@@ -37,6 +37,7 @@ def main():
     subprocess.run([sys.executable, str(root / "build-script.py"), "--check"], check=True)
     script = read("kill-aura.body.luau")
     for marker, name in [
+        ("SHARED SETTINGS", "shared-settings.module.luau"),
         ("MODERATOR WATCH", "moderator-watch.module.luau"),
         ("ENEMY HEALTH", "enemy-health.module.luau"),
         ("ARENA TRAVEL", "arena-travel.module.luau"),
@@ -122,6 +123,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("native-block.test.luau")) + "))()(" + quote(native) + ")\n"
     ownership = script[script.index("local previousRuntime="):script.index("local BUILD=")]
     fixture += "assert(loadstring(" + quote(read("account-settings.test.luau")) + "))()(" + quote(ownership) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("shared-settings.test.luau")) + "))()(" + quote(read("shared-settings.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-10-31.per-account-settings-v1.6.9"
-local VERSION="1.6.9"
+local BUILD="2026-10-31.shared-account-preferences-v1.7.0"
+local VERSION="1.7.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -229,7 +229,68 @@ if filePersistence then
     end)
     if ok then configData = result else configLoadError = tostring(result) end
 end
+local sharedSettings,sharedPreferences=nil,{}
+if filePersistence then
+    local make=(function()
+-- BEGIN BUNDLED SHARED SETTINGS
+-- Shared preferences only; account progress and resume tickets remain private.
+return function(ctx)
+    local api={Values={}}
+    local path="SB2Codex/shared-settings.json"
+    local keys={"Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
+        "SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AccountProgression","PanelPosition","HealthHUDPosition"}
+    local function select(value)
+        local result={Version=1}
+        for _,key in ipairs(keys)do result[key]=value[key]end
+        return result
+    end
+    local function read(file)
+        local raw=ctx.Read(file);assert(#raw<=32768,"Settings file exceeds its size limit")
+        local value=ctx.Decode(raw);assert(type(value)=="table"and value.Version==1,"Invalid shared settings")
+        return value
+    end
+    local function score(value)
+        return (type(value.SafeWhitelistText)=="string"and value.SafeWhitelistText:find("%S")and 1000 or 0)
+            +(value.SafeMode==true and 10 or 0)+(value.AccountProgression==true and 5 or 0)
+            +(value.Enabled==true and 1 or 0)+(value.AutoFarm==true and 1 or 0)
+    end
+    if ctx.IsFile(path)then api.Values=select(read(path))
+    else
+        local seed=ctx.Current or{}
+        if type(ctx.List)=="function"and score(seed)<1000 then
+            local ok,files=pcall(ctx.List,"SB2Codex")
+            if ok and type(files)=="table"then
+                table.sort(files)
+                for index,file in ipairs(files)do
+                    if index>200 then break end
+                    if file:match("settings_%d+%.json$")then
+                        local valid,value=pcall(read,file)
+                        if valid and score(value)>score(seed)then seed=value end
+                    end
+                end
+            end
+        end
+        api.Values=select(seed);ctx.Write(path,ctx.Encode(api.Values))
+    end
+    local last=ctx.Encode(api.Values)
+    function api.Save(value)
+        local shared=select(value);local encoded=ctx.Encode(shared)
+        if encoded~=last or not ctx.IsFile(path)then ctx.Write(path,encoded);last=encoded end
+        api.Values=shared
+    end
+    return api
+end
+
+-- END BUNDLED SHARED SETTINGS
+    end)()
+    local ok,value=pcall(make,{Current=configData,IsFile=isfile,Read=readfile,Write=writefile,List=listfiles,
+        Encode=function(v)return HttpService:JSONEncode(v)end,Decode=function(v)return HttpService:JSONDecode(v)end})
+    if ok then sharedSettings=value;sharedPreferences=value.Values else configLoadError=tostring(value)end
+end
 local function preference(key, fallback)
+    if sharedPreferences[key]~=nil then return sharedPreferences[key]end
     if previous and key=="StopEverything" and previous.ResumeRequested then return false end
     if previous and previous.StopEverything and previous.ResumeFeatures and previous.ResumeFeatures[key]~=nil then return previous.ResumeFeatures[key] end
     if previous and previous[key] ~= nil then return previous[key] end
@@ -897,7 +958,8 @@ function state.SaveNow()
     local ok, result = pcall(function()
         if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure();assert(ready,reason)end
         if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(configFolder) then makefolder(configFolder) end
-        local serialized = HttpService:JSONEncode(settingsPayload())
+        local payload=settingsPayload()
+        local serialized = HttpService:JSONEncode(payload)
         local generation=state.StorageBootstrap and state.StorageBootstrap.Generation or 0
         if serialized ~= lastSavedPayload or generation~=lastSavedStorageGeneration
             or (typeof(readfile)=="function"and readfile(configPath)~=serialized)then
@@ -905,6 +967,10 @@ function state.SaveNow()
             lastSavedPayload = serialized;lastSavedStorageGeneration=generation
         end
     end)
+    if ok and sharedSettings then
+        local sharedOK,reason=pcall(sharedSettings.Save,settingsPayload())
+        if not sharedOK then ok=false;result=reason end
+    end
     if ok then state.ConfigSaveError = nil else state.ConfigSaveError = tostring(result) end
     state.AutoSaveStatus = ok and "Auto-save · saved" or "Auto-save · write failed"
     return ok

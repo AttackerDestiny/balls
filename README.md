@@ -6,7 +6,7 @@ Swordburst 2 Luau script with a loader that fetches the latest published version
 loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()
 ```
 
-The standalone script automatically creates `SB2Codex` in the executor's workspace and saves its own runnable source, account settings, and rejoin state. Existing settings are preserved.
+The standalone script automatically creates `SB2Codex` in the executor's workspace and saves its own runnable source, account settings, and rejoin state. Settings and the whitelist are shared between accounts using the same executor workspace through `SB2Codex/shared-settings.json`. Existing configured profiles are migrated automatically. Current-floor context, progression checkpoints and rejoin tickets remain per-account. Re-execute the loader on each account to load shared changes. Separate devices or isolated app storage do not share local files.
 
 Features include Auto Farm with noclip, Kill Aura, Skill Aura, Safe Mode with an editable whitelist, Multi Spot, Atheon Dodge, and Account Progression in the **Speacial** tab. Moderator detection confirms the moderator is blocked before disconnecting. Unconfirmed blocking pauses automation without kicking.
 
