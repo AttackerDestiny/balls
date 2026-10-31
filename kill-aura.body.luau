@@ -12,9 +12,10 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
-local previous = env.SB2KillAura
-local BUILD="2026-10-31.moderator-block-before-kick-v1.6.8"
-local VERSION="1.6.8"
+local previousRuntime=env.SB2KillAura
+local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
+local BUILD="2026-10-31.per-account-settings-v1.6.9"
+local VERSION="1.6.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -275,8 +276,8 @@ local restore = {
 if type(restore.Skill)~="string" then restore.Skill="Piercing Dash" end
 if type(restore.ProgressionRestore)~="table"then restore.ProgressionRestore=nil end
 if restore.ProgressionFloor~=12 then restore.ProgressionComplete=false end
-if previous and previous.Destroy then
-    previous.Destroy(true)
+if previousRuntime and previousRuntime.Destroy then
+    previousRuntime.Destroy(true)
 end
 runtimeOwner.Retire()
 if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
@@ -301,7 +302,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
-    Build=BUILD, Version=VERSION, StopEverything=false,
+    Build=BUILD, Version=VERSION, UserId=player.UserId, StopEverything=false,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
     AttackInterval = 0.04, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.04,

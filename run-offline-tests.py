@@ -120,6 +120,8 @@ def main():
     native_start = adapter.index("    local blockBusy=false")
     native = adapter[native_start:adapter.index("    local queuedToken", native_start)]
     fixture += "assert(loadstring(" + quote(read("native-block.test.luau")) + "))()(" + quote(native) + ")\n"
+    ownership = script[script.index("local previousRuntime="):script.index("local BUILD=")]
+    fixture += "assert(loadstring(" + quote(read("account-settings.test.luau")) + "))()(" + quote(ownership) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")
