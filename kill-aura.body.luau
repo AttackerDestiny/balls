@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-10-31.shared-account-preferences-v1.7.0"
-local VERSION="1.7.0"
+local BUILD="2026-10-31.progression-unlock-recovery-v1.7.1"
+local VERSION="1.7.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7168,6 +7168,7 @@ return function(ctx)
     local api={Phase="Idle",Attempts=0}
     local nextTry,arrivalDeadline,waitingSince=0,nil,nil
     local spot,scoutIndex=nil,1
+    local unlockWaitSince
     local function status(phase,message)
         api.Phase=phase;state.ProgressionPhase=phase;ctx.Status(message)
     end
@@ -7178,6 +7179,7 @@ return function(ctx)
     function api.Reset()
         api.Paused=false;api.LastError=nil;api.Attempts=0
         nextTry,arrivalDeadline,waitingSince,spot,scoutIndex=0,nil,nil,nil,1
+        unlockWaitSince=nil
         ctx.Release();status("Idle",state.AccountProgression and "Starting account progression..." or "Account Progression is off")
     end
     local function travelFailed(now,message)
@@ -7190,10 +7192,23 @@ return function(ctx)
         local floor=ctx.Floor(number)
         if not floor then api.Pause("Floor "..number.." is unavailable");return end
         if not ctx.Unlocked(floor) then
+            if state.ProgressionFloor~=6 then
+                unlockWaitSince=unlockWaitSince or now
+                if now-unlockWaitSince>=8 then
+                    -- A saved/observed death does not prove the server granted
+                    -- progression credit. Reacquire this floor's boss if it did not.
+                    state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
+                    unlockWaitSince=nil;spot=nil;arrivalDeadline=nil;waitingSince=nil
+                    ctx.Release();ctx.Save()
+                    status("Rechecking boss","Next floor is still locked · returning to the current main boss")
+                    return
+                end
+            end
             status("Waiting for unlock","Boss defeated · waiting for F"..number.." unlock")
             return
         end
         ctx.Release();spot=nil;waitingSince=nil;arrivalDeadline=nil;api.Attempts=0
+        unlockWaitSince=nil
         state.ProgressionFloor=number;state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
         -- Save the next checkpoint BEFORE queuing a cross-server transition.
         ctx.Save();status("Changing floor","Returning to the teleport pad · F"..number)
@@ -7208,7 +7223,7 @@ return function(ctx)
             status("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes")
             return
         end
-        if not ctx.Ready() then status("Waiting","Waiting for protection, character or current movement");return end
+        if not ctx.Ready() then unlockWaitSince=nil;status("Waiting","Waiting for protection, character or current movement");return end
         if now<nextTry then return end
         local number=state.ProgressionFloor
         local floor=ctx.Floor(number)

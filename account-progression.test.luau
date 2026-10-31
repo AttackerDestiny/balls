@@ -40,8 +40,22 @@ return function(source)
     end)
     test("Progression waits for actual server unlock replication",function()
         local f=fixture();f.State.ProgressionBossCleared=true;f.Unlocked[2]=false
-        f.Api.Update(0);f.Api.Update(30);assert(#f.Trips==0 and f.Api.Phase=="Waiting for unlock")
-        f.Unlocked[2]=true;f.Api.Update(31);assert(f.Trips[1]==2)
+        f.Api.Update(0);f.Api.Update(3);assert(#f.Trips==0 and f.Api.Phase=="Waiting for unlock")
+        f.Unlocked[2]=true;f.Api.Update(4);assert(f.Trips[1]==2)
+    end)
+    test("A stale boss-clear checkpoint cannot wait forever for a locked next floor",function()
+        local f=fixture();f.State.ProgressionFloor=2;f.FloorId=2;f.State.ProgressionBossCleared=true
+        f.State.ProgressionBossClearedName="Borik the BeeKeeper";f.Unlocked[3]=false
+        f.Api.Update(0);f.Api.Update(8)
+        assert(not f.State.ProgressionBossCleared and not f.State.ProgressionBossClearedName and #f.Trips==0)
+        f.Api.Update(8.1);assert(#f.BossTrips==1 and f.State.ProgressionFloor==2)
+    end)
+    test("Unlock recovery honors protection pauses and never invents a town boss",function()
+        local f=fixture();f.State.ProgressionBossCleared=true;f.Unlocked[2]=false
+        f.Api.Update(0);f.Allowed=false;f.Api.Update(20);f.Allowed=true;f.Api.Update(21)
+        assert(f.State.ProgressionBossCleared);f.Api.Update(29);assert(not f.State.ProgressionBossCleared)
+        f=fixture();f.State.ProgressionFloor=6;f.FloorId=6;f.Unlocked[7]=false
+        f.Api.Update(0);f.Api.Update(100);assert(#f.BossTrips==0 and f.State.ProgressionFloor==6)
     end)
     test("Progression resumes a saved floor rather than restarting at F1 after a hop",function()
         local f=fixture();f.State.ProgressionFloor=8;f.FloorId=8
