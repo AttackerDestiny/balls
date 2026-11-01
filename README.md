@@ -22,4 +22,6 @@ Account Progression coordinates farming and floor travel, selects owned usable g
 Offline verification requires Python 3.10+, Lua 5.1+ on `PATH`, and the official Luau CLI tools. Supply their directory with `python run-offline-tests.py --luau-tool-dir /path/to/luau-tools`.
 
 Do not commit executor workspace files, account settings, local logs, credentials, or session notes. Each completed script update is committed and pushed so the loader serves the current version.
-`nAt steady 10–15 FPS, combat remains active instead of repeatedly entering a lag pause. Sudden freezes still trigger a brief recovery pause. Health-bar and cosmetic refreshes are paced separately from movement and dodge checks. Low FPS still limits how quickly the client can observe hazards.
+At steady 10â€“15 FPS, combat remains active instead of repeatedly entering a lag pause. Sudden freezes still trigger a brief recovery pause. Health-bar and cosmetic refreshes are paced separately from movement and dodge checks. Low FPS still limits how quickly the client can observe hazards.
+
+After its own confirmed moderator-block kick, the script attempts to rejoin the current place, with at most three requests eight seconds apart. It queues the public loader for the destination session when the executor supports teleport queues. This only handles the script’s moderator kick; it does not bypass bans. Some executors stop scripts after disconnection or reject post-kick teleports, so live executor support is required. Stop Everything or runtime replacement cancels pending requests.

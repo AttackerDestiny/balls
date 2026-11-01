@@ -125,6 +125,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("account-settings.test.luau")) + "))()(" + quote(ownership) + ")\n"
     fixture += "assert(loadstring(" + quote(read("shared-settings.test.luau")) + "))()(" + quote(read("shared-settings.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("frame-timing.test.luau")) + "))()(" + quote(read("frame-timing.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("moderator-rejoin.test.luau")) + "))()(" + quote(read("moderator-rejoin.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")
