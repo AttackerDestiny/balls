@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.best-all-weapons-v1.8.8"
-local VERSION="1.8.8"
+local BUILD="2026-11-01.auto-dismantle-v1.8.9"
+local VERSION="1.8.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -238,7 +238,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
@@ -308,6 +308,7 @@ local restore = {
     Radius=30,
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
+    AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
     FarmRange=math.huge,
@@ -375,6 +376,7 @@ local state = {
     BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
+    AutoDismantle=type(restore.AutoDismantle)=="table"and restore.AutoDismantle or {},
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
@@ -934,7 +936,7 @@ local function settingsPayload()
     local position = panel.Position
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -7753,11 +7755,7 @@ return function(ctx)
         return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
             and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoEquipBestSword))
     end
-    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
-        Active=gearActive,
-        Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
-            or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
-        Read=function()
+    local function readGear()
             local result={Level=math.floor(profile.Stats.Exp.Value^(1/3)),Items={},Equip={},
                 Highest={Damage=player:GetAttribute("HighestDamage")or 0,Defense=player:GetAttribute("HighestDefense")or 0}}
             for _,slot in ipairs(equip:GetChildren())do if slot:IsA("IntValue")then result.Equip[slot.Name]=slot.Value end end
@@ -7778,7 +7776,12 @@ return function(ctx)
                 end
             end
             return result
-        end,
+    end
+    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+        Active=gearActive,
+        Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
+            or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
+        Read=readGear,
         Equip=function(op)
             if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
             ctx.StopCombat("Equipping best usable weapon / gear")
@@ -7790,6 +7793,14 @@ return function(ctx)
         end,
         Status=function(value)state.ProgressionGearStatus=value;text(ui.ProgressionGear,value)end})
     state.ProgressionGearController=gear
+    function state.IsAutoEquipmentCandidate(item)
+        if not gearActive()then return false end
+        for _,op in ipairs(gear.Plan(readGear()))do
+            if op.Action~="Unequip"and op.Item.Native==item then return true end
+        end
+        return false
+    end
+
     local function invalidate()if not disposed then gear.Invalidate()end end
     ctx.Bind(inventory.DescendantAdded,function(child)
         invalidate()
@@ -8045,6 +8056,109 @@ end
         Status=function(text)if button.Parent then button.Text=text end end,
         Error=function(reason)state.LastRestartError=reason;warn("[SB2 Restart] "..reason)end})
     bind(button.Activated,state.RestartScript)
+end
+
+-- Source-compatible new-drop dismantling, separately opt-in for each rarity.
+do
+    local make=(function()
+-- BEGIN BUNDLED AUTO DISMANTLE
+-- New-drop dismantling only, matching the supplied source. No inventory sweep.
+return function(ctx)
+    local api={}
+    local allowed={Common=true,Uncommon=true,Rare=true}
+    local queue,queued={},setmetatable({}, {__mode="k"})
+    local head,tail,nextSend=1,0,0
+    function api.Add(item,now)
+        if queued[item]then return end
+        local rarity=ctx.Rarity(item)
+        if not allowed[rarity]or not ctx.Selected(rarity)then return end
+        tail+=1;queue[tail]={Item=item,Rarity=rarity,Ready=now+.75};queued[item]=true
+    end
+    function api.Update(now)
+        if not ctx.Active()or ctx.Busy()or now<nextSend or head>tail then return end
+        local entry=queue[head]
+        if now<entry.Ready then return end
+        queue[head]=nil;head+=1;queued[entry.Item]=nil
+        if head>tail then table.clear(queue);head,tail=1,0 end
+        local item,rarity=entry.Item,entry.Rarity
+        if not ctx.Selected(rarity)or ctx.Rarity(item)~=rarity or ctx.Protected(item)then return end
+        -- Native Event has no response. Send once, never retry destruction blindly.
+        nextSend=now+.4
+        local ok,reason=pcall(ctx.Send,item)
+        ctx.Status(ok and ("Dismantle requested · "..item.Name)or ("Dismantle failed · "..tostring(reason)))
+    end
+    function api.Clear()table.clear(queue);table.clear(queued);head,tail=1,0 end
+    return api
+end
+
+-- END BUNDLED AUTO DISMANTLE
+    end)()
+    local ReplicatedStorage=game:GetService("ReplicatedStorage")
+    local inventory=ReplicatedStorage.Profiles[player.Name].Inventory
+    local equip=ReplicatedStorage.Profiles[player.Name].Equip
+    local definitions=ReplicatedStorage.Database.Items
+    local buttons={}
+    local status=uiLabel("AutoDismantleStatus","New drops only · equipped and protected items are kept",140,42)
+    status.Parent=state.UI.Pages.Utility
+    local function rarity(item)
+        if item.Parent~=inventory or not item:IsA("IntValue")then return nil end
+        local definition=definitions:FindFirstChild(item.Name)
+        local value=definition and definition:FindFirstChild("Rarity")
+        return value and value.Value
+    end
+    local function protected(item)
+        if item.Parent~=inventory then return true end
+        if item.Name:find("Novice",1,true)or item.Name:find("Aura",1,true)then return true end
+        for _,slot in ipairs(equip:GetChildren())do
+            if slot:IsA("IntValue")and slot.Value==item.Value then return true end
+        end
+        local function marked(object)
+            for _,key in ipairs({"Locked","Lock","Favorite","Favorited","Favourite","Favourited","Skin"})do
+                local attr=object:GetAttribute(key)
+                if attr~=nil and attr~=false and attr~=0 and attr~=""then return true end
+                local flag=object:FindFirstChild(key)
+                if flag then
+                    if not flag:IsA("ValueBase")then return true end
+                    if flag.Value~=false and flag.Value~=0 and flag.Value~=""then return true end
+                end
+            end
+            return false
+        end
+        local definition=definitions:FindFirstChild(item.Name)
+        if marked(item)or (definition and marked(definition))then return true end
+        if state.IsAutoEquipmentCandidate and state.IsAutoEquipmentCandidate(item)then return true end
+        return false
+    end
+    local worker=make({Rarity=rarity,Protected=protected,
+        Selected=function(name)return state.AutoDismantle[name]==true end,
+        Active=function()return state.Running and not state.StopEverything and not state.ModeratorBlocking end,
+        Busy=function()return state.ProgressionEquipping or state.TravelBusy or state.AutomationTeleporting or state.SafeModePanic end,
+        Send=function(item)ReplicatedStorage.Event:FireServer("Equipment",{"Dismantle",{item}})end,
+        Status=function(text)if status.Parent then status.Text=text end end})
+    for index,name in ipairs({"Common","Uncommon","Rare"})do
+        local button=uiButton("AutoDismantle"..name,"",100+index*10,34,state.UI.Pages.Utility)
+        buttons[name]=button
+        local function refresh()
+            button.Text="Auto Dismantle "..name..(state.AutoDismantle[name]and " · ON"or " · OFF")
+            button.BackgroundColor3=state.AutoDismantle[name]and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
+        end
+        bind(button.Activated,function()
+            state.AutoDismantle[name]=not state.AutoDismantle[name];refresh();requestSave()
+        end)
+        refresh()
+    end
+    bind(inventory.ChildAdded,function(item)
+        if state.Running and not state.StopEverything then worker.Add(item,os.clock())end
+    end)
+    bind(gui.Destroying,worker.Clear)
+    task.spawn(function()
+        while state.Running do
+            local ok,reason=pcall(worker.Update,os.clock())
+            if not ok and status.Parent then status.Text="Dismantle paused · "..tostring(reason)end
+            task.wait((state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare)and .25 or 1)
+        end
+        worker.Clear()
+    end)
 end
 ]============]
 return assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)

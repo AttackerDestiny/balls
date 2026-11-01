@@ -141,6 +141,10 @@ def main():
     fixture += "assert(loadstring(" + quote(read("friend-join-pad.test.luau")) + "))()(" + quote(friend_pad) + ")\n"
     maintenance = visual[visual.index("    function api.ProcessManaged()"):visual.index("    function api.Update()")]
     fixture += "assert(loadstring(" + quote(read("visual-budget.test.luau")) + "))()(" + quote(maintenance) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("auto-dismantle.test.luau")) + "))()(" + quote(read("auto-dismantle.module.luau")) + ")\n"
+    protection_start=script.index("    local function protected(item)")
+    protection=script[protection_start:script.index("    local worker=make(",protection_start)]
+    fixture += "assert(loadstring(" + quote(read("dismantle-protection.test.luau")) + "))()(" + quote(protection) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

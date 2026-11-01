@@ -61,11 +61,7 @@ return function(ctx)
         return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
             and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoEquipBestSword))
     end
-    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
-        Active=gearActive,
-        Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
-            or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
-        Read=function()
+    local function readGear()
             local result={Level=math.floor(profile.Stats.Exp.Value^(1/3)),Items={},Equip={},
                 Highest={Damage=player:GetAttribute("HighestDamage")or 0,Defense=player:GetAttribute("HighestDefense")or 0}}
             for _,slot in ipairs(equip:GetChildren())do if slot:IsA("IntValue")then result.Equip[slot.Name]=slot.Value end end
@@ -86,7 +82,12 @@ return function(ctx)
                 end
             end
             return result
-        end,
+    end
+    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+        Active=gearActive,
+        Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
+            or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
+        Read=readGear,
         Equip=function(op)
             if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
             ctx.StopCombat("Equipping best usable weapon / gear")
@@ -98,6 +99,14 @@ return function(ctx)
         end,
         Status=function(value)state.ProgressionGearStatus=value;text(ui.ProgressionGear,value)end})
     state.ProgressionGearController=gear
+    function state.IsAutoEquipmentCandidate(item)
+        if not gearActive()then return false end
+        for _,op in ipairs(gear.Plan(readGear()))do
+            if op.Action~="Unequip"and op.Item.Native==item then return true end
+        end
+        return false
+    end
+
     local function invalidate()if not disposed then gear.Invalidate()end end
     ctx.Bind(inventory.DescendantAdded,function(child)
         invalidate()
