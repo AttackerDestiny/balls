@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.atlantis-safe-mode-v1.8.2"
-local VERSION="1.8.2"
+local BUILD="2026-11-01.best-sword-toggle-v1.8.3"
+local VERSION="1.8.3"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -238,7 +238,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
@@ -308,6 +308,7 @@ local restore = {
     Radius=30,
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
+    AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
     FarmRange=10000,
     Threat=3,
@@ -374,6 +375,7 @@ local state = {
     BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
+    AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.clamp(restore.FarmRange, 20, 10000), Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
     FarmAbove=false,OffsetMode="Below",
@@ -932,7 +934,7 @@ local function settingsPayload()
     local position = panel.Position
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {
+    return {AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -1315,6 +1317,18 @@ do
         end
     end
     toggle.Parent=pages.Combat; farmToggle.Parent=pages.Combat
+    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Sword",25,34,pages.Combat)
+    state.UI.AutoEquipBestSword=bestSword
+    function state.SetAutoEquipBestSword(on)
+        state.AutoEquipBestSword=on==true
+        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Sword · ON" or "Auto Equip Best Sword · OFF"
+        bestSword.BackgroundColor3=state.AutoEquipBestSword and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
+        if state.ProgressionGearController then state.ProgressionGearController.Reset()end
+        requestSave()
+    end
+    bind(bestSword.Activated,function()state.SetAutoEquipBestSword(not state.AutoEquipBestSword)end)
+    state.SetAutoEquipBestSword(restore.AutoEquipBestSword)
+
     state.UI.AtheonDodge=uiButton("AtheonDodge","Atheon Dodge · OFF",30,34,pages.Combat)
     function state.SetAtheonDodge(on)
         state.AtheonDodge=on==true
@@ -5262,7 +5276,7 @@ local function runFrame()
         local started = os.clock()
         if state.ArenaFloat then state.ArenaFloat.Update(started) end
         state.PerformanceBudget.Update(started)
-        if state.UpdateAutoFarmGear then state.UpdateAutoFarmGear(started)end
+        if state.UpdateBestSword then state.UpdateBestSword(started)end
         if state.WeaponSkills then state.WeaponSkills.Update(started) end
         local swingOK,swingError=pcall(updateAutoSwing)
         if not swingOK then state.LastSwingError=tostring(swingError) end
@@ -7571,6 +7585,7 @@ return function(ctx)
         local function add(action,item,slot)
             operations[#operations+1]={Action=action,Item=item,Slot=slot}
         end
+        if not (ctx.SkipWeapons and ctx.SkipWeapons())then
         local sword=swords[1]
         if sword and snapshot.Equip.Right~=sword.Id then add("EquipWeapon",sword,"Right")end
         if sword and sword.Class=="1HSword" then
@@ -7580,6 +7595,7 @@ return function(ctx)
                     break
                 end
             end
+        end
         end
         if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
         if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
@@ -7698,9 +7714,9 @@ return function(ctx)
     end
     local function gearActive()
         return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
-            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoFarm and state.Enabled))
+            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoEquipBestSword))
     end
-    local gear=ctx.MakeGear({WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
         Active=gearActive,
         Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
@@ -7797,10 +7813,10 @@ return function(ctx)
                 end)
             end
     end
-    local farmWasActive=false
-    function state.UpdateAutoFarmGear(now)
-        local active=not state.AccountProgression and state.AutoFarm and state.Enabled
-        if active~=farmWasActive then farmWasActive=active;gear.Reset()end
+    local swordWasActive=false
+    function state.UpdateBestSword(now)
+        local active=not state.AccountProgression and state.AutoEquipBestSword
+        if active~=swordWasActive then swordWasActive=active;gear.Reset()end
         if active then updateEquipment(now)end
     end
     local controller=ctx.MakeController({State=state,SyncFloor=syncFloor,

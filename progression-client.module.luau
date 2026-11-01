@@ -59,9 +59,9 @@ return function(ctx)
     end
     local function gearActive()
         return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
-            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoFarm and state.Enabled))
+            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoEquipBestSword))
     end
-    local gear=ctx.MakeGear({WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
         Active=gearActive,
         Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
@@ -158,10 +158,10 @@ return function(ctx)
                 end)
             end
     end
-    local farmWasActive=false
-    function state.UpdateAutoFarmGear(now)
-        local active=not state.AccountProgression and state.AutoFarm and state.Enabled
-        if active~=farmWasActive then farmWasActive=active;gear.Reset()end
+    local swordWasActive=false
+    function state.UpdateBestSword(now)
+        local active=not state.AccountProgression and state.AutoEquipBestSword
+        if active~=swordWasActive then swordWasActive=active;gear.Reset()end
         if active then updateEquipment(now)end
     end
     local controller=ctx.MakeController({State=state,SyncFloor=syncFloor,

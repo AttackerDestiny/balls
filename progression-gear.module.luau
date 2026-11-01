@@ -47,6 +47,7 @@ return function(ctx)
         local function add(action,item,slot)
             operations[#operations+1]={Action=action,Item=item,Slot=slot}
         end
+        if not (ctx.SkipWeapons and ctx.SkipWeapons())then
         local sword=swords[1]
         if sword and snapshot.Equip.Right~=sword.Id then add("EquipWeapon",sword,"Right")end
         if sword and sword.Class=="1HSword" then
@@ -56,6 +57,7 @@ return function(ctx)
                     break
                 end
             end
+        end
         end
         if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
         if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
