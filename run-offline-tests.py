@@ -134,6 +134,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("moderator-rejoin.test.luau")) + "))()(" + quote(read("moderator-rejoin.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-join-friend.test.luau")) + "))()(" + quote(read("auto-join-friend.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("restart-script.test.luau")) + "))()(" + quote(read("restart-script.module.luau")) + ")\n"
+    visual = read("skill-visuals.module.luau")
+    suppress = visual[visual.index("    local function write("):visual.index("    local function isSkill(")]
+    fixture += "assert(loadstring(" + quote(read("mobile-skill-visuals.test.luau")) + "))()(" + quote(suppress) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")
