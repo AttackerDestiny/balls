@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.auto-join-friend-v1.7.5"
-local VERSION="1.7.5"
+local BUILD="2026-11-01.restart-script-v1.7.6"
+local VERSION="1.7.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7872,5 +7872,43 @@ end
 end
 
 runtimeOwner.Ready()
+
+-- Manual restart intentionally retires the same-build singleton before reloading.
+do
+    local make=(function()
+-- BEGIN BUNDLED RESTART SCRIPT
+return function(ctx)
+    local busy=false
+    return function()
+        if busy then return end
+        busy=true;ctx.Status("Restarting...")
+        ctx.Spawn(function()
+            local ok,reason=pcall(function()
+                ctx.Save()
+                -- Download and compile before retiring the current runtime.
+                local run=ctx.Compile(ctx.Fetch())
+                assert(type(run)=="function","Loader did not compile")
+                ctx.Destroy()
+                run()
+            end)
+            busy=false
+            if not ok then ctx.Status("Restart failed · try again");ctx.Error(tostring(reason))end
+        end)
+    end
+end
+
+-- END BUNDLED RESTART SCRIPT
+    end)()
+    local button=uiButton("RestartScript","restart script",390,34)
+    state.UI.RestartScript=button
+    state.RestartScript=make({Spawn=task.spawn,
+        Save=state.SaveNow,
+        Fetch=function()return game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau")end,
+        Compile=function(source)return assert(loadstring(source,"SB2 restart loader"))end,
+        Destroy=function()state.Destroy(true)end,
+        Status=function(text)if button.Parent then button.Text=text end end,
+        Error=function(reason)state.LastRestartError=reason;warn("[SB2 Restart] "..reason)end})
+    bind(button.Activated,state.RestartScript)
+end
 ]============]
 return assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)
