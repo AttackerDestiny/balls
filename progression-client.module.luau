@@ -45,12 +45,12 @@ return function(ctx)
         state.ProgressionBossMob=mob
     end
     local ui=state.UI
-    ui.ProgressionToggle=ctx.Button("AccountProgression","Account Progression Â· OFF",10,34,ctx.Parent)
+    ui.ProgressionToggle=ctx.Button("AccountProgression","Account Progression · OFF",10,34,ctx.Parent)
     ui.ProgressionStatus=ctx.Label("ProgressionStatus","Account Progression is off",20,64)
     ui.ProgressionStatus.Parent=ctx.Parent;ui.ProgressionStatus.TextWrapped=true
     ui.ProgressionGear=ctx.Label("ProgressionGear","Owned usable swords, armor and accessories",30,48)
     ui.ProgressionGear.Parent=ctx.Parent;ui.ProgressionGear.TextWrapped=true
-    local hint=ctx.Label("ProgressionHint","F1 â†’ F12 Â· resumes after joins. F6 is skipped. Safe Mode protects the current floor; Multi Spot waits. Toggle OFF to restore your farm settings.",40,96)
+    local hint=ctx.Label("ProgressionHint","F1 → F12 · resumes after joins. F6 is skipped. Safe Mode protects the current floor; Multi Spot waits. Toggle OFF to restore your farm settings.",40,96)
     hint.Parent=ctx.Parent;hint.TextWrapped=true
     local function text(label,value)if label.Text~=value then label.Text=value end end
     local function field(instance,name,fallback)
@@ -225,7 +225,7 @@ return function(ctx)
                 task.delay(8,function()
                     if disposed or gearThread~=pendingThread then return end
                     pcall(task.cancel,pendingThread);gearThread=nil;state.ProgressionEquipping=false
-                    gear.Paused=true;gear.Error="Equipment request timed out Â· toggle progression OFF/ON to retry"
+                    gear.Paused=true;gear.Error="Equipment request timed out · toggle progression OFF/ON to retry"
                     text(ui.ProgressionGear,gear.Error)
                 end)
             end
@@ -271,7 +271,7 @@ return function(ctx)
             state.SetAutoFarm(previous.AutoFarm==true,"Account progression stopped");state.SetEnabled(previous.Enabled==true)
             if type(previous.AutoSwing)=="boolean"and state.SetAutoSwing then state.SetAutoSwing(previous.AutoSwing)end
         end
-        ui.ProgressionToggle.Text=state.AccountProgression and "Account Progression Â· ON"or"Account Progression Â· OFF"
+        ui.ProgressionToggle.Text=state.AccountProgression and "Account Progression · ON"or"Account Progression · OFF"
         ui.ProgressionToggle.BackgroundColor3=state.AccountProgression and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
         state.SaveNow();if state.RefreshAutomationUI then state.RefreshAutomationUI()end;return true
     end

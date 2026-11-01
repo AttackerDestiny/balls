@@ -35,6 +35,12 @@ def main():
         return (root / name).read_text(encoding="utf-8")
 
     subprocess.run([sys.executable, str(root / "build-script.py"), "--check"], check=True)
+    # Detect UTF-8 text accidentally decoded as Windows-1252 before publication.
+    import re
+    for source_file in [root / "kill-aura.body.luau", *root.glob("*.module.luau")]:
+        text = source_file.read_text(encoding="utf-8")
+        assert not re.search(r"[\u00c3\u00c2][^\x00-\x7f]|\u00e2[\u2000-\u2122]|\ufffd", text), f"Corrupt UI encoding: {source_file.name}"
+    print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
     for marker, name in [
         ("SHARED SETTINGS", "shared-settings.module.luau"),
