@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.friend-status-v1.8.0"
-local VERSION="1.8.0"
+local BUILD="2026-11-01.farm-best-sword-v1.8.1"
+local VERSION="1.8.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -5261,6 +5261,7 @@ local function runFrame()
         local started = os.clock()
         if state.ArenaFloat then state.ArenaFloat.Update(started) end
         state.PerformanceBudget.Update(started)
+        if state.UpdateAutoFarmGear then state.UpdateAutoFarmGear(started)end
         if state.WeaponSkills then state.WeaponSkills.Update(started) end
         local swingOK,swingError=pcall(updateAutoSwing)
         if not swingOK then state.LastSwingError=tostring(swingError) end
@@ -7579,6 +7580,7 @@ return function(ctx)
                 end
             end
         end
+        if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
         if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
         local desired={};for i=1,math.min(2,#accessories)do desired[accessories[i].Id]=true end
         local worn={};for _,slot in ipairs({"Accessory1","Accessory2"})do
@@ -7693,8 +7695,12 @@ return function(ctx)
         local child=instance and instance:FindFirstChild(name)
         return child and child:IsA("ValueBase") and child.Value or fallback
     end
-    local gear=ctx.MakeGear({Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
-        Active=function()return not disposed and state.Running and state.AccountProgression and not state.ProgressionComplete and not state.StopEverything and not state.ModeratorBlocking end,
+    local function gearActive()
+        return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
+            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoFarm and state.Enabled))
+    end
+    local gear=ctx.MakeGear({WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+        Active=gearActive,
         Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
         Read=function()
@@ -7720,8 +7726,8 @@ return function(ctx)
             return result
         end,
         Equip=function(op)
-            if disposed or not state.AccountProgression or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
-            ctx.StopCombat("Updating progression gear")
+            if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
+            ctx.StopCombat("Equipping best usable sword / gear")
             local args={op.Action,op.Item.Native}
             if op.Action=="EquipWeapon"then args[3]=op.Slot end
             local reply=game.ReplicatedStorage.Function:InvokeServer("Equipment",args)
@@ -7739,6 +7745,11 @@ return function(ctx)
     for _,upgrade in ipairs(inventory:QueryDescendants("#Upgrade"))do
         if upgrade:IsA("ValueBase")then ctx.Bind(upgrade.Changed,invalidate)end
     end
+    ctx.Bind(equip.DescendantAdded,function(slot)
+        invalidate();if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end
+    end)
+    ctx.Bind(equip.DescendantRemoving,invalidate)
+    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end end
     ctx.Bind(profile.Stats.Exp.Changed,invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDamage"),invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDefense"),invalidate)
@@ -7764,6 +7775,32 @@ return function(ctx)
                 break
             end
         end
+    end
+    local function updateEquipment(now)
+            if gearThread or gear.Paused or not gear.HasWork() then return end
+            gearThread=task.spawn(function()
+                state.ProgressionEquipping=true
+                local ok,message=pcall(gear.Update,now)
+                state.ProgressionEquipping=false;gearThread=nil
+                if not ok then gear.Paused=true;gear.Error=tostring(message);text(ui.ProgressionGear,gear.Error)end
+            end)
+            -- task.spawn can finish synchronously, before its return assigns the handle.
+            if coroutine.status(gearThread)=="dead"then gearThread=nil end
+            if gearThread then
+                local pendingThread=gearThread
+                task.delay(8,function()
+                    if disposed or gearThread~=pendingThread then return end
+                    pcall(task.cancel,pendingThread);gearThread=nil;state.ProgressionEquipping=false
+                    gear.Paused=true;gear.Error="Equipment request timed out · toggle Auto Farm or progression OFF/ON to retry"
+                    text(ui.ProgressionGear,gear.Error)
+                end)
+            end
+    end
+    local farmWasActive=false
+    function state.UpdateAutoFarmGear(now)
+        local active=not state.AccountProgression and state.AutoFarm and state.Enabled
+        if active~=farmWasActive then farmWasActive=active;gear.Reset()end
+        if active then updateEquipment(now)end
     end
     local controller=ctx.MakeController({State=state,SyncFloor=syncFloor,
         Floor=function(number)
@@ -7846,26 +7883,7 @@ return function(ctx)
                 end
             end
         end,
-        Equipment=function(now)
-            if gearThread or gear.Paused or not gear.HasWork() then return end
-            gearThread=task.spawn(function()
-                state.ProgressionEquipping=true
-                local ok,message=pcall(gear.Update,now)
-                state.ProgressionEquipping=false;gearThread=nil
-                if not ok then gear.Paused=true;gear.Error=tostring(message);text(ui.ProgressionGear,gear.Error)end
-            end)
-            -- task.spawn can finish synchronously, before its return assigns the handle.
-            if coroutine.status(gearThread)=="dead"then gearThread=nil end
-            if gearThread then
-                local pendingThread=gearThread
-                task.delay(8,function()
-                    if disposed or gearThread~=pendingThread then return end
-                    pcall(task.cancel,pendingThread);gearThread=nil;state.ProgressionEquipping=false
-                    gear.Paused=true;gear.Error="Equipment request timed out · toggle progression OFF/ON to retry"
-                    text(ui.ProgressionGear,gear.Error)
-                end)
-            end
-        end,
+        Equipment=updateEquipment,
         Complete=complete,Release=release,Save=state.SaveNow,
         Status=function(value)state.ProgressionStatus=value;text(ui.ProgressionStatus,value)end})
     state.ProgressionController=controller

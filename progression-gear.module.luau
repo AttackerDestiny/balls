@@ -57,6 +57,7 @@ return function(ctx)
                 end
             end
         end
+        if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
         if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
         local desired={};for i=1,math.min(2,#accessories)do desired[accessories[i].Id]=true end
         local worn={};for _,slot in ipairs({"Accessory1","Accessory2"})do

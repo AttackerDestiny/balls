@@ -10,7 +10,7 @@ return function(source)
     end
     local function fixture(items)
         local f={Snapshot={Level=10,Items=items or {},Equip={},Highest={Damage=100,Defense=100}},Calls={},Active=true,Busy=false,Reads=0}
-        f.Api=make({Rarity=rarity,Read=function()f.Reads+=1;return f.Snapshot end,
+        f.Api=make({WeaponsOnly=function()return f.WeaponsOnly end,Rarity=rarity,Read=function()f.Reads+=1;return f.Snapshot end,
             Active=function()return f.Active end,Busy=function()return f.Busy end,
             Equip=function(op)f.Calls[#f.Calls+1]=op;return not f.Fail,"Rejected"end,Status=function(value)f.Status=value end})
         return f
@@ -19,6 +19,16 @@ return function(source)
         local a=item(1,"Weapon","1HSword",100,nil,{Rarity="Legendary",Upgrade=20})
         local f=fixture({a,item(2,"Weapon","Katana",180),item(3,"Weapon","2HSword",999,nil,{Level=11}),item(4,"Weapon","Spear",1000)})
         local op=f.Api.Plan(f.Snapshot)[1];assert(op.Item.Id==1 and op.Slot=="Right"and a.Damage==200)
+    end)
+    test("Auto Farm equips only the best usable swords and preserves armor/accessories",function()
+        local f=fixture({item(1,"Weapon","1HSword",100),item(2,"Weapon","1HSword",90),
+            item(3,"Clothing","Armor",nil,500),item(4,"Accessory","",nil,500)})
+        f.WeaponsOnly=true
+        local ops=f.Api.Plan(f.Snapshot);assert(#ops==2)
+        for _,op in ipairs(ops)do assert(op.Action=="EquipWeapon")end
+        f.Snapshot.Equip.Right=1;f.Snapshot.Equip.Left=2
+        assert(#f.Api.Plan(f.Snapshot)==0)
+        f.WeaponsOnly=false;assert(#f.Api.Plan(f.Snapshot)>0)
     end)
     test("Armor uses defense upgrades rather than rarity or item level alone",function()
         local f=fixture({item(1,"Clothing","Armor",nil,100,{Upgrade=10}),item(2,"Clothing","Armor",nil,130)})
