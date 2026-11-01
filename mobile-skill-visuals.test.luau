@@ -4,7 +4,7 @@ return function(source)
     local state={}
     local invisible={Invisible=true}
     local chunk=assert(loadstring(source.."\nreturn suppress,restore"))
-    setfenv(chunk,setmetatable({state=state,managed=managed,api=api,ctx={},invisible=invisible,
+    setfenv(chunk,setmetatable({state=state,managed=managed,api=api,ctx={},invisible=invisible,maintenance={},maintenanceQueued={},maintenanceTail=0,
         effect=function(instance)return not instance.Protected end},{__index=getfenv()}))
     local suppress,restore=chunk()
     local function instance(class,denied)

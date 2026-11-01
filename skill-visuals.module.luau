@@ -4,6 +4,8 @@ return function(ctx)
     local api={AnimationsHidden=0,EffectsHidden=0}
     local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
     local managed,tracks={},{}
+    local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
+    local maintenanceHead,maintenanceTail=1,0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
@@ -121,6 +123,9 @@ return function(ctx)
         end
         if not next(record.Hidden)then return end
         managed[instance]=record
+        if not maintenanceQueued[instance]then
+            maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+        end
         if instance:IsA("ParticleEmitter") or instance:IsA("Trail") then pcall(function()instance:Clear()end) end
         api.EffectsHidden+=1
     end
@@ -215,6 +220,46 @@ return function(ctx)
     for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do enqueue(instance,false) end
     for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
     function api.IsEffect(instance) return effect(instance) end
+    function api.ProcessManaged()
+        local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
+        local deadline=os.clock()+.0006
+        local available=math.min(64,maintenanceTail-maintenanceHead+1)
+        local count=0
+        while count<available and (count==0 or os.clock()<deadline)do
+            local instance=maintenance[maintenanceHead]
+            maintenance[maintenanceHead]=nil;maintenanceHead+=1;maintenanceQueued[instance]=nil
+            local record=managed[instance]
+            if record then
+                pcall(function()
+                    if not instance.Parent then managed[instance]=nil
+                    elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
+                        restore(instance,record)
+                        managed[instance]=nil
+                    elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
+                        restore(instance,record)
+                        managed[instance]=nil
+                    else
+                        record.Parent=instance.Parent
+                        for property,value in pairs(record.Hidden) do
+                            local ok,current=pcall(function()return instance[property]end)
+                            if ok then
+                                if typeof(value)=="NumberSequence" then
+                                    local points=current.Keypoints
+                                    if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
+                                elseif current~=value then write(instance,property,value) end
+                            end
+                        end
+                    end
+                end)
+                if managed[instance]then
+                    maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+                end
+            end
+            count+=1
+        end
+        if maintenanceHead>maintenanceTail then table.clear(maintenance);maintenanceHead,maintenanceTail=1,0 end
+        return count
+    end
     function api.Update()
         if disposed or state.StopEverything then return end
         api.ProcessPending()
@@ -237,28 +282,7 @@ return function(ctx)
             if not track.IsPlaying then tracks[track]=nil
             elseif track.WeightCurrent>0.001 or math.abs(track.WeightTarget-hiddenWeight)>0.00001 then track:AdjustWeight(hiddenWeight,0) end
         end
-        local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
-        for instance,record in pairs(managed) do
-            if not instance.Parent then managed[instance]=nil
-            elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
-                restore(instance,record)
-                managed[instance]=nil
-            elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
-                restore(instance,record)
-                managed[instance]=nil
-            else
-                record.Parent=instance.Parent
-                for property,value in pairs(record.Hidden) do
-                    local ok,current=pcall(function()return instance[property]end)
-                    if ok then
-                        if typeof(value)=="NumberSequence" then
-                            local points=current.Keypoints
-                            if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
-                        elseif current~=value then write(instance,property,value) end
-                    end
-                end
-            end
-        end
+        api.ProcessManaged()
         state.HiddenSkillAnimations=api.AnimationsHidden
         state.HiddenSkillEffects=api.EffectsHidden
     end
@@ -270,6 +294,7 @@ return function(ctx)
         for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
+        table.clear(maintenance);table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
         table.clear(urgent); table.clear(background); table.clear(queued)
         table.clear(gunModels)
         urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0

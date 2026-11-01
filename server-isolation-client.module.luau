@@ -273,7 +273,7 @@ end
     end
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
-        SettleSeconds=.4,SoloSeconds=.6,BlockSettleSeconds=.15,
+        SettleSeconds=.15,SoloSeconds=.3,BlockSettleSeconds=0,
         NewId=function()return HttpService:GenerateGUID(false)end,Random=function(count)return math.random(1,count)end,
         Preflight=preflight,Save=save,GetBlocked=getBlocked,SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,
         GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
@@ -505,7 +505,7 @@ end
             end)
             if not updated then fail(message) end
             refresh()
-            task.wait((api.Active or state.SafeModePanic) and .05 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
+            task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
         end
     end)
     return api

@@ -9,12 +9,12 @@ return function(ctx)
             button,cancel=ctx.Find(target)
             if not active()then if cancel then ctx.Click(cancel)end;return false end
             if button and ctx.Ready(button)then break end
-            ctx.Sleep(.04)
+            ctx.Sleep(.03)
         until ctx.Now()>=deadline
         assert(button and ctx.Ready(button),"Roblox block dialog did not open; no rejoin attempted")
         local firstReady=ctx.Now()
         local stableSince,key=firstReady,ctx.Key(button)
-        local nextClick,clicks,confirmedAt=firstReady+.16,0,nil
+        local nextClick,clicks,confirmedAt=firstReady+.10,0,nil
         deadline=firstReady+10
         repeat
             if not active()then
@@ -27,14 +27,14 @@ return function(ctx)
                 if now-confirmedAt>=ctx.Settle()then return true end
             else confirmedAt=nil end
             button,cancel=ctx.Find(target)
-            if button and ctx.Ready(button)and clicks<4 then
+            if not confirmedAt and button and ctx.Ready(button)and clicks<4 then
                 local currentKey=ctx.Key(button)
                 if currentKey~=key then key=currentKey;stableSince=now end
-                if now>=nextClick and now-stableSince>=.08 then
+                if now>=nextClick and now-stableSince>=.06 then
                     ctx.Click(button);clicks+=1;nextClick=ctx.Now()+.3
                 end
             end
-            ctx.Sleep(.04)
+            ctx.Sleep(.03)
         until ctx.Now()>=deadline
         error("Roblox did not confirm the block; no rejoin attempted")
     end

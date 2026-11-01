@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.multispot-idle-infinite-range-v1.8.5"
-local VERSION="1.8.5"
+local BUILD="2026-11-01.safe-mode-speed-budget-v1.8.6"
+local VERSION="1.8.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -3359,6 +3359,8 @@ return function(ctx)
     local api={AnimationsHidden=0,EffectsHidden=0}
     local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
     local managed,tracks={},{}
+    local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
+    local maintenanceHead,maintenanceTail=1,0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
@@ -3476,6 +3478,9 @@ return function(ctx)
         end
         if not next(record.Hidden)then return end
         managed[instance]=record
+        if not maintenanceQueued[instance]then
+            maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+        end
         if instance:IsA("ParticleEmitter") or instance:IsA("Trail") then pcall(function()instance:Clear()end) end
         api.EffectsHidden+=1
     end
@@ -3570,6 +3575,46 @@ return function(ctx)
     for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do enqueue(instance,false) end
     for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
     function api.IsEffect(instance) return effect(instance) end
+    function api.ProcessManaged()
+        local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
+        local deadline=os.clock()+.0006
+        local available=math.min(64,maintenanceTail-maintenanceHead+1)
+        local count=0
+        while count<available and (count==0 or os.clock()<deadline)do
+            local instance=maintenance[maintenanceHead]
+            maintenance[maintenanceHead]=nil;maintenanceHead+=1;maintenanceQueued[instance]=nil
+            local record=managed[instance]
+            if record then
+                pcall(function()
+                    if not instance.Parent then managed[instance]=nil
+                    elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
+                        restore(instance,record)
+                        managed[instance]=nil
+                    elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
+                        restore(instance,record)
+                        managed[instance]=nil
+                    else
+                        record.Parent=instance.Parent
+                        for property,value in pairs(record.Hidden) do
+                            local ok,current=pcall(function()return instance[property]end)
+                            if ok then
+                                if typeof(value)=="NumberSequence" then
+                                    local points=current.Keypoints
+                                    if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
+                                elseif current~=value then write(instance,property,value) end
+                            end
+                        end
+                    end
+                end)
+                if managed[instance]then
+                    maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+                end
+            end
+            count+=1
+        end
+        if maintenanceHead>maintenanceTail then table.clear(maintenance);maintenanceHead,maintenanceTail=1,0 end
+        return count
+    end
     function api.Update()
         if disposed or state.StopEverything then return end
         api.ProcessPending()
@@ -3592,28 +3637,7 @@ return function(ctx)
             if not track.IsPlaying then tracks[track]=nil
             elseif track.WeightCurrent>0.001 or math.abs(track.WeightTarget-hiddenWeight)>0.00001 then track:AdjustWeight(hiddenWeight,0) end
         end
-        local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
-        for instance,record in pairs(managed) do
-            if not instance.Parent then managed[instance]=nil
-            elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
-                restore(instance,record)
-                managed[instance]=nil
-            elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
-                restore(instance,record)
-                managed[instance]=nil
-            else
-                record.Parent=instance.Parent
-                for property,value in pairs(record.Hidden) do
-                    local ok,current=pcall(function()return instance[property]end)
-                    if ok then
-                        if typeof(value)=="NumberSequence" then
-                            local points=current.Keypoints
-                            if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
-                        elseif current~=value then write(instance,property,value) end
-                    end
-                end
-            end
-        end
+        api.ProcessManaged()
         state.HiddenSkillAnimations=api.AnimationsHidden
         state.HiddenSkillEffects=api.EffectsHidden
     end
@@ -3625,6 +3649,7 @@ return function(ctx)
         for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
+        table.clear(maintenance);table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
         table.clear(urgent); table.clear(background); table.clear(queued)
         table.clear(gunModels)
         urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
@@ -7047,7 +7072,7 @@ end
     end
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
-        SettleSeconds=.4,SoloSeconds=.6,BlockSettleSeconds=.15,
+        SettleSeconds=.15,SoloSeconds=.3,BlockSettleSeconds=0,
         NewId=function()return HttpService:GenerateGUID(false)end,Random=function(count)return math.random(1,count)end,
         Preflight=preflight,Save=save,GetBlocked=getBlocked,SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,
         GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
@@ -7279,7 +7304,7 @@ end
             end)
             if not updated then fail(message) end
             refresh()
-            task.wait((api.Active or state.SafeModePanic) and .05 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
+            task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
         end
     end)
     return api
@@ -7310,12 +7335,12 @@ return function(ctx)
             button,cancel=ctx.Find(target)
             if not active()then if cancel then ctx.Click(cancel)end;return false end
             if button and ctx.Ready(button)then break end
-            ctx.Sleep(.04)
+            ctx.Sleep(.03)
         until ctx.Now()>=deadline
         assert(button and ctx.Ready(button),"Roblox block dialog did not open; no rejoin attempted")
         local firstReady=ctx.Now()
         local stableSince,key=firstReady,ctx.Key(button)
-        local nextClick,clicks,confirmedAt=firstReady+.16,0,nil
+        local nextClick,clicks,confirmedAt=firstReady+.10,0,nil
         deadline=firstReady+10
         repeat
             if not active()then
@@ -7328,14 +7353,14 @@ return function(ctx)
                 if now-confirmedAt>=ctx.Settle()then return true end
             else confirmedAt=nil end
             button,cancel=ctx.Find(target)
-            if button and ctx.Ready(button)and clicks<4 then
+            if not confirmedAt and button and ctx.Ready(button)and clicks<4 then
                 local currentKey=ctx.Key(button)
                 if currentKey~=key then key=currentKey;stableSince=now end
-                if now>=nextClick and now-stableSince>=.08 then
+                if now>=nextClick and now-stableSince>=.06 then
                     ctx.Click(button);clicks+=1;nextClick=ctx.Now()+.3
                 end
             end
-            ctx.Sleep(.04)
+            ctx.Sleep(.03)
         until ctx.Now()>=deadline
         error("Roblox did not confirm the block; no rejoin attempted")
     end
