@@ -169,7 +169,9 @@ return function(clientSource,controllerSource,gearSource,payloadSource)
         local op={Action="EquipWeapon",Item={Native=native},Slot="Right"}
         assert(f.GearCtx.Equip(op));local call=f.Calls[1]
         assert(call[1]=="Equipment"and call[2][1]=="EquipWeapon"and call[2][2]==native and call[2][3]=="Right")
-        f.State.SetAccountProgression(false);assert(not f.GearCtx.Equip(op) and #f.Calls==1)
+        assert(f.GearCtx.Equip({Action="Unequip",Item={Native=native},Slot="Left"}))
+        assert(f.Calls[2][2][1]=="Unequip"and f.Calls[2][2][2]==native)
+        f.State.SetAccountProgression(false);assert(not f.GearCtx.Equip(op) and #f.Calls==2)
     end)
     test("Gear snapshot keeps weapon auras and excludes vanity accessories",function()
         local f=fixture()

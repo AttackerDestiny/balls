@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.safe-mode-speed-budget-v1.8.6"
-local VERSION="1.8.6"
+local BUILD="2026-11-01.single-weapon-spear-v1.8.7"
+local VERSION="1.8.7"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7575,7 +7575,7 @@ end
 return function(ctx)
     local api={Dirty=true}
     local pending,nextRead,failures=nil,0,0
-    local swordClasses={['1HSword']=true,['2HSword']=true,Rapier=true,Katana=true}
+    local swordClasses={['1HSword']=true,Spear=true}
     local function effective(item,stat,snapshot)
         local value=tonumber(item.Stats[stat])
         if not value then return 0 end
@@ -7621,16 +7621,18 @@ return function(ctx)
             operations[#operations+1]={Action=action,Item=item,Slot=slot}
         end
         if not (ctx.SkipWeapons and ctx.SkipWeapons())then
-        local sword=swords[1]
-        if sword and snapshot.Equip.Right~=sword.Id then add("EquipWeapon",sword,"Right")end
-        if sword and sword.Class=="1HSword" then
-            for _,item in ipairs(swords)do
-                if item.Id~=sword.Id and item.Class==sword.Class then
-                    if snapshot.Equip.Left~=item.Id then add("EquipWeapon",item,"Left")end
-                    break
+            local sword=swords[1]
+            if sword then
+                -- Clear an existing offhand first, including when the winner is
+                -- currently in Left. Only request Right after native acknowledgment.
+                local left=snapshot.Equip.Left
+                if left and left~=0 then
+                    for _,item in ipairs(snapshot.Items)do
+                        if item.Id==left then add("Unequip",item,"Left");break end
+                    end
                 end
+                if snapshot.Equip.Right~=sword.Id then add("EquipWeapon",sword,"Right")end
             end
-        end
         end
         if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
         if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
