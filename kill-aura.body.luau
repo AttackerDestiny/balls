@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.single-weapon-spear-v1.8.7"
-local VERSION="1.8.7"
+local BUILD="2026-11-01.best-all-weapons-v1.8.8"
+local VERSION="1.8.8"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -1316,11 +1316,11 @@ do
         end
     end
     toggle.Parent=pages.Combat; farmToggle.Parent=pages.Combat
-    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Sword",25,34,pages.Combat)
+    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Weapon",25,34,pages.Combat)
     state.UI.AutoEquipBestSword=bestSword
     function state.SetAutoEquipBestSword(on)
         state.AutoEquipBestSword=on==true
-        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Sword · ON" or "Auto Equip Best Sword · OFF"
+        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Weapon · ON" or "Auto Equip Best Weapon · OFF"
         bestSword.BackgroundColor3=state.AutoEquipBestSword and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
         if state.ProgressionGearController then state.ProgressionGearController.Reset()end
         requestSave()
@@ -7575,7 +7575,6 @@ end
 return function(ctx)
     local api={Dirty=true}
     local pending,nextRead,failures=nil,0,0
-    local swordClasses={['1HSword']=true,Spear=true}
     local function effective(item,stat,snapshot)
         local value=tonumber(item.Stats[stat])
         if not value then return 0 end
@@ -7592,7 +7591,7 @@ return function(ctx)
         return value
     end
     function api.Plan(snapshot)
-        local swords,armor,accessories={},{},{}
+        local weapons,armor,accessories={},{},{}
         local equipped={};for _,id in pairs(snapshot.Equip)do equipped[id]=true end
         for _,item in ipairs(snapshot.Items)do
             if item.Level<=snapshot.Level and not item.Skin then
@@ -7600,7 +7599,7 @@ return function(ctx)
                 item.Damage,item.Defense=damage,defense
                 item.Utility=(tonumber(item.Stats.Critical)or 0)+(tonumber(item.Stats.Lifesteal)or 0)
                     +(tonumber(item.Stats.HealthRegeneration)or 0)+(tonumber(item.Stats.StaminaRegeneration)or 0)
-                if item.Type=="Weapon" and swordClasses[item.Class] then item.Score=damage;swords[#swords+1]=item
+                if item.Type=="Weapon" then item.Score=damage;weapons[#weapons+1]=item
                 elseif item.Type=="Clothing" and damage==0 and defense>0 then item.Score=defense;armor[#armor+1]=item
                 elseif item.Type=="Accessory" and (damage>0 or defense>0 or item.Utility>0)then
                     item.Score=damage/math.max(1,snapshot.Highest.Damage or 1)
@@ -7615,14 +7614,14 @@ return function(ctx)
             if equipped[a.Id]~=equipped[b.Id]then return equipped[a.Id]==true end
             return a.Id<b.Id
         end
-        table.sort(swords,less);table.sort(armor,less);table.sort(accessories,less)
+        table.sort(weapons,less);table.sort(armor,less);table.sort(accessories,less)
         local operations={}
         local function add(action,item,slot)
             operations[#operations+1]={Action=action,Item=item,Slot=slot}
         end
         if not (ctx.SkipWeapons and ctx.SkipWeapons())then
-            local sword=swords[1]
-            if sword then
+            local weapon=weapons[1]
+            if weapon then
                 -- Clear an existing offhand first, including when the winner is
                 -- currently in Left. Only request Right after native acknowledgment.
                 local left=snapshot.Equip.Left
@@ -7631,7 +7630,7 @@ return function(ctx)
                         if item.Id==left then add("Unequip",item,"Left");break end
                     end
                 end
-                if snapshot.Equip.Right~=sword.Id then add("EquipWeapon",sword,"Right")end
+                if snapshot.Equip.Right~=weapon.Id then add("EquipWeapon",weapon,"Right")end
             end
         end
         if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
@@ -7781,7 +7780,7 @@ return function(ctx)
         end,
         Equip=function(op)
             if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
-            ctx.StopCombat("Equipping best usable sword / gear")
+            ctx.StopCombat("Equipping best usable weapon / gear")
             local args={op.Action,op.Item.Native}
             if op.Action=="EquipWeapon"then args[3]=op.Slot end
             local reply=game.ReplicatedStorage.Function:InvokeServer("Equipment",args)

@@ -15,12 +15,12 @@ return function(source)
             Equip=function(op)f.Calls[#f.Calls+1]=op;return not f.Fail,"Rejected"end,Status=function(value)f.Status=value end})
         return f
     end
-    test("Best sword uses upgraded native damage and excludes unusable levels and non-swords",function()
+    test("Best weapon uses upgraded native damage and excludes unusable levels and non-weapons",function()
         local a=item(1,"Weapon","1HSword",100,nil,{Rarity="Legendary",Upgrade=20})
-        local f=fixture({a,item(2,"Weapon","Spear",180),item(3,"Weapon","2HSword",999,nil,{Level=11}),item(4,"Weapon","Bow",1000)})
+        local f=fixture({a,item(2,"Weapon","Spear",180),item(3,"Weapon","2HSword",999,nil,{Level=11}),item(4,"Clothing","Armor",nil,1000)})
         local op=f.Api.Plan(f.Snapshot)[1];assert(op.Item.Id==1 and op.Slot=="Right"and a.Damage==200)
     end)
-    test("Standalone Best Sword equips only the best usable swords and preserves armor/accessories",function()
+    test("Standalone Best Weapon equips only the best usable weapon and preserves armor/accessories",function()
         local f=fixture({item(1,"Weapon","1HSword",100),item(2,"Weapon","1HSword",90),
             item(3,"Clothing","Armor",nil,500),item(4,"Accessory","",nil,500)})
         f.WeaponsOnly=true
@@ -30,7 +30,7 @@ return function(source)
         assert(#f.Api.Plan(f.Snapshot)==0)
         f.WeaponsOnly=false;assert(#f.Api.Plan(f.Snapshot)>0)
     end)
-    test("Best Sword OFF blocks sword equips while progression can still select armor",function()
+    test("Best Weapon OFF blocks weapon equips while progression can still select armor",function()
         local f=fixture({item(1,"Weapon","1HSword",100),item(2,"Clothing","Armor",nil,100)})
         f.SkipWeapons=true;f.WeaponsOnly=true;assert(#f.Api.Plan(f.Snapshot)==0)
         f.WeaponsOnly=false;local ops=f.Api.Plan(f.Snapshot)
@@ -59,7 +59,7 @@ return function(source)
     end)
     test("Spears compete by effective damage and over-level spears remain excluded",function()
         local f=fixture({item(1,"Weapon","1HSword",100),item(2,"Weapon","Spear",120),
-            item(3,"Weapon","Spear",999,nil,{Level=11}),item(4,"Weapon","2HSword",999)})
+            item(3,"Weapon","Spear",999,nil,{Level=11}),item(4,"Weapon","2HSword",110)})
         local ops=f.Api.Plan(f.Snapshot)
         assert(#ops==1 and ops[1].Item.Id==2 and ops[1].Slot=="Right")
         f.Snapshot.Equip.Left=2
@@ -67,6 +67,19 @@ return function(source)
         f.Api.Update(1);assert(#f.Calls==1)
         f.Snapshot.Equip.Left=0;f.Api.Update(2)
         assert(#f.Calls==2 and f.Calls[2].Action=="EquipWeapon"and f.Calls[2].Slot=="Right")
+    end)
+    test("Every weapon class competes by damage without dual-wielding",function()
+        for _,class in ipairs({"1HSword","2HSword","Spear","Scythe","Rapier","Katana","Bow","FutureWeaponClass"})do
+            local f=fixture({item(1,"Weapon","1HSword",100),item(2,"Weapon",class,500),
+                item(3,"Weapon","Scythe",9999,nil,{Level=11})})
+            f.WeaponsOnly=true
+            local ops=f.Api.Plan(f.Snapshot)
+            assert(#ops==1 and ops[1].Item.Id==2 and ops[1].Slot=="Right",class)
+            f.Snapshot.Equip.Right=2;f.Snapshot.Equip.Left=1
+            ops=f.Api.Plan(f.Snapshot)
+            assert(#ops==1 and ops[1].Action=="Unequip"and ops[1].Slot=="Left",class)
+            f.Snapshot.Equip.Left=0;assert(#f.Api.Plan(f.Snapshot)==0,class)
+        end
     end)
     test("Accessories replace only worse slots and retain an already desired accessory",function()
         local f=fixture({item(1,"Accessory","",nil,100),item(2,"Accessory","",nil,90),item(3,"Accessory","",nil,80)})

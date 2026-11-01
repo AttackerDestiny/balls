@@ -89,7 +89,7 @@ return function(ctx)
         end,
         Equip=function(op)
             if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
-            ctx.StopCombat("Equipping best usable sword / gear")
+            ctx.StopCombat("Equipping best usable weapon / gear")
             local args={op.Action,op.Item.Native}
             if op.Action=="EquipWeapon"then args[3]=op.Slot end
             local reply=game.ReplicatedStorage.Function:InvokeServer("Equipment",args)
