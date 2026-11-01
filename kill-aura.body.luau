@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.farm-best-sword-v1.8.1"
-local VERSION="1.8.1"
+local BUILD="2026-11-01.atlantis-safe-mode-v1.8.2"
+local VERSION="1.8.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6513,7 +6513,7 @@ return function(ctx)
         }
     }
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
-        [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13}
+        [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14}
     local catalog={Floors={},FloorById={},Spots={},SpotById={},Aliases={}}
     -- Identities and positions verified in the new-account live progression test.
     local mainBossNames={
@@ -6531,7 +6531,7 @@ return function(ctx)
     for _,floor in ipairs(ctx.Floors) do
         local n=numbers[floor.PlaceId]
         if n then
-            local item={Id=floor.PlaceId,Number=n,Name=floor.Name,Label="F"..n.." · "..floor.Name,Unlocked=ctx.Unlocked(floor)}
+            local item={Id=floor.PlaceId,Number=n,Name=floor.Name,Label=floor.PlaceId==134019705603409 and floor.Name or ("F"..n.." · "..floor.Name),Unlocked=ctx.Unlocked(floor)}
             catalog.Floors[#catalog.Floors+1]=item;catalog.FloorById[item.Id]=item
         end
     end

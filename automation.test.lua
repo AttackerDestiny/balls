@@ -174,6 +174,17 @@ test("saved/live arenas merge and old duplicate selections migrate",function()
     assert(count==2 and selected["5287433115/Miniboss"] and selected["5287433115/Za, the Eldest"])
     Vector3=oldVector
 end)
+test("Atlantis featured floor appears in Safe Mode with native unlock status",function()
+    local oldVector=Vector3;Vector3={new=function(x,y,z)return {X=x,Y=y,Z=z}end}
+    local factory=assert(loadfile("floor-catalog.module.luau"))()
+    for _,unlocked in ipairs({true,false})do
+        local c=factory({Floors={{PlaceId=134019705603409,Name="Atlantis",Category="Featured"}},Unlocked=function()return unlocked end})
+        local floor=c.FloorById[134019705603409]
+        assert(#c.Floors==1 and floor.Label=="Atlantis"and floor.Unlocked==unlocked)
+        assert(#c.Spots==0,"Do not invent arena coordinates")
+    end
+    Vector3=oldVector
+end)
 test("Atheon appears as F13 and preserves its unlock status",function()
     local mt={}
     local function vector(x,y,z)return setmetatable({X=x,Y=y,Z=z},mt)end
