@@ -403,7 +403,6 @@ end
             state.SaveNow();refresh()
             if state.SafeMode then
                 workerIdentity()
-                friend.Update(os.clock())
                 safe.Update();refresh()
             end
         end)

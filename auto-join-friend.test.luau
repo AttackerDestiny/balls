@@ -23,5 +23,12 @@ return function(source)
     f=fixture();f.QueueFails=true;f.Api.Update(0);assert(f.Joins==0 and f.State.AutoJoinFriendStatus:find("Retrying"))
     f=fixture();f.Response="Player is offline";f.Api.Update(0);assert(f.State.AutoJoinFriendStatus==f.Response)
     f.State.JoinFriendUsername="Other";f.Api.Reset();f.Api.Update(1);assert(f.Resolves==2)
+    f=fixture();assert(f.State.AutoJoinFriendStatus=="Checking friend...")
+    f.State.AutoJoinFriend=false;f.Api.Reset();assert(f.State.AutoJoinFriendStatus=="Auto Join Friend is off")
+    f.State.AutoJoinFriend=true;f.Api.Reset();assert(f.State.AutoJoinFriendStatus=="Checking friend...")
+    for _,key in ipairs({"ModeratorBlocking","SafeModePanic","TravelBusy","AutomationTeleporting","AccountProgression","StopEverything"})do
+        f=fixture();f.State[key]=true;f.Api.Update(0)
+        assert(f.State.AutoJoinFriendStatus~="Auto Join Friend is off"and f.State.AutoJoinFriendStatus~="Checking friend...",key)
+    end
     print("PASS Auto Join Friend: native IDs, pacing, same-server stop, whitelist, travel priority, cancellation, self, invalid names, queue failure, server errors")
 end

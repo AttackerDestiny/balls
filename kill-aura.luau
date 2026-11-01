@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.friend-join-pad-v1.7.9"
-local VERSION="1.7.9"
+local BUILD="2026-11-01.friend-status-v1.8.0"
+local VERSION="1.8.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7151,7 +7151,6 @@ end
             state.SaveNow();refresh()
             if state.SafeMode then
                 workerIdentity()
-                friend.Update(os.clock())
                 safe.Update();refresh()
             end
         end)
@@ -7326,15 +7325,25 @@ return function(ctx)
     local api={}
     local nextTry,busy,serial=0,false,0
     local resolvedName,resolvedId
-    function api.Reset()serial+=1;nextTry=0;resolvedName=nil;resolvedId=nil end
+    function api.Reset()
+        serial+=1;nextTry=0;resolvedName=nil;resolvedId=nil
+        s.AutoJoinFriendStatus=s.AutoJoinFriend and "Checking friend..." or "Auto Join Friend is off"
+    end
     function api.Update(now)
         if not s.AutoJoinFriend then s.AutoJoinFriendStatus="Auto Join Friend is off";return end
-        if not s.Running or s.StopEverything or busy or now<nextTry then return end
+        if not s.Running then return end
+        if s.StopEverything then s.AutoJoinFriendStatus="Paused · Stop Everything is on";return end
+        if busy then return end
         local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@", "")
         if name==""then s.AutoJoinFriendStatus="Enter a Roblox username";return end
         if not name:match("^[%w_]+$")or #name>20 then s.AutoJoinFriendStatus="Enter a username, not a display name";return end
-        if s.ModeratorBlocking or s.SafeModePanic or s.TravelBusy or s.AutomationTeleporting then return end
+        if s.ModeratorBlocking then s.AutoJoinFriendStatus="Waiting · moderator protection";return end
+        if s.SafeModePanic then s.AutoJoinFriendStatus="Waiting · Safe Mode protection";return end
+        if s.TravelBusy then s.AutoJoinFriendStatus="Waiting · current movement";return end
+        if s.AutomationTeleporting then s.AutoJoinFriendStatus="Waiting · teleport in progress";return end
         if s.AccountProgression then s.AutoJoinFriendStatus="Waiting · Account Progression owns floor travel";return end
+        if now<nextTry then return end
+        s.AutoJoinFriendStatus="Checking @"..name
         nextTry=now+20;busy=true
         local token=serial
         local function active()return token==serial and s.Running and not s.StopEverything and s.AutoJoinFriend end
@@ -7363,6 +7372,7 @@ return function(ctx)
             if not ok and active()then s.AutoJoinFriendStatus="Retrying · "..tostring(reason)end
         end)
     end
+    api.Reset()
     return api
 end
 
