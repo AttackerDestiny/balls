@@ -403,6 +403,7 @@ end
             state.SaveNow();refresh()
             if state.SafeMode then
                 workerIdentity()
+                friend.Update(os.clock())
                 safe.Update();refresh()
             end
         end)
@@ -419,6 +420,24 @@ end
         local spot=catalog.SpotById[id]
         if not spot or not spot.Floor.Unlocked then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
+    end
+    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
+        Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,
+        Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
+        Queue=function()
+            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+            assert(type(queue)=="function","Executor has no teleport queue support")
+            state.SaveNow()
+            queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
+        end,
+        Join=function(id)return game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})end})
+    state.AutoJoinFriendController=friend
+    function state.SetAutoJoinFriend(on)
+        state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()
+    end
+    function state.SetJoinFriendUsername(name)
+        state.JoinFriendUsername=tostring(name or ""):match("^%s*(.-)%s*$"):gsub("^@", ""):sub(1,20)
+        friend.Reset();state.SaveNow();refresh()
     end
     ui=ctx.MakeUI({State=state,Catalog=catalog,Create=ctx.Create,Button=ctx.Button,Label=ctx.Label,
         Bind=ctx.Bind,Corner=ctx.Corner,Reveal=ctx.Reveal,Parent=ctx.Parent})
@@ -450,6 +469,7 @@ end
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
                 if state.ModeratorBlocking then return end
+                friend.Update(os.clock())
                 safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end

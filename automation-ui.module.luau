@@ -31,6 +31,17 @@ return function(ctx)
     s.UI.SafeMode=safe;s.UI.SafeFloor=floor;s.UI.SafeFloorOptions=floors;s.UI.SafeWhitelist=white
     s.UI.SafeModeStatus=safeStatus;s.UI.MultiSpot=multi;s.UI.MultiSpotDropdown=spots;s.UI.MultiSpotOptions=arenas
     s.UI.MultiSpotStatus=multiStatus
+    local join=ctx.Button("AutoJoinFriend","Auto Join Friend · OFF",340,34)
+    local username=ctx.Create("TextBox",{Name="JoinFriendUsername",LayoutOrder=350,Size=UDim2.new(1,0,0,34),
+        Text=s.JoinFriendUsername or "",PlaceholderText="Friend's Roblox username",ClearTextOnFocus=false,
+        Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(225,228,241),
+        PlaceholderColor3=Color3.fromRGB(125,132,153),BackgroundColor3=Color3.fromRGB(38,41,56),BorderSizePixel=0},ctx.Parent)
+    ctx.Corner(username,8)
+    local joinStatus=ctx.Label("AutoJoinFriendStatus","Auto Join Friend is off",360,48)
+    joinStatus.TextWrapped=true;joinStatus.TextTruncate=Enum.TextTruncate.None
+    s.UI.AutoJoinFriend=join;s.UI.JoinFriendUsername=username;s.UI.AutoJoinFriendStatus=joinStatus
+    ctx.Bind(join.Activated,function()s.SetJoinFriendUsername(username.Text);s.SetAutoJoinFriend(not s.AutoJoinFriend)end)
+    ctx.Bind(username.FocusLost,function()s.SetJoinFriendUsername(username.Text)end)
     local api={}
     local lastView
     function s.CloseAutomationMenus(except)
@@ -47,9 +58,12 @@ return function(ctx)
     function api.Refresh()
         local count=0;for id,on in pairs(s.MultiSpotSelected) do if on and catalog.SpotById[id] and catalog.SpotById[id].PlaceId==game.PlaceId then count=count+1 end end
         local view=table.concat({tostring(s.SafeMode),tostring(s.MultiSpot),tostring(s.SafeFloorId),
-            tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
+            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
         if view==lastView then return end
         lastView=view
+        join.Text=s.AutoJoinFriend and "Auto Join Friend · ON" or "Auto Join Friend · OFF"
+        join.BackgroundColor3=s.AutoJoinFriend and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
+        joinStatus.Text=s.AutoJoinFriendStatus or "Auto Join Friend is off"
         safe.Text=s.SafeMode and "Safe Mode · ON" or "Safe Mode · OFF"
         multi.Text=s.MultiSpot and "Multi Spot · ON" or "Multi Spot · OFF"
         safe.BackgroundColor3=s.SafeMode and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)

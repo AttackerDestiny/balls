@@ -74,7 +74,7 @@ def main():
         "\ndo\n    local create=(function()\n-- BEGIN BUNDLED SKILL ACTIVATION")]
     sources = {"HUD": read("enemy-health.module.luau"), "Travel": read("arena-travel.module.luau"),
                "Destroy": destroy, "Adapter": read("server-isolation-client.module.luau"),
-               "Owner": read("runtime-owner.module.luau")}
+               "Friend": read("auto-join-friend.module.luau"), "Owner": read("runtime-owner.module.luau")}
     wave = read("wave-dodge.module.luau")
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
@@ -126,6 +126,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("shared-settings.test.luau")) + "))()(" + quote(read("shared-settings.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("frame-timing.test.luau")) + "))()(" + quote(read("frame-timing.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("moderator-rejoin.test.luau")) + "))()(" + quote(read("moderator-rejoin.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("auto-join-friend.test.luau")) + "))()(" + quote(read("auto-join-friend.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

@@ -22,6 +22,7 @@ MODULES = {
     "ARENA TRAVEL": "arena-travel.module.luau",
     "MULTI SPOT": "multi-spot.module.luau",
     "SERVER ISOLATION CLIENT": "server-isolation-client.module.luau",
+    "AUTO JOIN FRIEND": "auto-join-friend.module.luau",
     "AUTOMATION UI": "automation-ui.module.luau",
     "FLOOR CATALOG": "floor-catalog.module.luau",
     "ATHEON DODGE": "atheon-dodge.module.luau",

@@ -231,7 +231,7 @@ return function(sources)
         local multiContext
         adapter({State=state,Player=player,Players=players,MakeCatalog=function()return catalog end,
             Make=function()return search end,MakeSafe=function()return safe end,MakeMulti=function(ctx)multiContext=ctx;return multi end,
-            MakeUI=function()return {Refresh=function()end}end,Bind=function()end})
+            MakeFriend=load(sources.Friend),MakeUI=function()return {Refresh=function()end}end,Bind=function()end})
         state.SetMultiSpot(false);state.SetMultiSpot(true)
         assert(saved[#saved]==true and state.MultiSpot)
         queued[1]() -- actual background worker: rejected identity must not kill it

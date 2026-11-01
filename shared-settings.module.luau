@@ -4,7 +4,7 @@ return function(ctx)
     local path="SB2Codex/shared-settings.json"
     local keys={"Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
     local function select(value)
         local result={Version=1}

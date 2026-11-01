@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.skip-f6-v1.7.4"
-local VERSION="1.7.4"
+local BUILD="2026-11-01.auto-join-friend-v1.7.5"
+local VERSION="1.7.5"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -240,7 +240,7 @@ return function(ctx)
     local path="SB2Codex/shared-settings.json"
     local keys={"Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
     local function select(value)
         local result={Version=1}
@@ -323,6 +323,7 @@ local restore = {
     AtheonDodge=preference("AtheonDodge",false)==true,
     TransparentMap=preference("TransparentMap",false)==true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
+    AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
     SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
     SafeWhitelistText=preference("SafeWhitelistText",""),SafeWhitelistIds=preference("SafeWhitelistIds",{}),
     MultiSpot=preference("MultiSpot",false)==true,MultiSpotSelected=preference("MultiSpotSelected",{}),
@@ -392,6 +393,7 @@ local state = {
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
     AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, TransparentMap = restore.TransparentMap, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
+    AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
     MultiSpot=restore.MultiSpot,MultiSpotSelected=restore.MultiSpotSelected,MultiSpotCursor=restore.MultiSpotCursor,MultiSpotPending=restore.MultiSpotPending,
     AutomationRunId=restore.AutomationRunId,AutomationResumeFeatures=restore.AutomationResumeFeatures,
@@ -932,6 +934,7 @@ local function settingsPayload()
     local features=state
     return {
         StopEverything=false,
+        AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
         MultiSpot=state.MultiSpot,MultiSpotSelected=state.MultiSpotSelected,MultiSpotCursor=state.MultiSpotCursor,MultiSpotPending=state.MultiSpotPending,
         AccountProgression=state.AccountProgression,ProgressionFloor=state.ProgressionFloor,
@@ -6637,6 +6640,17 @@ return function(ctx)
     s.UI.SafeMode=safe;s.UI.SafeFloor=floor;s.UI.SafeFloorOptions=floors;s.UI.SafeWhitelist=white
     s.UI.SafeModeStatus=safeStatus;s.UI.MultiSpot=multi;s.UI.MultiSpotDropdown=spots;s.UI.MultiSpotOptions=arenas
     s.UI.MultiSpotStatus=multiStatus
+    local join=ctx.Button("AutoJoinFriend","Auto Join Friend · OFF",340,34)
+    local username=ctx.Create("TextBox",{Name="JoinFriendUsername",LayoutOrder=350,Size=UDim2.new(1,0,0,34),
+        Text=s.JoinFriendUsername or "",PlaceholderText="Friend's Roblox username",ClearTextOnFocus=false,
+        Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(225,228,241),
+        PlaceholderColor3=Color3.fromRGB(125,132,153),BackgroundColor3=Color3.fromRGB(38,41,56),BorderSizePixel=0},ctx.Parent)
+    ctx.Corner(username,8)
+    local joinStatus=ctx.Label("AutoJoinFriendStatus","Auto Join Friend is off",360,48)
+    joinStatus.TextWrapped=true;joinStatus.TextTruncate=Enum.TextTruncate.None
+    s.UI.AutoJoinFriend=join;s.UI.JoinFriendUsername=username;s.UI.AutoJoinFriendStatus=joinStatus
+    ctx.Bind(join.Activated,function()s.SetJoinFriendUsername(username.Text);s.SetAutoJoinFriend(not s.AutoJoinFriend)end)
+    ctx.Bind(username.FocusLost,function()s.SetJoinFriendUsername(username.Text)end)
     local api={}
     local lastView
     function s.CloseAutomationMenus(except)
@@ -6653,9 +6667,12 @@ return function(ctx)
     function api.Refresh()
         local count=0;for id,on in pairs(s.MultiSpotSelected) do if on and catalog.SpotById[id] and catalog.SpotById[id].PlaceId==game.PlaceId then count=count+1 end end
         local view=table.concat({tostring(s.SafeMode),tostring(s.MultiSpot),tostring(s.SafeFloorId),
-            tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
+            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
         if view==lastView then return end
         lastView=view
+        join.Text=s.AutoJoinFriend and "Auto Join Friend · ON" or "Auto Join Friend · OFF"
+        join.BackgroundColor3=s.AutoJoinFriend and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
+        joinStatus.Text=s.AutoJoinFriendStatus or "Auto Join Friend is off"
         safe.Text=s.SafeMode and "Safe Mode · ON" or "Safe Mode · OFF"
         multi.Text=s.MultiSpot and "Multi Spot · ON" or "Multi Spot · OFF"
         safe.BackgroundColor3=s.SafeMode and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
@@ -7108,6 +7125,7 @@ end
             state.SaveNow();refresh()
             if state.SafeMode then
                 workerIdentity()
+                friend.Update(os.clock())
                 safe.Update();refresh()
             end
         end)
@@ -7124,6 +7142,24 @@ end
         local spot=catalog.SpotById[id]
         if not spot or not spot.Floor.Unlocked then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
+    end
+    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
+        Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,
+        Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
+        Queue=function()
+            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+            assert(type(queue)=="function","Executor has no teleport queue support")
+            state.SaveNow()
+            queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
+        end,
+        Join=function(id)return game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})end})
+    state.AutoJoinFriendController=friend
+    function state.SetAutoJoinFriend(on)
+        state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()
+    end
+    function state.SetJoinFriendUsername(name)
+        state.JoinFriendUsername=tostring(name or ""):match("^%s*(.-)%s*$"):gsub("^@", ""):sub(1,20)
+        friend.Reset();state.SaveNow();refresh()
     end
     ui=ctx.MakeUI({State=state,Catalog=catalog,Create=ctx.Create,Button=ctx.Button,Label=ctx.Label,
         Bind=ctx.Bind,Corner=ctx.Corner,Reveal=ctx.Reveal,Parent=ctx.Parent})
@@ -7155,6 +7191,7 @@ end
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
                 if state.ModeratorBlocking then return end
+                friend.Update(os.clock())
                 safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end
@@ -7226,7 +7263,57 @@ end
 
 -- END BUNDLED BLOCK CONFIRM
     end)()
-    attach({Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    local makeFriend=(function()
+-- BEGIN BUNDLED AUTO JOIN FRIEND
+-- Uses the game's native friend-teleport route; never guesses server IDs.
+return function(ctx)
+    local s=ctx.State
+    local api={}
+    local nextTry,busy,serial=0,false,0
+    local resolvedName,resolvedId
+    function api.Reset()serial+=1;nextTry=0;resolvedName=nil;resolvedId=nil end
+    function api.Update(now)
+        if not s.AutoJoinFriend then s.AutoJoinFriendStatus="Auto Join Friend is off";return end
+        if not s.Running or s.StopEverything or busy or now<nextTry then return end
+        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@", "")
+        if name==""then s.AutoJoinFriendStatus="Enter a Roblox username";return end
+        if not name:match("^[%w_]+$")or #name>20 then s.AutoJoinFriendStatus="Enter a username, not a display name";return end
+        if s.ModeratorBlocking or s.SafeModePanic or s.TravelBusy or s.AutomationTeleporting then return end
+        if s.AccountProgression then s.AutoJoinFriendStatus="Waiting · Account Progression owns floor travel";return end
+        nextTry=now+20;busy=true
+        local token=serial
+        local function active()return token==serial and s.Running and not s.StopEverything and s.AutoJoinFriend end
+        local function ready()return active()and not(s.ModeratorBlocking or s.SafeModePanic or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
+        ctx.Spawn(function()
+            local ok,reason=pcall(function()
+                if resolvedName~=name:lower()then
+                    local id=ctx.Resolve(name)
+                    if not active()then return end
+                    assert(type(id)=="number"and id>0,"Username was not found")
+                    resolvedName,resolvedId=name:lower(),id
+                end
+                if not ready()then return end
+                if resolvedId==ctx.LocalUserId then s.AutoJoinFriendStatus="Choose another player";return end
+                if ctx.Present(resolvedId)then s.AutoJoinFriendStatus="Joined @"..name.." · staying in this server";return end
+                if s.SafeMode and not(s.SafeWhitelistIds and s.SafeWhitelistIds[tostring(resolvedId)])then
+                    s.AutoJoinFriendStatus="Add @"..name.." to the Safe Mode whitelist first";return
+                end
+                ctx.Queue()
+                if not ready()then return end
+                s.AutoJoinFriendStatus="Joining @"..name
+                local message=ctx.Join(resolvedId)
+                if active()then s.AutoJoinFriendStatus=type(message)=="string"and message~=""and message or "Join requested · waiting for teleport"end
+            end)
+            busy=false
+            if not ok and active()then s.AutoJoinFriendStatus="Retrying · "..tostring(reason)end
+        end)
+    end
+    return api
+end
+
+-- END BUNDLED AUTO JOIN FRIEND
+    end)()
+    attach({Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end
