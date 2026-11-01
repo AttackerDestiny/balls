@@ -16,7 +16,7 @@ return function(ctx)
         nextTry=now+20;busy=true
         local token=serial
         local function active()return token==serial and s.Running and not s.StopEverything and s.AutoJoinFriend end
-        local function ready()return active()and not(s.ModeratorBlocking or s.SafeModePanic or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
+        local function ready()return active()and not(s.ModeratorBlocking or (s.SafeModePanic and not s.AutoJoinFriendHolding) or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
                 if resolvedName~=name:lower()then
@@ -34,7 +34,7 @@ return function(ctx)
                 ctx.Queue()
                 if not ready()then return end
                 s.AutoJoinFriendStatus="Joining @"..name
-                local message=ctx.Join(resolvedId)
+                local message=ctx.Join(resolvedId,ready)
                 if active()then s.AutoJoinFriendStatus=type(message)=="string"and message~=""and message or "Join requested · waiting for teleport"end
             end)
             busy=false

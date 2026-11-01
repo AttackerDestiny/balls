@@ -421,6 +421,35 @@ end
         if not spot or not spot.Floor.Unlocked then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
     end
+    local function joinFriendAtPad(id,active)
+        state.AutoJoinFriendHolding=true
+        local function permitted()
+            return active()and not api.Active and not (state.SafeMode and safe.Seeking)
+        end
+        local ok,result=pcall(function()
+            for attempt=1,2 do
+                assert(permitted(),"Friend join cancelled for protection or travel")
+                assert(state.PanicToSpawn(),"Wait for a living character at the teleport pad")
+                task.wait(math.clamp((state.PingMs or 100)/1000+.25,.5,1))
+                assert(permitted(),"Friend join cancelled for protection or travel")
+                assert(state.PanicToSpawn(),"Teleport pad is unavailable")
+                local message=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})
+                if message==nil or message==""then
+                    -- Hold through the native transition instead of farming away from the pad.
+                    local deadline=os.clock()+5
+                    repeat task.wait(.1)until not permitted()or state.ServerTeleportStarted or os.clock()>=deadline
+                    return message
+                end
+                if attempt==2 or not tostring(message):lower():find("teleport pad",1,true)then return message end
+            end
+        end)
+        state.AutoJoinFriendHolding=false
+        if state.Running and not state.ModeratorBlocking and not api.Active and not (state.SafeMode and safe.Seeking)then
+            state.ReleaseSafePanic()
+        end
+        if not ok then error(result)end
+        return result
+    end
     local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
         Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,
         Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
@@ -430,7 +459,7 @@ end
             state.SaveNow()
             queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
         end,
-        Join=function(id)return game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})end})
+        Join=joinFriendAtPad})
     state.AutoJoinFriendController=friend
     function state.SetAutoJoinFriend(on)
         state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()

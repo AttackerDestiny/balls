@@ -137,6 +137,8 @@ def main():
     visual = read("skill-visuals.module.luau")
     suppress = visual[visual.index("    local function write("):visual.index("    local function isSkill(")]
     fixture += "assert(loadstring(" + quote(read("mobile-skill-visuals.test.luau")) + "))()(" + quote(suppress) + ")\n"
+    friend_pad = adapter[adapter.index("    local function joinFriendAtPad("):adapter.index("    local friend=ctx.MakeFriend(")]
+    fixture += "assert(loadstring(" + quote(read("friend-join-pad.test.luau")) + "))()(" + quote(friend_pad) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.mobile-skill-visuals-v1.7.8"
-local VERSION="1.7.8"
+local BUILD="2026-11-01.friend-join-pad-v1.7.9"
+local VERSION="1.7.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -5254,7 +5254,7 @@ local function runFrame()
             if state.PanicToSpawn then state.PanicToSpawn()end
             return
         end
-        if state.SafeModePanic then
+        if state.AutoJoinFriendHolding or state.SafeModePanic then
             if state.PanicToSpawn then state.PanicToSpawn() end
             return
         end
@@ -7168,6 +7168,35 @@ end
         if not spot or not spot.Floor.Unlocked then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
     end
+    local function joinFriendAtPad(id,active)
+        state.AutoJoinFriendHolding=true
+        local function permitted()
+            return active()and not api.Active and not (state.SafeMode and safe.Seeking)
+        end
+        local ok,result=pcall(function()
+            for attempt=1,2 do
+                assert(permitted(),"Friend join cancelled for protection or travel")
+                assert(state.PanicToSpawn(),"Wait for a living character at the teleport pad")
+                task.wait(math.clamp((state.PingMs or 100)/1000+.25,.5,1))
+                assert(permitted(),"Friend join cancelled for protection or travel")
+                assert(state.PanicToSpawn(),"Teleport pad is unavailable")
+                local message=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})
+                if message==nil or message==""then
+                    -- Hold through the native transition instead of farming away from the pad.
+                    local deadline=os.clock()+5
+                    repeat task.wait(.1)until not permitted()or state.ServerTeleportStarted or os.clock()>=deadline
+                    return message
+                end
+                if attempt==2 or not tostring(message):lower():find("teleport pad",1,true)then return message end
+            end
+        end)
+        state.AutoJoinFriendHolding=false
+        if state.Running and not state.ModeratorBlocking and not api.Active and not (state.SafeMode and safe.Seeking)then
+            state.ReleaseSafePanic()
+        end
+        if not ok then error(result)end
+        return result
+    end
     local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
         Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,
         Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
@@ -7177,7 +7206,7 @@ end
             state.SaveNow()
             queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
         end,
-        Join=function(id)return game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})end})
+        Join=joinFriendAtPad})
     state.AutoJoinFriendController=friend
     function state.SetAutoJoinFriend(on)
         state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()
@@ -7308,7 +7337,7 @@ return function(ctx)
         nextTry=now+20;busy=true
         local token=serial
         local function active()return token==serial and s.Running and not s.StopEverything and s.AutoJoinFriend end
-        local function ready()return active()and not(s.ModeratorBlocking or s.SafeModePanic or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
+        local function ready()return active()and not(s.ModeratorBlocking or (s.SafeModePanic and not s.AutoJoinFriendHolding) or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
                 if resolvedName~=name:lower()then
@@ -7326,7 +7355,7 @@ return function(ctx)
                 ctx.Queue()
                 if not ready()then return end
                 s.AutoJoinFriendStatus="Joining @"..name
-                local message=ctx.Join(resolvedId)
+                local message=ctx.Join(resolvedId,ready)
                 if active()then s.AutoJoinFriendStatus=type(message)=="string"and message~=""and message or "Join requested · waiting for teleport"end
             end)
             busy=false
