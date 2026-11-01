@@ -62,9 +62,25 @@ return function(source)
         f.Api.Update(0);assert(#f.BossTrips==1 and #f.Trips==0)
         f.State.ProgressionBossCleared=true;f.Api.Update(1);assert(f.Trips[1]==9)
     end)
-    test("Progression visits Helmfirth without inventing a town boss",function()
+    test("Progression leaves an existing Helmfirth checkpoint for F7",function()
         local f=fixture();f.State.ProgressionFloor=6;f.FloorId=6;f.Api.Update(0)
         assert(f.Trips[1]==7 and #f.BossTrips==0 and not f.State.ProgressionBossCleared)
+    end)
+    test("F5 clear skips locked F6 and targets unlocked F7 directly",function()
+        local f=fixture();f.State.ProgressionFloor=5;f.FloorId=5
+        f.State.ProgressionBossCleared=true;f.Unlocked[6]=false
+        f.Api.Update(0);assert(f.Trips[1]==7 and f.State.ProgressionFloor==7)
+        assert(f.Saves[1].Floor==7 and #f.BossTrips==0)
+    end)
+    test("An old F6 checkpoint never travels back to town",function()
+        local f=fixture();f.State.ProgressionFloor=6;f.FloorId=5
+        f.Api.Update(0);assert(f.Trips[1]==7 and f.State.ProgressionFloor==7)
+    end)
+    test("Skipping F6 still requires the actual F7 unlock",function()
+        local f=fixture();f.State.ProgressionFloor=5;f.FloorId=5
+        f.State.ProgressionBossCleared=true;f.Unlocked[7]=false
+        f.Api.Update(0);assert(#f.Trips==0 and f.Status:find("F7 unlock",1,true))
+        f.Unlocked[7]=true;f.Api.Update(1);assert(f.Trips[1]==7)
     end)
     test("Progression starts from F1 even when enabled on another floor",function()
         local f=fixture();f.FloorId=13;f.Api.Update(0);f.Api.Update(.5)
