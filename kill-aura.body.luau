@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.best-sword-toggle-v1.8.3"
-local VERSION="1.8.3"
+local BUILD="2026-11-01.atlantis-spots-v1.8.4"
+local VERSION="1.8.4"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6517,6 +6517,9 @@ return function(ctx)
             ['Duality Reaper  '] = Vector3.new(4763.06934, 501.713593, -4344.83838),
             ['Neon chest       '] = Vector3.new(5204.35449, 2294.14502, 5778.00195)
         },
+        [134019705603409] = { -- Atlantis: native client arena discovery
+            Leviathan = Vector3.new(15.89453125, 1320.01953125, -797.10546875)
+        },
         [13965775911] = { -- Atheon / floor 13 (user-provided arena)
             ['Atheon arena'] = Vector3.new(840, 798, 336)
         },
@@ -6550,7 +6553,7 @@ return function(ctx)
         end
     end
     table.sort(catalog.Floors,function(a,b)return a.Number<b.Number end)
-    local extraKinds={['Suspended Unborn']='Arena',['Limor the Devourer']='Arena',['Radioactive Experiment']='Arena',
+    local extraKinds={Leviathan='Boss',['Suspended Unborn']='Arena',['Limor the Devourer']='Arena',['Radioactive Experiment']='Arena',
         ['Za, the Eldest']='Mini boss',['Wa, the Curious']='Arena',['Duality Reaper']='Mini boss',['Atheon arena']='Arena'}
     for placeId,areas in pairs(source) do
         local floor=catalog.FloorById[placeId]
@@ -6563,6 +6566,7 @@ return function(ctx)
                     DestinationId='source:'..key,Floor=floor,Label=floor.Label..' · '..name,
                     MainBoss=key=='Boss',PositionLocked=(placeId==573267292 and key=='Miniboss') or placeId==13965775911,
                     EncounterNames=placeId==13965775911 and {Atheon=true,['Corrupted Atheon']=true}
+                        or (placeId==134019705603409 and key=='Leviathan' and {Leviathan=true})
                         or (key=='Boss' and mainBossNames[placeId]) or nil}
                 catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[spot.Id]=spot
             end
