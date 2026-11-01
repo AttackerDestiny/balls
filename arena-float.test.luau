@@ -24,8 +24,9 @@ return function(source,arrivalSource)
     float.Attach=function(r)float.Root=r;calls+=1 end
     local state={AutoFarm=true,Enabled=true,TravelHold=true,TravelHoldPosition={},MultiSpotLandingPosition={},ArenaFloat=float}
     local held,holds=nil,0
+    local clock=0
     local chunk=assert(loadstring(arrivalSource))
-    setfenv(chunk,setmetatable({state=state,player={Character={
+    setfenv(chunk,setmetatable({os={clock=function()return clock end},state=state,player={Character={
         FindFirstChild=function()return root end,FindFirstChildOfClass=function()return {Health=100}end}},
         waveDodge={Idle=function(anchor)held=anchor;holds+=1 end},
         stopMovement=function()stops+=1 end},{__index=getfenv()}));chunk()
@@ -39,8 +40,11 @@ return function(source,arrivalSource)
     state.MultiSpot=true;state.MultiSpotAnchor=vec(840,798,336);state.MultiSpotController={Current={}}
     state.ReadAutomationEncounter=function()return alive end
     assert(not state.HoldMultiSpotIdle() and holds==0,"A living boss or add must not pull farming back to the spot")
-    alive=0;assert(state.HoldMultiSpotIdle() and holds==1 and held==state.MultiSpotAnchor)
+    alive=0;assert(not state.HoldMultiSpotIdle()and holds==0)
+    clock=4.99;assert(not state.HoldMultiSpotIdle()and holds==0)
+    clock=5;assert(state.HoldMultiSpotIdle() and holds==1 and held==state.MultiSpotAnchor)
     alive=math.huge;assert(not state.HoldMultiSpotIdle() and holds==1,"Unknown streamed mobs cannot prove an idle arena")
-    alive=0;state.SafeModePanic=true;assert(not state.HoldMultiSpotIdle() and holds==1)
+    alive=0;clock=10;assert(not state.HoldMultiSpotIdle(),"Unknown mobs reset the five-second timer")
+    state.SafeModePanic=true;assert(not state.HoldMultiSpotIdle() and holds==1)
     print("PASS Multi Spot holds its selected spot only with no living arena enemies")
 end

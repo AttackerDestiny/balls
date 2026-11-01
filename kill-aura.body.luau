@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.atlantis-spots-v1.8.4"
-local VERSION="1.8.4"
+local BUILD="2026-11-01.multispot-idle-infinite-range-v1.8.5"
+local VERSION="1.8.5"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -309,7 +309,7 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
-    FarmRange=10000,
+    FarmRange=math.huge,
     Threat=3,
     SkillAura=preference("SkillAura",false)==true,
     MiscSkillEnabled=preference("MiscSkillEnabled",false)==true,
@@ -375,7 +375,7 @@ local state = {
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
     AutoEquipBestSword=restore.AutoEquipBestSword,
-    AutoFarm = false, FarmRange = math.clamp(restore.FarmRange, 20, 10000), Recovering = false,
+    AutoFarm = false, FarmRange = math.huge, Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
     FarmAbove=false,OffsetMode="Below",
     OffsetProfiles = {}, UnsafeOffsetProfiles = {}, ProtectionStatus = "Retreat on health loss",
@@ -945,7 +945,7 @@ local function settingsPayload()
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
         Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
-        FarmRange = state.FarmRange, AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
+        AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
@@ -2202,7 +2202,7 @@ function state.SetAutoFarm(enabled, reason)
 end
 function state.SetFarmRange(range)
     if type(range) ~= "number" or range ~= range then range = state.FarmRange end
-    state.FarmRange = math.clamp(math.floor(range), 20, 10000)
+    state.FarmRange = math.huge
     state.FollowTarget = nil
     nextTargetRefresh = 0
     movementStatus("Detection range updated")
@@ -4041,9 +4041,15 @@ function state.FinishMultiSpotArrival()
 end
 function state.HoldMultiSpotIdle()
     if not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
-        or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then return false end
+        or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
     local spot=state.MultiSpotController and state.MultiSpotController.Current
-    if not spot or state.ReadAutomationEncounter(spot)~=0 then return false end
+    if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
+    if state.MultiSpotEmptyAnchor~=state.MultiSpotAnchor then
+        state.MultiSpotEmptyAnchor=state.MultiSpotAnchor;state.MultiSpotEmptySince=nil
+    end
+    local now=os.clock()
+    state.MultiSpotEmptySince=state.MultiSpotEmptySince or now
+    if now-state.MultiSpotEmptySince<5 then return false end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
@@ -4306,10 +4312,11 @@ local function updateMovement()
         targetMissingSince = targetMissingSince or now
         if now - targetMissingSince > 0.9 then
             waveDodge.Idle()
-            movementStatus("No target in "..state.FarmRange.." studs · idle -20")
+            movementStatus("No loaded enemy · unlimited detection · idle -20")
         else waveDodge.Idle(); movementStatus("Waiting below the map · 20 studs") end
         return
     end
+    state.MultiSpotEmptySince=nil
     targetMissingSince = nil
     state.IdleBelowMap = false
     state.Exploring = false
@@ -7100,7 +7107,7 @@ end
         Go=function(spot)
             if state.TravelBusy then return false end
             state.RegisterAutomationDestination(spot)
-            state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
+            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
             state.MultiSpotOwnsTravel=true
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
@@ -7109,7 +7116,7 @@ end
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release() end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
-            state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
+            state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false
             state.MultiSpotLandingPosition=nil
         end,

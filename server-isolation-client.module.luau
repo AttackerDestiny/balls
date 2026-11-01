@@ -334,7 +334,7 @@ end
         Go=function(spot)
             if state.TravelBusy then return false end
             state.RegisterAutomationDestination(spot)
-            state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
+            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
             state.MultiSpotOwnsTravel=true
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
@@ -343,7 +343,7 @@ end
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release() end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
-            state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
+            state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false
             state.MultiSpotLandingPosition=nil
         end,
