@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "FRAME TIMING": "frame-timing.module.luau",
     "SHARED SETTINGS": "shared-settings.module.luau",
     "MODERATOR WATCH": "moderator-watch.module.luau",
     "FARM NOCLIP": "farm-noclip.module.luau",

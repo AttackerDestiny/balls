@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-10-31.progression-unlock-recovery-v1.7.1"
-local VERSION="1.7.1"
+local BUILD="2026-11-01.low-fps-v1.7.2"
+local VERSION="1.7.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -5173,6 +5173,28 @@ local function scan()
     return normalScheduler.Update(now,candidates,root,mobs)
 end
 
+local frameTiming=(function()
+-- BEGIN BUNDLED FRAME TIMING
+-- All deadlines remain wall-clock based. Steady 10 FPS is not a freeze.
+return function(state)
+    local api={}
+    function api.Sample(delta,now)
+        if type(delta)~="number" or delta~=delta or delta<=0 or delta==math.huge then return end
+        local previous=state.AverageFrameTime or 1/60
+        local stalled=delta>math.max(.35,previous*4)
+        -- Ignore a single long hitch in the baseline so it cannot poison pacing.
+        state.AverageFrameTime=previous+(math.min(delta,.2)-previous)*.08
+        if stalled and (state.Enabled or state.SkillAura) then
+            state.LagPauseUntil=math.max(state.LagPauseUntil or 0,now+.5)
+        end
+        return stalled
+    end
+    return api
+end
+
+-- END BUNDLED FRAME TIMING
+end)()(state)
+
 state.PerformanceBudget=(function()
 -- BEGIN BUNDLED PERFORMANCE BUDGET
 return function(state)
@@ -5196,6 +5218,7 @@ end
 -- END BUNDLED PERFORMANCE BUDGET
 end)()(state)
 
+local nextPresentationUpdate=0
 local function runFrame()
         if state.StopEverything then return end
         if state.ModeratorBlocking then
@@ -5215,10 +5238,14 @@ local function runFrame()
         local dodgeOK,dodgeError=pcall(waveDodge.Update)
         if not dodgeOK then state.LastDodgeError=tostring(dodgeError) end
         updateHealthGuard()
-        local healthOK,healthError=pcall(healthHUD.Update)
-        if not healthOK then state.LastHealthHUDError=tostring(healthError) end
+        local updatePresentation=started>=nextPresentationUpdate
+        if updatePresentation then
+            nextPresentationUpdate=started+math.max(.05,math.min(.15,state.AverageFrameTime or 1/60))
+            local healthOK,healthError=pcall(healthHUD.Update)
+            if not healthOK then state.LastHealthHUDError=tostring(healthError) end
+        end
         if state.AutoRanges then state.AutoRanges.Update() end
-        if state.SkillVisuals then
+        if updatePresentation and state.SkillVisuals then
             local visualOK,visualError=pcall(state.SkillVisuals.Update)
             if not visualOK then state.LastVisualError=tostring(visualError) end
         end
@@ -5272,8 +5299,7 @@ end
 do
     local accumulator,busy,lastErrorAt=0,false,0
     bind(RunService.Heartbeat,function(delta)
-        state.AverageFrameTime+=(delta-state.AverageFrameTime)*.08
-        if (state.Enabled or state.SkillAura) and (delta>.25 or state.AverageFrameTime>.10) then state.LagPauseUntil=os.clock()+.5 end
+        frameTiming.Sample(delta,os.clock())
         if not state.Running or state.StopEverything or not gui.Parent then return end
         accumulator+=delta
         local period=state.SafeModePanic and .1 or (state.Enabled or state.SkillAura) and 1/60 or (state.AutoDodge and workspace:FindFirstChild("WaveDefenseStuff") and .04 or .1)
