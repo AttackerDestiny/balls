@@ -48,12 +48,35 @@ test("resume on A2 then finish alone", function()
     local b=fixture(a.saved,"A2"); b.blocked=copy(a.blocked); b.others={}; assert(b.start()); b.tick(0); b.tick(8)
     assert(not b.api.Active and b.blocks==0 and b.saved.Hops==1)
 end)
-test("same or visited job cannot cause another block", function()
-    local a=fixture(); a.start(); a.tick(8); a.tick(11)
-    local b=fixture(a.saved,"A1"); assert(not b.start() and b.blocks==0)
-    local t=copy(a.saved); t.SourceJob="A2"
-    local c=fixture(t,"A1"); assert(not c.start() and c.blocks==0 and not c.saved.Active)
+test("Same or visited jobs retry a confirmed rejoin without another block",function()
+    local a=fixture();a.start();a.tick(8);a.tick(11)
+    for _,visited in ipairs({false,true})do
+        local t=copy(a.saved);if visited then t.SourceJob="A2"end
+        local b=fixture(t,"A1");b.blocked[2]=true
+        assert(b.start());assert(b.hops==0)
+        b.tick(0);assert(b.hops==1 and b.blocks==0 and b.saved.Hops==2 and b.saved.StartedAt==a.saved.StartedAt)
+        assert(b.saved.SameServerReturns==1)
+    end
 end)
+test("Repeated same-server arrivals retain a three-return cap across executions",function()
+    local a=fixture();a.start();a.tick(8);a.tick(11);local t=a.saved
+    for n=1,3 do
+        local b=fixture(t,"A1");b.blocked[2]=true;assert(b.start());b.tick(.25*(n-1))
+        assert(b.hops==1 and b.blocks==0 and b.saved.SameServerReturns==n);t=b.saved
+    end
+    local stopped=fixture(t,"A1");stopped.blocked[2]=true
+    assert(not stopped.start()and stopped.hops==0 and stopped.blocks==0 and not stopped.saved.Active)
+end)
+test("Same-server recovery does not bypass confirmation, solo checks, or hop limits",function()
+    local a=fixture();a.start();a.tick(8);a.tick(11)
+    local b=fixture(copy(a.saved),"A1");assert(b.start());b.tick(2)
+    assert(b.hops==0 and b.blocks==0 and b.api.Retryable)
+    b=fixture(copy(a.saved),"A1");b.others={};assert(b.start());b.tick(0);b.tick(8)
+    assert(b.api.Outcome=="Safe"and b.hops==0)
+    local t=copy(a.saved);t.Hops=12;b=fixture(t,"A1");b.blocked[2]=true;assert(b.start());b.tick(2)
+    assert(not b.api.Active and b.hops==0 and b.blocks==0)
+end)
+
 test("server-local blocked list can be empty after a successful hop", function()
     local a=fixture(); a.start(); a.tick(8); a.tick(11)
     local b=fixture(a.saved,"A2"); assert(b.start() and b.api.Active and b.blocks==0)
@@ -134,7 +157,7 @@ test("resume restores settings before reading this server's block list", functio
     assert(b.start() and restored.Enabled and restored.AutoFarm and restored.SkillAura)
     local c=fixture(a.saved,"A1"); local sameRestored
     c.ctx.RestoreSettings=function(value) sameRestored=copy(value) end
-    assert(not c.start() and sameRestored.AutoFarm and not c.api.Active)
+    assert(c.start() and sameRestored.AutoFarm and c.api.Active)
 end)
 test("whitelisted users do not prevent a protected result", function()
     local f=fixture();f.ctx.IsAllowed=function()return true end;f.start();f.tick(0);f.tick(8)

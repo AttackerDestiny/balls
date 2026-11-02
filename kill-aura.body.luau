@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.fast-dispatch-mobile-v1.10.2"
-local VERSION="1.10.2"
+local BUILD="2026-11-02.same-server-recovery-v1.10.3"
+local VERSION="1.10.3"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6222,6 +6222,7 @@ return function(ctx)
     local api = {Active=false, Phase="Idle", Status="Ready", JobId=ctx.JobId}
     local generation, soloSince, settleUntil, hopDeadline = 0, nil, 0, nil
     local ticket, blocked, pendingPlayer, busy, retryBlockId
+    local sameServerReturn=false
     local function announce(message)
         api.Status = message
         if ctx.Notify then ctx.Notify(api) end
@@ -6268,6 +6269,8 @@ return function(ctx)
             and type(t.Hops) == "number" and t.Hops >= 0 and t.Hops <= 12 and t.Hops % 1 == 0
             and type(t.Visited) == "table" and type(t.Added) == "table"
             and type(t.SourceJob) == "string"
+            and (t.SameServerReturns==nil or (type(t.SameServerReturns)=="number"and t.SameServerReturns>=0
+                and t.SameServerReturns<=3 and t.SameServerReturns%1==0))
     end
     function api.Start(resume)
         if api.Active or busy then return false end
@@ -6277,16 +6280,18 @@ return function(ctx)
             return false
         end
         generation = generation + 1
-        retryBlockId=nil
+        retryBlockId=nil;sameServerReturn=false
         local token = generation
         api.Active, api.Phase = true, "Preparing"
         api.Outcome="Searching"
         announce("Checking block access and rejoin support...")
         local ok, message = pcall(function()
             if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features) end
-            if resume and resume.SourceJob == ctx.JobId then
-                ticket = resume
-                error("Rejoin returned the same server; search stopped")
+            if resume and (resume.SourceJob==ctx.JobId or resume.Visited[ctx.JobId])then
+                ticket=resume;api.Ticket=ticket
+                ticket.SameServerReturns=(ticket.SameServerReturns or 0)+1
+                assert(ticket.SameServerReturns<=3,"Same-server retry limit reached · matchmaking did not move you")
+                sameServerReturn=true
             end
             ctx.Preflight()
             if not live(token) then return end
@@ -6298,13 +6303,13 @@ return function(ctx)
             if not resume and ctx.SnapshotSettings then ticket.Features = ctx.SnapshotSettings() end
             -- GetBlockedUserIds contains only users present in this server.
             -- An absent player disappearing from it is expected after a hop.
-            if ticket.Visited[ctx.JobId] then error("Matchmaking returned a visited server; search stopped") end
+            if ticket.Visited[ctx.JobId]and not sameServerReturn then error("Matchmaking returned a visited server; search stopped") end
             api.Ticket = ticket
             persist()
             if not live(token) then return end
-            settleUntil, soloSince = ctx.Clock() + (ctx.SettleSeconds or 8), nil
+            settleUntil, soloSince = ctx.Clock() + (sameServerReturn and math.min(1,.25*(ticket.SameServerReturns-1))or (ctx.SettleSeconds or 8)), nil
             api.Phase = "Waiting"
-            announce("Checking this floor's population...")
+            announce(sameServerReturn and ("Returned to the same server · retry "..ticket.SameServerReturns.."/3 pending")or "Checking this floor's population...")
         end)
         if not ok and live(token) then api.Stop(readable(message)) end
         return ok and live(token)
@@ -6344,6 +6349,24 @@ return function(ctx)
         end
         soloSince = nil
         if ctx.Clock() < settleUntil then return end
+        if sameServerReturn then
+            if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return end
+            local confirmed=ctx.GetBlocked()
+            if not live(token)then return end
+            for _,person in ipairs(others)do
+                if confirmed[person.UserId]then
+                    ticket.LastBlockedUserId=person.UserId;hop(token);return
+                end
+            end
+            for _,person in ipairs(others)do
+                if person.UserId==ticket.LastBlockedUserId then
+                    error("Block was not confirmed after same-server return; no rejoin attempted")
+                end
+            end
+            -- The earlier target left. Any new block still follows the normal
+            -- native confirmation path; never add a block merely because we returned.
+            sameServerReturn=false
+        end
         if api.Phase == "Block settling" then
             if ctx.IsPresent(pendingPlayer) then
                 local confirmed = ctx.GetBlocked()
