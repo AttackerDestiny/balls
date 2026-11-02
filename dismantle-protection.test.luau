@@ -10,7 +10,7 @@ return function(source)
     local inventory=node("Inventory","Folder");local equip=node("Equip","Folder");local definitions=node("Items","Folder")
     local state={};state.IsAutoEquipmentCandidate=function(item)return item.Planned end
     local chunk=assert(loadstring(source.."\nreturn protected"))
-    setfenv(chunk,setmetatable({inventory=inventory,equip=equip,definitions=definitions,state=state},{__index=getfenv()}))
+    setfenv(chunk,setmetatable({inventory=inventory,equip=equip,definitions=definitions,state=state,profile={},nativeRestrictions={CanOfferDismantle=function(_,item)return not item.NativeDenied end}},{__index=getfenv()}))
     local protected=chunk()
     local function item(name)
         local n=node(name or "Sword","IntValue",1);n.Parent=inventory;return n
@@ -22,6 +22,7 @@ return function(source)
         n=item();n.Children[flag]=node(flag,"BoolValue",true);assert(protected(n),flag)
         n.Children[flag].Value=false;assert(not protected(n),flag)
     end
+    n=item();n.NativeDenied=true;assert(protected(n))
     n=item();n.Planned=true;assert(protected(n))
     assert(protected(item("Novice Sword"))and protected(item("Rare Aura")))
     n=item();n.Parent=nil;assert(protected(n))

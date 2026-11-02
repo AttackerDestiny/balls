@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.safe-mode-recovery-v1.9.1"
-local VERSION="1.9.1"
+local BUILD="2026-11-02.inventory-dismantle-v1.9.2"
+local VERSION="1.9.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8129,24 +8129,37 @@ end
     bind(button.Activated,state.RestartScript)
 end
 
--- Source-compatible new-drop dismantling, separately opt-in for each rarity.
+-- Inventory and new-drop dismantling, separately opt-in for each rarity.
 do
     local make=(function()
 -- BEGIN BUNDLED AUTO DISMANTLE
--- New-drop dismantling only, matching the supplied source. No inventory sweep.
+-- Existing inventory and new drops; bounded scans and send-time protections.
 return function(ctx)
     local api={}
     local allowed={Common=true,Uncommon=true,Rare=true}
     local queue,queued={},setmetatable({}, {__mode="k"})
     local head,tail,nextSend=1,0,0
+    local scan,scanIndex,scanAt=nil,1,0
+    local requested=setmetatable({}, {__mode="k"})
     function api.Add(item,now)
-        if queued[item]then return end
+        if queued[item]or requested[item]then return end
         local rarity=ctx.Rarity(item)
         if not allowed[rarity]or not ctx.Selected(rarity)then return end
         tail+=1;queue[tail]={Item=item,Rarity=rarity,Ready=now+.75};queued[item]=true
     end
+    function api.Scan(items,now)
+        scan,scanIndex,scanAt=items,1,now
+    end
     function api.Update(now)
-        if not ctx.Active()or ctx.Busy()or now<nextSend or head>tail then return end
+        if not ctx.Active()or ctx.Busy()then return end
+        if scan then
+            for _=1,32 do
+                local item=scan[scanIndex]
+                if not item then scan=nil;break end
+                scanIndex+=1;api.Add(item,scanAt)
+            end
+        end
+        if now<nextSend or head>tail then return end
         local entry=queue[head]
         if now<entry.Ready then return end
         queue[head]=nil;head+=1;queued[entry.Item]=nil
@@ -8155,21 +8168,24 @@ return function(ctx)
         if not ctx.Selected(rarity)or ctx.Rarity(item)~=rarity or ctx.Protected(item)then return end
         -- Native Event has no response. Send once, never retry destruction blindly.
         nextSend=now+.4
+        requested[item]=true
         local ok,reason=pcall(ctx.Send,item)
         ctx.Status(ok and ("Dismantle requested · "..item.Name)or ("Dismantle failed · "..tostring(reason)))
     end
-    function api.Clear()table.clear(queue);table.clear(queued);head,tail=1,0 end
+    function api.Clear()table.clear(queue);table.clear(queued);table.clear(requested);scan=nil;head,tail=1,0 end
     return api
 end
 
 -- END BUNDLED AUTO DISMANTLE
     end)()
     local ReplicatedStorage=game:GetService("ReplicatedStorage")
-    local inventory=ReplicatedStorage.Profiles[player.Name].Inventory
+    local profile=ReplicatedStorage.Profiles[player.Name]
+    local nativeRestrictions=require(ReplicatedStorage.Shared.Util.ItemRestrictions)
+    local inventory=profile.Inventory
     local equip=ReplicatedStorage.Profiles[player.Name].Equip
     local definitions=ReplicatedStorage.Database.Items
     local buttons={}
-    local status=uiLabel("AutoDismantleStatus","New drops only · equipped and protected items are kept",140,42)
+    local status=uiLabel("AutoDismantleStatus","Inventory + drops · equipped, locked and favorited items are kept",140,42)
     status.Parent=state.UI.Pages.Utility
     local function rarity(item)
         if item.Parent~=inventory or not item:IsA("IntValue")then return nil end
@@ -8179,6 +8195,7 @@ end
     end
     local function protected(item)
         if item.Parent~=inventory then return true end
+        if nativeRestrictions.CanOfferDismantle(profile,item)~=true then return true end
         if item.Name:find("Novice",1,true)or item.Name:find("Aura",1,true)then return true end
         for _,slot in ipairs(equip:GetChildren())do
             if slot:IsA("IntValue")and slot.Value==item.Value then return true end
@@ -8215,8 +8232,12 @@ end
         end
         bind(button.Activated,function()
             state.AutoDismantle[name]=not state.AutoDismantle[name];refresh();requestSave()
+            if state.AutoDismantle[name]then worker.Scan(inventory:GetChildren(),os.clock())end
         end)
         refresh()
+    end
+    if state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare then
+        worker.Scan(inventory:GetChildren(),os.clock())
     end
     bind(inventory.ChildAdded,function(item)
         if state.Running and not state.StopEverything then worker.Add(item,os.clock())end
