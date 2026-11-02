@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.max-trade-vel-v1.9.5"
-local VERSION="1.9.5"
+local BUILD="2026-11-02.trade-stacks-v1.9.6"
+local VERSION="1.9.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8282,15 +8282,16 @@ return function(ctx)
         return math.floor(math.min(math.floor(balance),110000000)*10/11)
     end
     local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
-    local pending,acceptedRequest
+    local pending,acceptedRequest,pendingAdd
     function api.Event(kind,data)
         if not ctx.Active()then trade=nil;return end
         if kind=="Request"then
             pending=data
             ctx.Status("Checking incoming trade request")
         elseif kind=="TradeChanged"or kind=="RequestAccept"then
+            if kind=="RequestAccept"then pendingAdd=nil;lastSignature=nil;lastAction=nil end
             trade=data;pending=nil;acceptedRequest=nil
-        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;pending=nil;acceptedRequest=nil;lastSignature=nil;lastAction=nil end
+        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;pending=nil;acceptedRequest=nil;pendingAdd=nil;lastSignature=nil;lastAction=nil end
     end
     function api.Update(now)
         if not ctx.Active()then return false end
@@ -8308,8 +8309,16 @@ return function(ctx)
         if not ctx.Allowed(trade[peer])then ctx.Status("Trade paused · partner is not whitelisted");return false end
         local desired,vel=ctx.Plan()
         local ours=trade[role.."Items"]or{}
-        local have={};local signature={tostring(vel)}
-        for _,item in ipairs(desired)do signature[#signature+1]="want:"..item.Value end
+        local have,wanted={},{}
+        local signature={tostring(vel)}
+        local remaining=128
+        for _,item in ipairs(desired)do
+            local count=ctx.Count and ctx.Count(item)or 1
+            count=type(count)=="number"and count==count and math.min(128,math.max(0,math.floor(count)))or 0
+            local amount=math.min(remaining,count)
+            if amount>0 then wanted[item]=amount;remaining=remaining-amount end
+            signature[#signature+1]="want:"..item.Value..":"..amount
+        end
         for _,side in ipairs({role,peer})do
             signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
             for _,v in ipairs(trade[side.."Items"]or{})do
@@ -8319,14 +8328,24 @@ return function(ctx)
         end
         local key=table.concat(signature,"|")
         if key~=lastSignature then lastSignature=key;stableSince=now;lastAction=nil end
-        for _,v in ipairs(ours)do if v.item then have[v.item]=true end end
-        local wanted={};for _,item in ipairs(desired)do wanted[item]=true end
-        for item in pairs(have)do if not wanted[item]then ctx.Status("Trade paused · offer contains an unselected item");return true end end
+        for _,v in ipairs(ours)do if v.item then have[v.item]=(have[v.item]or 0)+(v.count or 1)end end
+        for item,count in pairs(have)do
+            if not wanted[item]or count>wanted[item]then ctx.Status("Trade paused · offer exceeds selected quantity");return true end
+        end
+        if pendingAdd then
+            if (have[pendingAdd.Item]or 0)<pendingAdd.Expected then
+                ctx.Status("Waiting for stacked items to register");return true
+            end
+            pendingAdd=nil
+        end
         for _,item in ipairs(desired)do
-            if not have[item]then
-                local action="item:"..item.Value
-                if lastAction~=action then lastAction=action;ctx.Send("TradeAddItem",{item})end
-                ctx.Status("Adding "..item.Name);return true
+            local current=have[item]or 0
+            local amount=wanted[item]or 0
+            if current<amount then
+                local batch=math.min(4,amount-current)
+                pendingAdd={Item=item,Expected=current+batch}
+                for _=1,batch do ctx.Send("TradeAddItem",{item})end
+                ctx.Status("Adding "..item.Name.." · "..current.."/"..amount);return true
             end
         end
         if (trade[role.."Currency"]or 0)~=vel then
@@ -8372,7 +8391,7 @@ end
         list.Visible=not list.Visible
         if not list.Visible then return end
         for _,child in ipairs(list:GetChildren())do if child:IsA("GuiButton")then child:Destroy()end end
-        local groups={};for _,item in ipairs(inventory:GetChildren())do groups[item.Name]=(groups[item.Name]or 0)+1 end
+        local groups={};for _,item in ipairs(inventory:GetChildren())do local count=item:FindFirstChild("Count");groups[item.Name]=(groups[item.Name]or 0)+(count and count.Value or 1)end
         local names={};for name in pairs(groups)do names[#names+1]=name end;table.sort(names)
         for index,name in ipairs(names)do
             local button=uiButton("TradeItem"..index,"",index,30,list)
@@ -8410,6 +8429,7 @@ end
         return name and Players:FindFirstChild(name)or nil
     end
     worker=make({Player=player,Plan=plan,Pending=pendingRequest,
+        Count=function(item)local count=item:FindFirstChild("Count");return count and count.Value or 1 end,
         Active=function()return state.AutoTrade and state.Running and not state.StopEverything and not state.ModeratorBlocking end,
         Allowed=function(person)return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true end,
         Send=function(action,args)

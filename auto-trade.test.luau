@@ -40,5 +40,25 @@ return function(source)
         if offer<100000000 then assert((offer+1)*11>balance*10)end
     end
     assert(amounts.MaxVel(nil)==0 and amounts.MaxVel(0/0)==0 and amounts.MaxVel(math.huge)==0 and amounts.MaxVel(-5)==0)
+    for _,quantity in ipairs({1,64,128,200})do
+        local stack={Name="Legendary Upgrade Crystal",Value=123}
+        local snapshot={Requester=me,Partner=friend,RequesterItems={},PartnerItems={},RequesterCurrency=0,PartnerCurrency=0}
+        local requests,confirms=0,0
+        local stacks=make({Player=me,Active=function()return true end,Allowed=function(p)return p==friend end,
+            Plan=function()return {stack},0 end,Count=function()return quantity end,Status=function()end,
+            Send=function(action)
+                if action=="TradeAddItem"then requests+=1 elseif action=="TradeConfirm"then confirms+=1 end
+            end})
+        stacks.Event("RequestAccept",snapshot)
+        local target=math.min(quantity,128)
+        for tick=1,40 do
+            local before=requests;stacks.Update(tick)
+            assert(requests-before<=4 and requests<=target)
+            stacks.Update(tick+.1);assert(requests-before<=4,"No next batch without acknowledgment")
+            snapshot.RequesterItems={};for i=1,requests do snapshot.RequesterItems[i]={item=stack}end
+            stacks.Event("TradeChanged",snapshot)
+        end
+        assert(requests==target and confirms==1,"Stack fills to its quantity or the trade limit")
+    end
     print("PASS Trade: whitelist, exact items and Vel acknowledgment, stable offers, native confirm/accept stages, deduplication, changed offers, pause")
 end
