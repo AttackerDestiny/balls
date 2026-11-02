@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.trade-stacks-v1.9.6"
-local VERSION="1.9.6"
+local BUILD="2026-11-02.legendary-plus-trade-v1.9.7"
+local VERSION="1.9.7"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8275,6 +8275,10 @@ do
 -- BEGIN BUNDLED AUTO TRADE
 return function(ctx)
     local api={}
+    local highRarities={Legendary=true,Tribute=true,Burst=true}
+    function api.IncludesRarity(mode,rarity)
+        return (mode=="Legendary"or mode=="Tribute")and highRarities[rarity]==true
+    end
     function api.MaxVel(balance)
         if type(balance)~="number"or balance~=balance or balance==math.huge or balance<=0 then return 0 end
         -- Clamp before multiplying: avoids float division by 1.1 rounding exact
@@ -8372,6 +8376,7 @@ end
     local restrictions=require(rs.Shared.Util.ItemRestrictions)
     local parent=state.UI.Pages.Utility
     local status=uiLabel("TradeStatus","Uses Safe Mode whitelist · final acceptance is automatic",250,48);status.Parent=parent
+    if state.TradeMode=="Tribute"then state.TradeMode="Legendary";requestSave()end
     local toggle=uiButton("AutoTrade","",200,34,parent)
     local mode=uiButton("TradeMode","",210,34,parent)
     local items=uiButton("TradeItems","Select inventory items  v",220,34,parent)
@@ -8381,11 +8386,11 @@ end
     local function refresh()
         toggle.Text=state.AutoTrade and "Auto Trade · ON"or "Auto Trade · OFF"
         toggle.BackgroundColor3=state.AutoTrade and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
-        mode.Text="Offer mode · "..tostring(state.TradeMode)
+        mode.Text="Offer mode · "..(state.TradeMode=="Legendary"and "Legendary+"or "Selected")
     end
     bind(toggle.Activated,function()state.AutoTrade=not state.AutoTrade;refresh();requestSave()end)
     bind(mode.Activated,function()
-        state.TradeMode=state.TradeMode=="Selected"and "Legendary"or state.TradeMode=="Legendary"and "Tribute"or "Selected";refresh();requestSave()
+        state.TradeMode=state.TradeMode=="Selected"and "Legendary"or "Selected";refresh();requestSave()
     end)
     bind(items.Activated,function()
         list.Visible=not list.Visible
@@ -8405,7 +8410,7 @@ end
         for _,item in ipairs(inventory:GetChildren())do
             local definition=rs.Database.Items:FindFirstChild(item.Name)
             local rarity=definition and definition:FindFirstChild("Rarity")
-            local chosen=state.TradeMode=="Selected"and state.TradeItems[item.Name]or state.TradeMode~="Selected"and rarity and rarity.Value==state.TradeMode
+            local chosen=state.TradeMode=="Selected"and state.TradeItems[item.Name]or rarity and worker.IncludesRarity(state.TradeMode,rarity.Value)
             if chosen and item:IsA("IntValue")and not item:GetAttribute("Locked")and not item:GetAttribute("Favorited")and restrictions.CanOfferTrading(profile,item)==true then
                 local equipped=false
                 for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")and slot.Value==item.Value then equipped=true;break end end

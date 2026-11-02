@@ -60,5 +60,12 @@ return function(source)
         end
         assert(requests==target and confirms==1,"Stack fills to its quantity or the trade limit")
     end
+    local filters=make({})
+    for _,rarity in ipairs({"Legendary","Tribute","Burst"})do
+        assert(filters.IncludesRarity("Legendary",rarity))
+        assert(filters.IncludesRarity("Tribute",rarity),"Legacy Tribute settings use Legendary+")
+    end
+    for _,rarity in ipairs({"Common","Uncommon","Rare","Empty","Unknown"})do assert(not filters.IncludesRarity("Legendary",rarity))end
+    assert(not filters.IncludesRarity("Selected","Tribute"))
     print("PASS Trade: whitelist, exact items and Vel acknowledgment, stable offers, native confirm/accept stages, deduplication, changed offers, pause")
 end

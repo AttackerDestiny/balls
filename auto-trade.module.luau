@@ -1,5 +1,9 @@
 return function(ctx)
     local api={}
+    local highRarities={Legendary=true,Tribute=true,Burst=true}
+    function api.IncludesRarity(mode,rarity)
+        return (mode=="Legendary"or mode=="Tribute")and highRarities[rarity]==true
+    end
     function api.MaxVel(balance)
         if type(balance)~="number"or balance~=balance or balance==math.huge or balance<=0 then return 0 end
         -- Clamp before multiplying: avoids float division by 1.1 rounding exact
