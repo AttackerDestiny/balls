@@ -151,6 +151,14 @@ def main():
     plan_start=script.index("    local function plan()")
     trade_plan=script[plan_start:script.index("    local nativeTrade=",plan_start)]
     fixture += "assert(loadstring(" + quote(read("auto-trade-plan.test.luau")) + "))()(" + quote(trade_plan) + "," + quote(read("auto-trade.module.luau")) + ")\n"
+    away_start=script.index("function state.EscapeSafeRejoin()")
+    away=script[away_start:script.index("function state.ReleaseSafePanic()",away_start)]
+    fixture += "assert(loadstring(" + quote(read("safe-rejoin-away.test.luau")) + "))()(" + quote(away) + ")\n"
+    helper_start=adapter.index("    local function clearRejoinAway()")
+    away_helpers=adapter[helper_start:adapter.index("    local function fail(",helper_start)]
+    hop_start=adapter.index("        Hop=function()")
+    hop=adapter[hop_start:adapter.index("        Notify=function",hop_start)]
+    fixture += "assert(loadstring(" + quote(read("safe-rejoin-order.test.luau")) + "))()(" + quote(away_helpers) + "," + quote(hop) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

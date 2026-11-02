@@ -8,7 +8,7 @@ local function safeFixture()
     local search={Active=false,Outcome="Safe",Starts=0,Status="ready"}
     function search.Start()search.Starts=search.Starts+1;search.Active=true;search.Outcome="Searching";return true end
     function search.Update()end
-    function search.Stop()search.Active=false;search.Outcome="Stopped"end
+    function search.Stop(_,outcome)search.Active=false;search.Outcome=outcome or "Stopped"end
     local f={State=s,Search=search,People={},White={},Floor=11,FloorChanges=0,Saves=0,Clock=0}
     f.Api=safeFactory({Clock=function()return f.Clock end,State=s,Search=search,CurrentFloor=function()return f.Floor end,
         TargetFloor=function()return f.ProgressionTarget or s.SafeFloorId end,Players=function()return f.People end,
@@ -76,6 +76,21 @@ test("Account Progression protects the current floor without overwriting the Saf
     f.People={{UserId=3}};f.Api.Update();assert(f.Search.Starts==1 and f.Api.Seeking)
     f.State.AccountProgression=false;f.ProgressionTarget=nil;f.People={};f.Search.Active=false
     f.Api.Reset();f.Api.Update();assert(f.FloorChanges==1 and f.State.SafeFloorId==11)
+end)
+test("Protected population monitor releases a stalled search without another block",function()
+    local f=safeFixture();f.People={{UserId=2}};f.Api.Update();assert(f.Search.Active)
+    f.People={};f.Api.ObserveProtected();f.Clock=.59;f.Api.ObserveProtected();assert(f.Search.Active)
+    f.Clock=.6;f.Api.ObserveProtected();assert(not f.Search.Active and f.Search.Outcome=="Safe"and not f.Api.Seeking)
+    f.People={{UserId=3}};f.Api.Update();assert(f.Search.Starts==2)
+end)
+test("Protected monitoring cannot release an outsider or bypass unresolved whitelist",function()
+    local f=safeFixture();f.People={{UserId=2}};f.Api.Joined(f.People[1])
+    f.Api.ObserveProtected();f.Clock=10;f.Api.ObserveProtected();assert(f.State.SafePendingUserId==2)
+    f.People={};f.State.SafeWhitelistResolving=true;f.Api.ObserveProtected();assert(f.Status==nil)
+end)
+test("A failed resumed search is adopted rather than silently starting a fresh budget",function()
+    local f=safeFixture();f.People={{UserId=2}};f.Search.Outcome="Stopped";f.Search.Status="12-hop search limit reached"
+    f.Api.AdoptSearch();f.Api.Update();assert(f.Api.Paused and f.Search.Starts==0)
 end)
 local function multiFixture()
     local a={Id="a",PlaceId=11,Name="Boss",Floor={Name="11"}}

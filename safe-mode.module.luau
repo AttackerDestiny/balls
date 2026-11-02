@@ -5,6 +5,19 @@ return function(ctx)
     local retries,retryAt=0,nil
     local clock=ctx.Clock or os.clock
     local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
+    local protectedSince
+    function api.AdoptSearch()started=true end
+    function api.ObserveProtected()
+        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
+            or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
+        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
+        protectedSince=protectedSince or clock()
+        if clock()-protectedSince<.6 then return end
+        if search.Active then search.Stop("Protected · only you and whitelisted players","Safe")end
+        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+        if ctx.ReleasePanic then ctx.ReleasePanic()end
+        ctx.Status("Protected · only you and whitelisted players")
+    end
     function api.Update()
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
@@ -76,7 +89,7 @@ return function(ctx)
         end
     end
     function api.Reset()
-        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
         if search.Active then search.Stop("Safe Mode settings changed") end
         if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
     end

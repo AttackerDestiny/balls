@@ -51,7 +51,7 @@ return function(ctx)
         return result
     end
     local function save(ticket)
-        if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure();assert(ready,reason)end
+        if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure(true);assert(ready,reason)end
         writefile(path, HttpService:JSONEncode(ticket))
         return true
     end
@@ -231,7 +231,16 @@ end
 ]],state.ConfigPath,state.AutomationRunId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
         queue(code);queuedToken=state.AutomationRunId
     end
+    local function clearRejoinAway()
+        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.ServerTeleportStarted=false
+    end
+    local function escapeAfterRejoin()
+        if state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
+            if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
+        end
+    end
     local function fail(message)
+        clearRejoinAway()
         state.AutomationTeleporting=false
         if state.SoloServerSearch and state.SoloServerSearch.Active then state.SoloServerSearch.Stop("Automation stopped") end
         if state.MultiSpotController then state.MultiSpotController.Pause(tostring(message)) end
@@ -293,7 +302,10 @@ end
         Queue=function()state.QueueAutomation()end,
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
-            TeleportService:Teleport(game.PlaceId,player)
+            state.SafeRejoinRequested=true
+            local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
+            if not sent then clearRejoinAway();error(message)end
+            escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
@@ -382,6 +394,12 @@ end
         text=tostring(text or "");if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
         whitelistGeneration=whitelistGeneration+1;local token=whitelistGeneration
         safe.Reset();state.SafeWhitelistResolving=true
+        task.delay(12,function()
+            if token~=whitelistGeneration or not state.Running or not state.SafeWhitelistResolving then return end
+            whitelistGeneration=whitelistGeneration+1;state.SafeWhitelistResolving=false
+            state.SafeModeStatus="Whitelist lookup timed out · using the saved whitelist"
+            refresh()
+        end)
         task.spawn(function()
             local ids,count={},0
             local ok,message=pcall(function()
@@ -479,10 +497,11 @@ end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
+            escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
-        elseif stage==Enum.TeleportState.Failed then state.AutomationTeleporting=false end
+        elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()
@@ -491,7 +510,7 @@ end
         getgenv().SB2AutomationResumeFeatures=nil
         if features then restoreFeatures(features) end
         local ok,resume=pcall(readTicket);if queuedResume then ok,resume=true,queuedResume end
-        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume) end
+        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
         state.SaveNow()
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
@@ -506,6 +525,13 @@ end
             if not updated then fail(message) end
             refresh()
             task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
+        end
+    end)
+    -- Population monitoring stays responsive even while the search worker yields.
+    task.spawn(function()
+        while state.Running do
+            if safe.ObserveProtected then pcall(safe.ObserveProtected)end
+            task.wait(.25)
         end
     end)
     return api

@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.always-trade-consumables-v1.10.0"
-local VERSION="1.10.0"
+local BUILD="2026-11-02.safe-arrival-away-v1.10.1"
+local VERSION="1.10.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -26,6 +26,8 @@ return function(ctx)
     local api={Ready=false,Generation=0,Created={}}
     local folder="SB2Codex"
     local sourcePath=folder.."/kill-aura.luau"
+    local cachedPath=type(ctx.Build)=="string"and (folder.."/source_"..ctx.Build:gsub("[^%w_-]","_")..".luau")or sourcePath
+    api.SourcePath=cachedPath
     local saved=false
     local fullSource=type(ctx.Source)=="string"and ctx.Prefix..ctx.Source..ctx.Suffix or nil
     local function ensureFile(path,value)
@@ -33,7 +35,7 @@ return function(ctx)
             ctx.Write(path,value);api.Generation+=1;api.Created[path]=true
         end
     end
-    function api.Ensure()
+    function api.Ensure(verifySource)
         local ok,message=pcall(function()
             assert(type(ctx.IsFile)=="function"and type(ctx.Read)=="function"and type(ctx.Write)=="function",
                 "This executor does not provide file storage for automatic rejoin")
@@ -48,11 +50,16 @@ return function(ctx)
                 -- Executors without isfolder may report an existing folder as an error.
                 pcall(ctx.MakeFolder,folder)
             end
-            if not saved or not ctx.IsFile(sourcePath)then
+            if verifySource or not saved or not ctx.IsFile(sourcePath)then
                 if not ctx.IsFile(sourcePath)or ctx.Read(sourcePath)~=fullSource then
                     ctx.Write(sourcePath,fullSource);api.Generation+=1;api.Created[sourcePath]=true
                 end
                 saved=true
+            end
+            if cachedPath~=sourcePath and (verifySource or not ctx.IsFile(cachedPath))then
+                if not ctx.IsFile(cachedPath)or ctx.Read(cachedPath)~=fullSource then
+                    ctx.Write(cachedPath,fullSource);api.Generation+=1;api.Created[cachedPath]=true
+                end
             end
             ensureFile(folder.."/settings_"..ctx.UserId..".json",ctx.Encode({Version=1}))
             ensureFile(folder.."/solo-search_"..ctx.UserId..".json",ctx.Encode({Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId}))
@@ -61,12 +68,12 @@ return function(ctx)
         api.Ready=ok;api.Error=not ok and tostring(message)or nil
         return ok,api.Error
     end
-    api.Ensure()
+    api.Ensure(true)
     return api
 end
 
 -- END BUNDLED STORAGE BOOTSTRAP
-end)()({Source=embeddedSource,UserId=player.UserId,PlaceId=game.PlaceId,
+end)()({Source=embeddedSource,Build=BUILD,UserId=player.UserId,PlaceId=game.PlaceId,
     Prefix="local SB2_SOURCE=["..string.rep("=",12).."[\n",
     Suffix="]"..string.rep("=",12).."]\nreturn assert(loadstring(SB2_SOURCE, \"SB2\"))(SB2_SOURCE)\n",
     IsFile=isfile,Read=readfile,Write=writefile,IsFolder=isfolder,MakeFolder=makefolder,
@@ -401,7 +408,7 @@ local state = {
     AverageFrameTime = 1 / 60, AverageLoopCost = 0, TargetScans = 0,
     Moving = false, FollowTarget = nil, MovementStatus = "Auto farm is off",
     ConfigPath = configPath, ConfigLoadError = configLoadError, ConfigLoadedFromDisk = configData.Version == 1,
-    SavedScriptPath = configFolder .. "/kill-aura.luau",StorageBootstrap=storageBootstrap,
+    SavedScriptPath = storageBootstrap.SourcePath or (configFolder .. "/kill-aura.luau"),StorageBootstrap=storageBootstrap,
     MiscSkillEnabled=false, SelectedMiscSkill=type(restore.SelectedMiscSkill)=="string" and restore.SelectedMiscSkill or "Cursed Enhancement",
     MiscSkillRequests=0, MiscSkillCasts=0, MiscCastRunning=false, MiscReserveStamina=false,
     SkillPerWeapon=preference("SkillPerWeapon",{}), SkillPerWeaponVersion=preference("SkillPerWeaponVersion",0), SkillWeaponVersion=0,
@@ -6176,9 +6183,11 @@ function state.PanicToSpawn()
         end
         state.SafePanicSpawnPart=pad
     end
-    local position
-    if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
-    elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0) end
+    local position=state.AutomationTeleporting and not state.ModeratorBlocking and state.SafeRejoinAway or nil
+    if not position then
+        if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
+        elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0) end
+    end
     if not position then return false end
     if root~=movementRoot then stopMovement(nil,true) end
     ensureMovementController(character,root,humanoid,position)
@@ -6187,7 +6196,18 @@ function state.PanicToSpawn()
     state.TravelHold=true;state.TravelHoldPosition=position;state.SafePanicPosition=position
     return true
 end
+function state.EscapeSafeRejoin()
+    if not state.SafeRejoinRequested or not state.AutomationTeleporting or state.StopEverything or state.ModeratorBlocking then return false end
+    if not state.SafeRejoinAway then
+        local c=player.Character;local root=c and c:FindFirstChild("HumanoidRootPart")
+        local origin=state.SafePanicPosition or (root and root.Position)
+        if not origin then return false end
+        state.SafeRejoinAway=origin+Vector3.new(10000,0,0)
+    end
+    return state.PanicToSpawn()
+end
 function state.ReleaseSafePanic()
+    state.SafeRejoinRequested=false;state.SafeRejoinAway=nil
     if not state.SafeModePanic then return end
     state.SafeModePanic=false;state.SafePanicPosition=nil
     stopMovement("Safe Mode · server protected",true)
@@ -6427,6 +6447,19 @@ return function(ctx)
     local retries,retryAt=0,nil
     local clock=ctx.Clock or os.clock
     local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
+    local protectedSince
+    function api.AdoptSearch()started=true end
+    function api.ObserveProtected()
+        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
+            or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
+        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
+        protectedSince=protectedSince or clock()
+        if clock()-protectedSince<.6 then return end
+        if search.Active then search.Stop("Protected · only you and whitelisted players","Safe")end
+        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+        if ctx.ReleasePanic then ctx.ReleasePanic()end
+        ctx.Status("Protected · only you and whitelisted players")
+    end
     function api.Update()
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
@@ -6498,7 +6531,7 @@ return function(ctx)
         end
     end
     function api.Reset()
-        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
         if search.Active then search.Stop("Safe Mode settings changed") end
         if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
     end
@@ -6978,7 +7011,7 @@ return function(ctx)
         return result
     end
     local function save(ticket)
-        if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure();assert(ready,reason)end
+        if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure(true);assert(ready,reason)end
         writefile(path, HttpService:JSONEncode(ticket))
         return true
     end
@@ -7158,7 +7191,16 @@ end
 ]],state.ConfigPath,state.AutomationRunId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
         queue(code);queuedToken=state.AutomationRunId
     end
+    local function clearRejoinAway()
+        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.ServerTeleportStarted=false
+    end
+    local function escapeAfterRejoin()
+        if state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
+            if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
+        end
+    end
     local function fail(message)
+        clearRejoinAway()
         state.AutomationTeleporting=false
         if state.SoloServerSearch and state.SoloServerSearch.Active then state.SoloServerSearch.Stop("Automation stopped") end
         if state.MultiSpotController then state.MultiSpotController.Pause(tostring(message)) end
@@ -7220,7 +7262,10 @@ end
         Queue=function()state.QueueAutomation()end,
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
-            TeleportService:Teleport(game.PlaceId,player)
+            state.SafeRejoinRequested=true
+            local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
+            if not sent then clearRejoinAway();error(message)end
+            escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
@@ -7309,6 +7354,12 @@ end
         text=tostring(text or "");if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
         whitelistGeneration=whitelistGeneration+1;local token=whitelistGeneration
         safe.Reset();state.SafeWhitelistResolving=true
+        task.delay(12,function()
+            if token~=whitelistGeneration or not state.Running or not state.SafeWhitelistResolving then return end
+            whitelistGeneration=whitelistGeneration+1;state.SafeWhitelistResolving=false
+            state.SafeModeStatus="Whitelist lookup timed out · using the saved whitelist"
+            refresh()
+        end)
         task.spawn(function()
             local ids,count={},0
             local ok,message=pcall(function()
@@ -7406,10 +7457,11 @@ end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
+            escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
-        elseif stage==Enum.TeleportState.Failed then state.AutomationTeleporting=false end
+        elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()
@@ -7418,7 +7470,7 @@ end
         getgenv().SB2AutomationResumeFeatures=nil
         if features then restoreFeatures(features) end
         local ok,resume=pcall(readTicket);if queuedResume then ok,resume=true,queuedResume end
-        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume) end
+        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
         state.SaveNow()
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
@@ -7433,6 +7485,13 @@ end
             if not updated then fail(message) end
             refresh()
             task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
+        end
+    end)
+    -- Population monitoring stays responsive even while the search worker yields.
+    task.spawn(function()
+        while state.Running do
+            if safe.ObserveProtected then pcall(safe.ObserveProtected)end
+            task.wait(.25)
         end
     end)
     return api
