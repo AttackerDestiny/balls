@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.pending-trade-requests-v1.9.4"
-local VERSION="1.9.4"
+local BUILD="2026-11-02.max-trade-vel-v1.9.5"
+local VERSION="1.9.5"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -238,7 +238,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoTrade","TradeMode","TradeItems","TradeVel","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
@@ -321,7 +321,7 @@ local restore = {
     Radius=30,
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
-    AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),TradeVel=preference("TradeVel",0),
+    AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
@@ -390,7 +390,7 @@ local state = {
     BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
-    AutoTrade=restore.AutoTrade,TradeMode=restore.TradeMode,TradeItems=type(restore.TradeItems)=="table"and restore.TradeItems or {},TradeVel=tonumber(restore.TradeVel)or 0,
+    AutoTrade=restore.AutoTrade,TradeMode=restore.TradeMode,TradeItems=type(restore.TradeItems)=="table"and restore.TradeItems or {},
     AutoDismantle=type(restore.AutoDismantle)=="table"and restore.AutoDismantle or {},
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
@@ -951,7 +951,7 @@ local function settingsPayload()
     local position = panel.Position
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,TradeVel=state.TradeVel,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -8275,6 +8275,12 @@ do
 -- BEGIN BUNDLED AUTO TRADE
 return function(ctx)
     local api={}
+    function api.MaxVel(balance)
+        if type(balance)~="number"or balance~=balance or balance==math.huge or balance<=0 then return 0 end
+        -- Clamp before multiplying: avoids float division by 1.1 rounding exact
+        -- balances down (e.g. 660000 must permit an offer of 600000).
+        return math.floor(math.min(math.floor(balance),110000000)*10/11)
+    end
     local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
     local pending,acceptedRequest
     function api.Event(kind,data)
@@ -8352,7 +8358,7 @@ end
     local items=uiButton("TradeItems","Select inventory items  v",220,34,parent)
     local list=create("ScrollingFrame",{Name="TradeItemOptions",Visible=false,LayoutOrder=225,Size=UDim2.new(1,0,0,200),BackgroundTransparency=1,ScrollBarThickness=3,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},parent)
     create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},list)
-    local vel=create("TextBox",{Name="TradeVel",Text=tostring(state.TradeVel),PlaceholderText="Vel to offer (0 = none)",ClearTextOnFocus=false,LayoutOrder=240,Size=UDim2.new(1,0,0,34),BackgroundColor3=Color3.fromRGB(38,41,56),TextColor3=Color3.fromRGB(225,228,241),Font=Enum.Font.Gotham,TextSize=12},parent);corner(vel,8)
+    local velInfo=uiLabel("TradeVelInfo","Vel: maximum affordable · includes 10% tax",240,34);velInfo.Parent=parent
     local function refresh()
         toggle.Text=state.AutoTrade and "Auto Trade · ON"or "Auto Trade · OFF"
         toggle.BackgroundColor3=state.AutoTrade and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
@@ -8361,11 +8367,6 @@ end
     bind(toggle.Activated,function()state.AutoTrade=not state.AutoTrade;refresh();requestSave()end)
     bind(mode.Activated,function()
         state.TradeMode=state.TradeMode=="Selected"and "Legendary"or state.TradeMode=="Legendary"and "Tribute"or "Selected";refresh();requestSave()
-    end)
-    bind(vel.FocusLost,function()
-        local value=tonumber(vel.Text)
-        state.TradeVel=value and value==value and math.clamp(math.floor(value),0,100000000)or 0
-        vel.Text=tostring(state.TradeVel);requestSave()
     end)
     bind(items.Activated,function()
         list.Visible=not list.Visible
@@ -8379,6 +8380,7 @@ end
             label();bind(button.Activated,function()state.TradeItems[name]=not state.TradeItems[name];label();requestSave()end)
         end
     end)
+    local worker
     local function plan()
         local result={}
         for _,item in ipairs(inventory:GetChildren())do
@@ -8393,7 +8395,7 @@ end
         end
         table.sort(result,function(a,b)return a.Value<b.Value end)
         local balance=profile.Stats:FindFirstChild("Vel")
-        return result,math.min(state.TradeVel,math.floor((balance and balance.Value or 0)/1.1))
+        return result,worker.MaxVel(balance and balance.Value or 0)
     end
     local nativeTrade=require(rs.CardinalClient.MainModule.Services.UI.Trade)
     local function pendingRequest()
@@ -8407,7 +8409,7 @@ end
         local name=label.Text:match("^([%w_]+) wants to trade with you$")
         return name and Players:FindFirstChild(name)or nil
     end
-    local worker=make({Player=player,Plan=plan,Pending=pendingRequest,
+    worker=make({Player=player,Plan=plan,Pending=pendingRequest,
         Active=function()return state.AutoTrade and state.Running and not state.StopEverything and not state.ModeratorBlocking end,
         Allowed=function(person)return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true end,
         Send=function(action,args)

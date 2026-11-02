@@ -32,5 +32,13 @@ return function(source)
     visible=friend;recovery.Update(4);assert(#recovered==2)
     visible=nil;recovery.Event("RequestAccept",{Requester=me,Partner=friend,RequesterItems={},PartnerItems={},RequesterCurrency=0,PartnerCurrency=1})
     recovery.Update(5);recovery.Update(8);assert(recovered[3]=="TradeConfirm","Accepted snapshot starts automation before later trade changes")
+    local amounts=make({})
+    for _,case in ipairs({{0,0},{1,0},{10,9},{11,10},{110000,100000},{660000,600000},{109999999,99999999},{110000000,100000000},{999999999,100000000}})do
+        local balance,expected=case[1],case[2]
+        local offer=amounts.MaxVel(balance)
+        assert(offer==expected and offer*11<=balance*10 and offer<=100000000)
+        if offer<100000000 then assert((offer+1)*11>balance*10)end
+    end
+    assert(amounts.MaxVel(nil)==0 and amounts.MaxVel(0/0)==0 and amounts.MaxVel(math.huge)==0 and amounts.MaxVel(-5)==0)
     print("PASS Trade: whitelist, exact items and Vel acknowledgment, stable offers, native confirm/accept stages, deduplication, changed offers, pause")
 end

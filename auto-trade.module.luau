@@ -1,5 +1,11 @@
 return function(ctx)
     local api={}
+    function api.MaxVel(balance)
+        if type(balance)~="number"or balance~=balance or balance==math.huge or balance<=0 then return 0 end
+        -- Clamp before multiplying: avoids float division by 1.1 rounding exact
+        -- balances down (e.g. 660000 must permit an offer of 600000).
+        return math.floor(math.min(math.floor(balance),110000000)*10/11)
+    end
     local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
     local pending,acceptedRequest
     function api.Event(kind,data)
