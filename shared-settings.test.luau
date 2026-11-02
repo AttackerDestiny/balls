@@ -31,4 +31,27 @@ return function(source)
     local c=make(context({Version=1}))
     assert(c.Values.SafeMode==false and c.Values.SafeWhitelistText=="Updated")
     print("PASS Unchanged account saves do not overwrite another account's newer shared preferences")
+    -- Simulate two clients loaded before either changes settings.
+    files["SB2Codex/shared-settings.json"]=encode({Version=1,SafeMode=false,
+        SafeWhitelistText="Old",SafeWhitelistIds={['1']=true},AutoFarm=false})
+    local one=make(context({Version=1}));local two=make(context({Version=1}))
+    one.Save({SafeMode=true,SafeWhitelistText="TrustedNew",SafeWhitelistIds={['99']=true},AutoFarm=false})
+    two.Save({SafeMode=false,SafeWhitelistText="Old",SafeWhitelistIds={['1']=true},AutoFarm=true})
+    local three=make(context({Version=1}))
+    assert(three.Values.SafeMode and three.Values.SafeWhitelistText=="TrustedNew"and three.Values.SafeWhitelistIds['99'])
+    assert(three.Values.AutoFarm==true)
+    two.Save({SafeMode=false,SafeWhitelistText="Old",SafeWhitelistIds={['1']=true},AutoFarm=false})
+    three=make(context({Version=1}));assert(three.Values.SafeMode and three.Values.AutoFarm==false)
+    print("PASS Another account changing unrelated options preserves shared Safe Mode and whitelist")
+    -- Changing Safe Mode intentionally still writes the new value, including OFF.
+    one.Save({SafeMode=false,SafeWhitelistText="TrustedNew",SafeWhitelistIds={['99']=true},AutoFarm=false})
+    three=make(context({Version=1}));assert(three.Values.SafeMode==false and three.Values.SafeWhitelistIds['99'])
+    local before=writes
+    one.Save({SafeMode=false,SafeWhitelistText="TrustedNew",SafeWhitelistIds={['99']=true},AutoFarm=false})
+    assert(writes==before)
+    files["SB2Codex/shared-settings.json"]=nil
+    one.Save({SafeMode=false,SafeWhitelistText="TrustedNew",SafeWhitelistIds={['99']=true},AutoFarm=false})
+    assert(files["SB2Codex/shared-settings.json"]and writes==before+1)
+    print("PASS Explicit Safe Mode OFF saves, unchanged preferences skip writes, missing shared file recovers")
+
 end

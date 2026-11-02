@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-01.auto-dismantle-v1.8.9"
-local VERSION="1.8.9"
+local BUILD="2026-11-02.shared-safe-autosave-v1.9.0"
+local VERSION="1.9.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -275,11 +275,24 @@ return function(ctx)
         end
         api.Values=select(seed);ctx.Write(path,ctx.Encode(api.Values))
     end
-    local last=ctx.Encode(api.Values)
+    local function signatures(value)
+        local result={}
+        for _,key in ipairs(keys)do result[key]=ctx.Encode({Value=value[key]})end
+        return result
+    end
+    -- Keep this runtime's last local values, separately from other accounts' edits.
+    local last=signatures(api.Values)
     function api.Save(value)
-        local shared=select(value);local encoded=ctx.Encode(shared)
-        if encoded~=last or not ctx.IsFile(path)then ctx.Write(path,encoded);last=encoded end
-        api.Values=shared
+        local shared=select(value)
+        local current=signatures(shared)
+        local changed={}
+        for _,key in ipairs(keys)do if current[key]~=last[key]then changed[#changed+1]=key end end
+        local exists=ctx.IsFile(path)
+        if #changed==0 and exists then return end
+        local merged=exists and select(read(path))or select(api.Values)
+        for _,key in ipairs(changed)do merged[key]=shared[key]end
+        ctx.Write(path,ctx.Encode(merged))
+        last=current;api.Values=merged
     end
     return api
 end
