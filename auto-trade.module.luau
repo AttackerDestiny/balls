@@ -40,12 +40,11 @@ return function(ctx)
         local ours=trade[role.."Items"]or{}
         local have,wanted={},{}
         local signature={tostring(vel)}
-        local remaining=128
         for _,item in ipairs(desired)do
             local count=ctx.Count and ctx.Count(item)or 1
-            count=type(count)=="number"and count==count and math.min(128,math.max(0,math.floor(count)))or 0
-            local amount=math.min(remaining,count)
-            if amount>0 then wanted[item]=amount;remaining=remaining-amount end
+            count=type(count)=="number"and count==count and count~=math.huge and math.max(0,math.floor(count))or 0
+            local amount=count
+            if amount>0 then wanted[item]=amount end
             signature[#signature+1]="want:"..item.Value..":"..amount
         end
         for _,side in ipairs({role,peer})do
@@ -63,7 +62,7 @@ return function(ctx)
         end
         if pendingAdd then
             if (have[pendingAdd.Item]or 0)<pendingAdd.Expected then
-                ctx.Status("Waiting for stacked items to register");return true
+                ctx.Status(now-pendingAdd.At>=10 and "Server has not acknowledged the batch · trade may be full · automatic acceptance paused"or "Waiting for stacked items to register");return true
             end
             pendingAdd=nil
         end
@@ -72,7 +71,7 @@ return function(ctx)
             local amount=wanted[item]or 0
             if current<amount then
                 local batch=math.min(4,amount-current)
-                pendingAdd={Item=item,Expected=current+batch}
+                pendingAdd={Item=item,Expected=current+batch,At=now}
                 for _=1,batch do ctx.Send("TradeAddItem",{item})end
                 ctx.Status("Adding "..item.Name.." · "..current.."/"..amount);return true
             end

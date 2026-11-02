@@ -40,7 +40,7 @@ return function(source)
         if offer<100000000 then assert((offer+1)*11>balance*10)end
     end
     assert(amounts.MaxVel(nil)==0 and amounts.MaxVel(0/0)==0 and amounts.MaxVel(math.huge)==0 and amounts.MaxVel(-5)==0)
-    for _,quantity in ipairs({1,64,128,200})do
+    for _,quantity in ipairs({1,64,128,129,200,512})do
         local stack={Name="Legendary Upgrade Crystal",Value=123}
         local snapshot={Requester=me,Partner=friend,RequesterItems={},PartnerItems={},RequesterCurrency=0,PartnerCurrency=0}
         local requests,confirms=0,0
@@ -50,15 +50,15 @@ return function(source)
                 if action=="TradeAddItem"then requests+=1 elseif action=="TradeConfirm"then confirms+=1 end
             end})
         stacks.Event("RequestAccept",snapshot)
-        local target=math.min(quantity,128)
-        for tick=1,40 do
+        local target=quantity
+        for tick=1,math.ceil(quantity/4)+4 do
             local before=requests;stacks.Update(tick)
             assert(requests-before<=4 and requests<=target)
             stacks.Update(tick+.1);assert(requests-before<=4,"No next batch without acknowledgment")
             snapshot.RequesterItems={};for i=1,requests do snapshot.RequesterItems[i]={item=stack}end
             stacks.Event("TradeChanged",snapshot)
         end
-        assert(requests==target and confirms==1,"Stack fills to its quantity or the trade limit")
+        assert(requests==target and confirms==1,"Stack fills to its full quantity without a 128-unit cutoff")
     end
     local filters=make({})
     for _,rarity in ipairs({"Legendary","Tribute","Burst"})do
@@ -67,5 +67,24 @@ return function(source)
     end
     for _,rarity in ipairs({"Common","Uncommon","Rare","Empty","Unknown"})do assert(not filters.IncludesRarity("Legendary",rarity))end
     assert(not filters.IncludesRarity("Selected","Tribute"))
+    local multiCalls,confirmCalls=0,0
+    local a,b={Name="A",Value=10},{Name="B",Value=11}
+    local snap={Requester=me,Partner=friend,RequesterItems={},PartnerItems={},RequesterCurrency=0,PartnerCurrency=0}
+    local multi=make({Player=me,Active=function()return true end,Allowed=function(p)return p==friend end,
+        Plan=function()return {a,b},0 end,Count=function()return 100 end,Status=function()end,
+        Send=function(action,args)
+            if action=="TradeAddItem"then multiCalls+=1;snap.RequesterItems[#snap.RequesterItems+1]={item=args[1]}
+            elseif action=="TradeConfirm"then confirmCalls+=1 end
+        end})
+    multi.Event("RequestAccept",snap)
+    for tick=1,55 do multi.Update(tick);multi.Event("TradeChanged",snap)end
+    assert(multiCalls==200 and confirmCalls==1,"The total across stacks can exceed 128")
+    local attempts,confirmed,status=0,0,""
+    local full=make({Player=me,Active=function()return true end,Allowed=function(p)return p==friend end,
+        Plan=function()return {a},0 end,Count=function()return 200 end,Status=function(text)status=text end,
+        Send=function(action)if action=="TradeAddItem"then attempts+=1 elseif action=="TradeConfirm"then confirmed+=1 end end})
+    full.Event("RequestAccept",{Requester=me,Partner=friend,RequesterItems={},PartnerItems={}})
+    full.Update(0);full.Update(20)
+    assert(attempts==4 and confirmed==0 and status:find("not acknowledged"),"A full or unresponsive server cannot cause spam or partial auto-acceptance")
     print("PASS Trade: whitelist, exact items and Vel acknowledgment, stable offers, native confirm/accept stages, deduplication, changed offers, pause")
 end
