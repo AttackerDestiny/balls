@@ -312,7 +312,7 @@ end
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if state.AccountProgression or state.ModeratorBlocking then return false end
+            if state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")

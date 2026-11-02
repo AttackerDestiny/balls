@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.legendary-plus-trade-v1.9.7"
-local VERSION="1.9.7"
+local BUILD="2026-11-02.trade-position-hold-v1.9.8"
+local VERSION="1.9.8"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2231,7 +2231,7 @@ bind(farmToggle.Activated, function() state.SetAutoFarm(not state.AutoFarm,"UI t
 state.SetAutoFarm(false)
 refreshMobIndex()
 local function validMob(mob, mobs)
-    if state.ModeratorBlocking then return nil end
+    if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     if not mob or mob.Parent ~= mobs then return nil end
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
         or mob~=state.ProgressionBossMob)then return nil end
@@ -5311,8 +5311,59 @@ end
 -- END BUNDLED PERFORMANCE BUDGET
 end)()(state)
 
+do
+    local make=(function()
+-- BEGIN BUNDLED TRADE HOLD
+return function(ctx)
+    local api={}
+    local root,anchor,owned
+    function api.Update()
+        if ctx.Blocked()then root,anchor,owned=nil,nil,false;return end
+        if not ctx.Active()then
+            if owned then ctx.Release()end
+            root,anchor,owned=nil,nil,false;return
+        end
+        local current=ctx.Root()
+        if current~=root or not owned then
+            root=current;anchor=nil;owned=true
+            if root then anchor=ctx.Anchor(root)end
+            ctx.Pause()
+        end
+        if root and anchor then ctx.Hold(anchor)end
+    end
+    return api
+end
+
+-- END BUNDLED TRADE HOLD
+    end)()
+    state.TradeHold=make({
+        Active=function()return state.AutoTradeBusy==true end,
+        Blocked=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutoJoinFriendHolding or state.AutomationTeleporting end,
+        Root=function()
+            local c=player.Character;local h=c and c:FindFirstChildOfClass("Humanoid")
+            return h and h.Health>0 and c:FindFirstChild("HumanoidRootPart")or nil
+        end,
+        Anchor=function(root)
+            local p=root.Position
+            return Vector3.new(p.X,waveDodge.FloorY(p),p.Z)
+        end,
+        Pause=function()
+            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
+            finishAttackBurst("Trading");stopSword(true)
+            if state.CancelSkillAura then state.CancelSkillAura("Trading")end
+            if state.CancelMiscSkill then state.CancelMiscSkill()end
+            if state.MultiSpotController then state.MultiSpotController.Reset()end
+            if state.ProgressionController then state.ProgressionController.Reset()end
+            state.FollowTarget=nil
+            stopMovement("Trading · holding 20 studs below ground",true)
+        end,
+        Hold=function(anchor)waveDodge.Idle(anchor)end,
+        Release=function()stopMovement("Trade ended · resuming farming",true);nextMovementUpdate=0;nextAcquisition=0 end})
+end
+
 local nextPresentationUpdate=0
 local function runFrame()
+        if state.TradeHold then state.TradeHold.Update()end
         if state.StopEverything then return end
         if state.ModeratorBlocking then
             if state.PanicToSpawn then state.PanicToSpawn()end
@@ -5322,15 +5373,7 @@ local function runFrame()
             if state.PanicToSpawn then state.PanicToSpawn() end
             return
         end
-        if state.AutoTradeBusy then
-            if not state.TradeCombatPaused then
-                state.TradeCombatPaused=true;finishAttackBurst("Trading");stopSword(true)
-                if state.CancelSkillAura then state.CancelSkillAura("Trading")end
-                stopMovement("Trading",true)
-            end
-            return
-        end
-        state.TradeCombatPaused=false
+        if state.AutoTradeBusy then return end
         local started = os.clock()
         if state.ArenaFloat then state.ArenaFloat.Update(started) end
         state.PerformanceBudget.Update(started)
@@ -7196,7 +7239,7 @@ end
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if state.AccountProgression or state.ModeratorBlocking then return false end
+            if state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
@@ -7960,7 +8003,7 @@ return function(ctx)
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            return root and not root.Anchored and humanoid and humanoid.Health>0
+            return not state.AutoTradeBusy and root and not root.Anchored and humanoid and humanoid.Health>0
                 and not state.SafeModePanic and not state.AutomationTeleporting and not state.Dodging
                 and not state.Recovering and not state.ProgressionEquipping and not (state.SafeController and state.SafeController.Seeking)
                 and (not state.TravelBusy or state.ProgressionTravelOwned)
@@ -8447,7 +8490,7 @@ end
     bind(rs.Event.OnClientEvent,function(route,args)
         if route=="UI"and type(args)=="table"and args[1]=="Trade"then
             worker.Event(args[2],args[3])
-            if args[2]=="TradeChanged"and state.AutoTrade then state.AutoTradeBusy=true end
+            if (args[2]=="TradeChanged"or args[2]=="RequestAccept")and state.AutoTrade then state.AutoTradeBusy=true end
             if args[2]=="TradeCancel"or args[2]=="TradeCompleted"then state.AutoTradeBusy=false end
         end
     end)

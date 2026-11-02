@@ -183,7 +183,7 @@ return function(ctx)
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            return root and not root.Anchored and humanoid and humanoid.Health>0
+            return not state.AutoTradeBusy and root and not root.Anchored and humanoid and humanoid.Health>0
                 and not state.SafeModePanic and not state.AutomationTeleporting and not state.Dodging
                 and not state.Recovering and not state.ProgressionEquipping and not (state.SafeController and state.SafeController.Seeking)
                 and (not state.TravelBusy or state.ProgressionTravelOwned)
