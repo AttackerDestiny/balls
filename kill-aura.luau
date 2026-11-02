@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.inventory-dismantle-v1.9.2"
-local VERSION="1.9.2"
+local BUILD="2026-11-02.auto-trade-v1.9.3"
+local VERSION="1.9.3"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -238,7 +238,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoTrade","TradeMode","TradeItems","TradeVel","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition"}
@@ -321,6 +321,7 @@ local restore = {
     Radius=30,
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
+    AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),TradeVel=preference("TradeVel",0),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
@@ -389,6 +390,7 @@ local state = {
     BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
+    AutoTrade=restore.AutoTrade,TradeMode=restore.TradeMode,TradeItems=type(restore.TradeItems)=="table"and restore.TradeItems or {},TradeVel=tonumber(restore.TradeVel)or 0,
     AutoDismantle=type(restore.AutoDismantle)=="table"and restore.AutoDismantle or {},
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
@@ -949,7 +951,7 @@ local function settingsPayload()
     local position = panel.Position
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,TradeVel=state.TradeVel,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -5320,6 +5322,15 @@ local function runFrame()
             if state.PanicToSpawn then state.PanicToSpawn() end
             return
         end
+        if state.AutoTradeBusy then
+            if not state.TradeCombatPaused then
+                state.TradeCombatPaused=true;finishAttackBurst("Trading");stopSword(true)
+                if state.CancelSkillAura then state.CancelSkillAura("Trading")end
+                stopMovement("Trading",true)
+            end
+            return
+        end
+        state.TradeCombatPaused=false
         local started = os.clock()
         if state.ArenaFloat then state.ArenaFloat.Update(started) end
         state.PerformanceBudget.Update(started)
@@ -7851,7 +7862,7 @@ return function(ctx)
     end
     local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
         Active=gearActive,
-        Busy=function()return state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
+        Busy=function()return state.AutoTradeBusy or state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
         Read=readGear,
         Equip=function(op)
@@ -8221,11 +8232,15 @@ end
     local worker=make({Rarity=rarity,Protected=protected,
         Selected=function(name)return state.AutoDismantle[name]==true end,
         Active=function()return state.Running and not state.StopEverything and not state.ModeratorBlocking end,
-        Busy=function()return state.ProgressionEquipping or state.TravelBusy or state.AutomationTeleporting or state.SafeModePanic end,
+        Busy=function()return state.AutoTradeBusy or state.ProgressionEquipping or state.TravelBusy or state.AutomationTeleporting or state.SafeModePanic end,
         Send=function(item)ReplicatedStorage.Event:FireServer("Equipment",{"Dismantle",{item}})end,
         Status=function(text)if status.Parent then status.Text=text end end})
+    local dropdown=uiButton("AutoDismantleDropdown","Auto Dismantle  v",100,34,state.UI.Pages.Utility)
+    local options=create("Frame",{Name="AutoDismantleOptions",Visible=false,LayoutOrder=105,Size=UDim2.new(1,0,0,114),BackgroundTransparency=1},state.UI.Pages.Utility)
+    create("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},options)
+    bind(dropdown.Activated,function()options.Visible=not options.Visible end)
     for index,name in ipairs({"Common","Uncommon","Rare"})do
-        local button=uiButton("AutoDismantle"..name,"",100+index*10,34,state.UI.Pages.Utility)
+        local button=uiButton("AutoDismantle"..name,"",index,34,options)
         buttons[name]=button
         local function refresh()
             button.Text="Auto Dismantle "..name..(state.AutoDismantle[name]and " · ON"or " · OFF")
@@ -8251,6 +8266,144 @@ end
             task.wait((state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare)and .25 or 1)
         end
         worker.Clear()
+    end)
+end
+
+-- Native trade automation. Final acceptance is built in and whitelist-gated.
+do
+    local make=(function()
+-- BEGIN BUNDLED AUTO TRADE
+return function(ctx)
+    local api={}
+    local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
+    function api.Event(kind,data)
+        if not ctx.Active()then trade=nil;return end
+        if kind=="Request"then
+            if ctx.Allowed(data)then ctx.Send("RequestAccept",{})end
+        elseif kind=="TradeChanged"then trade=data
+        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;lastSignature=nil;lastAction=nil end
+    end
+    function api.Update(now)
+        if not trade or not ctx.Active()then return false end
+        local role=trade.Requester==ctx.Player and "Requester"or trade.Partner==ctx.Player and "Partner"
+        if not role then return false end
+        local peer=role=="Requester"and "Partner"or "Requester"
+        if not ctx.Allowed(trade[peer])then ctx.Status("Trade paused · partner is not whitelisted");return false end
+        local desired,vel=ctx.Plan()
+        local ours=trade[role.."Items"]or{}
+        local have={};local signature={tostring(vel)}
+        for _,item in ipairs(desired)do signature[#signature+1]="want:"..item.Value end
+        for _,side in ipairs({role,peer})do
+            signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
+            for _,v in ipairs(trade[side.."Items"]or{})do
+                local item=v.item
+                signature[#signature+1]=side..":"..tostring(item and item.Value)..":"..tostring(v.count or 1)
+            end
+        end
+        local key=table.concat(signature,"|")
+        if key~=lastSignature then lastSignature=key;stableSince=now;lastAction=nil end
+        for _,v in ipairs(ours)do if v.item then have[v.item]=true end end
+        local wanted={};for _,item in ipairs(desired)do wanted[item]=true end
+        for item in pairs(have)do if not wanted[item]then ctx.Status("Trade paused · offer contains an unselected item");return true end end
+        for _,item in ipairs(desired)do
+            if not have[item]then
+                local action="item:"..item.Value
+                if lastAction~=action then lastAction=action;ctx.Send("TradeAddItem",{item})end
+                ctx.Status("Adding "..item.Name);return true
+            end
+        end
+        if (trade[role.."Currency"]or 0)~=vel then
+            if lastAction~="vel"then lastAction="vel";ctx.Send("TradeChangeCurrency",{vel})end
+            ctx.Status("Setting trade Vel");return true
+        end
+        if now-stableSince<2 then ctx.Status("Waiting for the trade offer to settle");return true end
+        if trade[role.."Confirmed"]~=true then
+            if lastAction~="confirm"then lastAction="confirm";ctx.Send("TradeConfirm",{})end
+        elseif trade[peer.."Confirmed"]==true and trade[role.."Accepted"]~=true then
+            if lastAction~="accept"then lastAction="accept";ctx.Send("TradeAccept",{})end
+        end
+        ctx.Status("Trade offer ready · automatic confirmation active")
+        return true
+    end
+    return api
+end
+
+-- END BUNDLED AUTO TRADE
+    end)()
+    local rs=game:GetService("ReplicatedStorage")
+    local profile=rs.Profiles[player.Name]
+    local inventory,equip=profile.Inventory,profile.Equip
+    local restrictions=require(rs.Shared.Util.ItemRestrictions)
+    local parent=state.UI.Pages.Utility
+    local status=uiLabel("TradeStatus","Uses Safe Mode whitelist · final acceptance is automatic",250,48);status.Parent=parent
+    local toggle=uiButton("AutoTrade","",200,34,parent)
+    local mode=uiButton("TradeMode","",210,34,parent)
+    local items=uiButton("TradeItems","Select inventory items  v",220,34,parent)
+    local list=create("ScrollingFrame",{Name="TradeItemOptions",Visible=false,LayoutOrder=225,Size=UDim2.new(1,0,0,200),BackgroundTransparency=1,ScrollBarThickness=3,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},parent)
+    create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},list)
+    local vel=create("TextBox",{Name="TradeVel",Text=tostring(state.TradeVel),PlaceholderText="Vel to offer (0 = none)",ClearTextOnFocus=false,LayoutOrder=240,Size=UDim2.new(1,0,0,34),BackgroundColor3=Color3.fromRGB(38,41,56),TextColor3=Color3.fromRGB(225,228,241),Font=Enum.Font.Gotham,TextSize=12},parent);corner(vel,8)
+    local function refresh()
+        toggle.Text=state.AutoTrade and "Auto Trade · ON"or "Auto Trade · OFF"
+        toggle.BackgroundColor3=state.AutoTrade and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
+        mode.Text="Offer mode · "..tostring(state.TradeMode)
+    end
+    bind(toggle.Activated,function()state.AutoTrade=not state.AutoTrade;refresh();requestSave()end)
+    bind(mode.Activated,function()
+        state.TradeMode=state.TradeMode=="Selected"and "Legendary"or state.TradeMode=="Legendary"and "Tribute"or "Selected";refresh();requestSave()
+    end)
+    bind(vel.FocusLost,function()
+        local value=tonumber(vel.Text)
+        state.TradeVel=value and value==value and math.clamp(math.floor(value),0,100000000)or 0
+        vel.Text=tostring(state.TradeVel);requestSave()
+    end)
+    bind(items.Activated,function()
+        list.Visible=not list.Visible
+        if not list.Visible then return end
+        for _,child in ipairs(list:GetChildren())do if child:IsA("GuiButton")then child:Destroy()end end
+        local groups={};for _,item in ipairs(inventory:GetChildren())do groups[item.Name]=(groups[item.Name]or 0)+1 end
+        local names={};for name in pairs(groups)do names[#names+1]=name end;table.sort(names)
+        for index,name in ipairs(names)do
+            local button=uiButton("TradeItem"..index,"",index,30,list)
+            local function label()button.Text=(state.TradeItems[name]and "[x] "or "[ ] ")..name.." x"..groups[name]end
+            label();bind(button.Activated,function()state.TradeItems[name]=not state.TradeItems[name];label();requestSave()end)
+        end
+    end)
+    local function plan()
+        local result={}
+        for _,item in ipairs(inventory:GetChildren())do
+            local definition=rs.Database.Items:FindFirstChild(item.Name)
+            local rarity=definition and definition:FindFirstChild("Rarity")
+            local chosen=state.TradeMode=="Selected"and state.TradeItems[item.Name]or state.TradeMode~="Selected"and rarity and rarity.Value==state.TradeMode
+            if chosen and item:IsA("IntValue")and not item:GetAttribute("Locked")and not item:GetAttribute("Favorited")and restrictions.CanOfferTrading(profile,item)==true then
+                local equipped=false
+                for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")and slot.Value==item.Value then equipped=true;break end end
+                if not equipped then result[#result+1]=item end
+            end
+        end
+        table.sort(result,function(a,b)return a.Value<b.Value end)
+        local balance=profile.Stats:FindFirstChild("Vel")
+        return result,math.min(state.TradeVel,math.floor((balance and balance.Value or 0)/1.1))
+    end
+    local worker=make({Player=player,Plan=plan,
+        Active=function()return state.AutoTrade and state.Running and not state.StopEverything and not state.ModeratorBlocking end,
+        Allowed=function(person)return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true end,
+        Send=function(action,args)rs.Event:FireServer("Trade",action,args)end,
+        Status=function(text)status.Text=text end})
+    bind(rs.Event.OnClientEvent,function(route,args)
+        if route=="UI"and type(args)=="table"and args[1]=="Trade"then
+            worker.Event(args[2],args[3])
+            if args[2]=="TradeChanged"and state.AutoTrade then state.AutoTradeBusy=true end
+            if args[2]=="TradeCancel"or args[2]=="TradeCompleted"then state.AutoTradeBusy=false end
+        end
+    end)
+    refresh()
+    task.spawn(function()
+        while state.Running do
+            local ok,value=pcall(worker.Update,os.clock());state.AutoTradeBusy=ok and value==true
+            if not ok then status.Text="Trade paused · "..tostring(value)end
+            task.wait(state.AutoTrade and .3 or 1)
+        end
+        state.AutoTradeBusy=false
     end)
 end
 ]============]

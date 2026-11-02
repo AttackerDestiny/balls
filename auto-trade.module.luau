@@ -1,0 +1,54 @@
+return function(ctx)
+    local api={}
+    local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
+    function api.Event(kind,data)
+        if not ctx.Active()then trade=nil;return end
+        if kind=="Request"then
+            if ctx.Allowed(data)then ctx.Send("RequestAccept",{})end
+        elseif kind=="TradeChanged"then trade=data
+        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;lastSignature=nil;lastAction=nil end
+    end
+    function api.Update(now)
+        if not trade or not ctx.Active()then return false end
+        local role=trade.Requester==ctx.Player and "Requester"or trade.Partner==ctx.Player and "Partner"
+        if not role then return false end
+        local peer=role=="Requester"and "Partner"or "Requester"
+        if not ctx.Allowed(trade[peer])then ctx.Status("Trade paused · partner is not whitelisted");return false end
+        local desired,vel=ctx.Plan()
+        local ours=trade[role.."Items"]or{}
+        local have={};local signature={tostring(vel)}
+        for _,item in ipairs(desired)do signature[#signature+1]="want:"..item.Value end
+        for _,side in ipairs({role,peer})do
+            signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
+            for _,v in ipairs(trade[side.."Items"]or{})do
+                local item=v.item
+                signature[#signature+1]=side..":"..tostring(item and item.Value)..":"..tostring(v.count or 1)
+            end
+        end
+        local key=table.concat(signature,"|")
+        if key~=lastSignature then lastSignature=key;stableSince=now;lastAction=nil end
+        for _,v in ipairs(ours)do if v.item then have[v.item]=true end end
+        local wanted={};for _,item in ipairs(desired)do wanted[item]=true end
+        for item in pairs(have)do if not wanted[item]then ctx.Status("Trade paused · offer contains an unselected item");return true end end
+        for _,item in ipairs(desired)do
+            if not have[item]then
+                local action="item:"..item.Value
+                if lastAction~=action then lastAction=action;ctx.Send("TradeAddItem",{item})end
+                ctx.Status("Adding "..item.Name);return true
+            end
+        end
+        if (trade[role.."Currency"]or 0)~=vel then
+            if lastAction~="vel"then lastAction="vel";ctx.Send("TradeChangeCurrency",{vel})end
+            ctx.Status("Setting trade Vel");return true
+        end
+        if now-stableSince<2 then ctx.Status("Waiting for the trade offer to settle");return true end
+        if trade[role.."Confirmed"]~=true then
+            if lastAction~="confirm"then lastAction="confirm";ctx.Send("TradeConfirm",{})end
+        elseif trade[peer.."Confirmed"]==true and trade[role.."Accepted"]~=true then
+            if lastAction~="accept"then lastAction="accept";ctx.Send("TradeAccept",{})end
+        end
+        ctx.Status("Trade offer ready · automatic confirmation active")
+        return true
+    end
+    return api
+end
