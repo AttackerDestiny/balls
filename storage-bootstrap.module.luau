@@ -29,7 +29,7 @@ return function(ctx)
                 -- Executors without isfolder may report an existing folder as an error.
                 pcall(ctx.MakeFolder,folder)
             end
-            if verifySource or not saved or not ctx.IsFile(sourcePath)then
+            if (verifySource and cachedPath==sourcePath)or not saved or not ctx.IsFile(sourcePath)then
                 if not ctx.IsFile(sourcePath)or ctx.Read(sourcePath)~=fullSource then
                     ctx.Write(sourcePath,fullSource);api.Generation+=1;api.Created[sourcePath]=true
                 end

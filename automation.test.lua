@@ -26,6 +26,11 @@ test("whitelisted join stays; unknown join starts searching",function()
     assert(f.Search.Starts==1 and f.State.SafePendingUserId==3)
     f.Api.Update();assert(f.Search.Starts==1)
 end)
+test("Safe Mode checks the population immediately after starting the search",function()
+    local f=safeFixture();f.People={{UserId=2}};local updates=0
+    f.Search.Update=function()updates=updates+1 end
+    f.Api.Update();assert(f.Search.Starts==1 and updates==1)
+end)
 test("successful search monitors; failures keep Safe Mode holding",function()
     local f=safeFixture();f.People={{UserId=2}};f.Api.Update();f.Api.Update()
     f.Search.Active=false;f.Search.Outcome="Safe";f.People={};f.Api.Update()

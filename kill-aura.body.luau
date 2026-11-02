@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.safe-arrival-away-v1.10.1"
-local VERSION="1.10.1"
+local BUILD="2026-11-02.fast-dispatch-mobile-v1.10.2"
+local VERSION="1.10.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -49,7 +49,7 @@ return function(ctx)
                 -- Executors without isfolder may report an existing folder as an error.
                 pcall(ctx.MakeFolder,folder)
             end
-            if verifySource or not saved or not ctx.IsFile(sourcePath)then
+            if (verifySource and cachedPath==sourcePath)or not saved or not ctx.IsFile(sourcePath)then
                 if not ctx.IsFile(sourcePath)or ctx.Read(sourcePath)~=fullSource then
                     ctx.Write(sourcePath,fullSource);api.Generation+=1;api.Created[sourcePath]=true
                 end
@@ -6190,7 +6190,7 @@ function state.PanicToSpawn()
     if not position then return false end
     if root~=movementRoot then stopMovement(nil,true) end
     ensureMovementController(character,root,humanoid,position)
-    if positionAlign then positionAlign.Position=position end
+    if positionAlign and positionAlign.Position~=position then positionAlign.Position=position end
     if first or (root.Position-position).Magnitude>3 then pivotRoot(root,position) end
     state.TravelHold=true;state.TravelHoldPosition=position;state.SafePanicPosition=position
     return true
@@ -6206,7 +6206,7 @@ function state.EscapeSafeRejoin()
     return state.PanicToSpawn()
 end
 function state.ReleaseSafePanic()
-    state.SafeRejoinRequested=false;state.SafeRejoinAway=nil
+    state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil
     if not state.SafeModePanic then return end
     state.SafeModePanic=false;state.SafePanicPosition=nil
     stopMovement("Safe Mode · server protected",true)
@@ -6516,7 +6516,8 @@ return function(ctx)
         api.Seeking=true
         if ctx.Panic then ctx.Panic() end
         started=search.Start()==true
-        if not started then api.Pause(search.Status);ctx.Save() end
+        if not started then api.Pause(search.Status);ctx.Save()
+        else search.Update()end
     end
     function api.Pause(reason)
         api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
@@ -6968,7 +6969,7 @@ return function(ctx)
     local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
     local queuedResume = getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket = nil
-    local queue, savedSource
+    local queue, savedSource,validatedSource
     local GuiService = game:GetService("GuiService")
     -- Optional desktop input must not prevent Multi Spot / autosave on mobile.
     local virtualInput
@@ -7052,7 +7053,10 @@ return function(ctx)
         assert(string.find(savedSource, state.Build, 1, true)
             and string.find(savedSource, "-- BEGIN BUNDLED SERVER ISOLATION", 1, true),
             "The executor's saved script could not be refreshed automatically")
-        assert(loadstring(savedSource), "The saved script does not compile")
+        if savedSource~=validatedSource then
+            assert(loadstring(savedSource), "The saved script does not compile")
+            validatedSource=savedSource
+        end
     end
     local function preflight()
         queuePreflight()
@@ -7106,7 +7110,7 @@ return function(ctx)
             Ready=function(button)return button.Visible and button.Active and button.AbsoluteSize.X>0 end,
             Key=function(button)return tostring(button.AbsolutePosition).."/"..tostring(button.AbsoluteSize)end,
             Click=click,Now=os.clock,Sleep=task.wait,
-            Blocked=function(target)return getBlocked()[target.UserId]==true end,
+            Blocked=function(target)return nativeBlockedEvents[target.UserId]==true or getBlocked()[target.UserId]==true end,
             Settle=function()return math.clamp((state.PingMs or 100)/1000+.05,.15,.75)end})
     else
         block=function(target,active)
@@ -7161,8 +7165,8 @@ return function(ctx)
     end
     local queuedToken
     function state.QueueAutomation()
-        queuePreflight()
         if queuedToken and queuedToken==state.AutomationRunId then return end
+        queuePreflight()
         state.AutomationRunId=state.AutomationRunId or HttpService:GenerateGUID(false)
         state.AutomationResumeFeatures=snapshot()
         assert(state.SaveNow(),"Could not save automation settings")
@@ -7191,10 +7195,10 @@ end
         queue(code);queuedToken=state.AutomationRunId
     end
     local function clearRejoinAway()
-        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.ServerTeleportStarted=false
+        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
     end
     local function escapeAfterRejoin()
-        if state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
+        if not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
             if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
         end
     end
@@ -7241,7 +7245,7 @@ end
     end
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
-        SettleSeconds=.15,SoloSeconds=.3,BlockSettleSeconds=0,
+        SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,
         NewId=function()return HttpService:GenerateGUID(false)end,Random=function(count)return math.random(1,count)end,
         Preflight=preflight,Save=save,GetBlocked=getBlocked,SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,
         GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
@@ -7262,6 +7266,12 @@ end
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
             state.SafeRejoinRequested=true
+            local dispatch={};state.SafeRejoinDispatch=dispatch
+            -- Defer runs after the native call is entered (or returns), so a
+            -- yielding Teleport call cannot hold the character at spawn.
+            task.defer(function()
+                if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end
+            end)
             local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not sent then clearRejoinAway();error(message)end
             escapeAfterRejoin()
@@ -7538,7 +7548,7 @@ return function(ctx)
                 confirmedAt=confirmedAt or now
                 if now-confirmedAt>=ctx.Settle()then return true end
             else confirmedAt=nil end
-            button,cancel=ctx.Find(target)
+            if not confirmedAt then button,cancel=ctx.Find(target)end
             if not confirmedAt and button and ctx.Ready(button)and clicks<4 then
                 local currentKey=ctx.Key(button)
                 if currentKey~=key then key=currentKey;stableSince=now end

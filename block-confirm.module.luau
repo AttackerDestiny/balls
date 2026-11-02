@@ -26,7 +26,7 @@ return function(ctx)
                 confirmedAt=confirmedAt or now
                 if now-confirmedAt>=ctx.Settle()then return true end
             else confirmedAt=nil end
-            button,cancel=ctx.Find(target)
+            if not confirmedAt then button,cancel=ctx.Find(target)end
             if not confirmedAt and button and ctx.Ready(button)and clicks<4 then
                 local currentKey=ctx.Key(button)
                 if currentKey~=key then key=currentKey;stableSince=now end

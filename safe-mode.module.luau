@@ -75,7 +75,8 @@ return function(ctx)
         api.Seeking=true
         if ctx.Panic then ctx.Panic() end
         started=search.Start()==true
-        if not started then api.Pause(search.Status);ctx.Save() end
+        if not started then api.Pause(search.Status);ctx.Save()
+        else search.Update()end
     end
     function api.Pause(reason)
         api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil

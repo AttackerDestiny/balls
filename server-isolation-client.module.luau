@@ -9,7 +9,7 @@ return function(ctx)
     local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
     local queuedResume = getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket = nil
-    local queue, savedSource
+    local queue, savedSource,validatedSource
     local GuiService = game:GetService("GuiService")
     -- Optional desktop input must not prevent Multi Spot / autosave on mobile.
     local virtualInput
@@ -93,7 +93,10 @@ return function(ctx)
         assert(string.find(savedSource, state.Build, 1, true)
             and string.find(savedSource, "-- BEGIN BUNDLED SERVER ISOLATION", 1, true),
             "The executor's saved script could not be refreshed automatically")
-        assert(loadstring(savedSource), "The saved script does not compile")
+        if savedSource~=validatedSource then
+            assert(loadstring(savedSource), "The saved script does not compile")
+            validatedSource=savedSource
+        end
     end
     local function preflight()
         queuePreflight()
@@ -147,7 +150,7 @@ return function(ctx)
             Ready=function(button)return button.Visible and button.Active and button.AbsoluteSize.X>0 end,
             Key=function(button)return tostring(button.AbsolutePosition).."/"..tostring(button.AbsoluteSize)end,
             Click=click,Now=os.clock,Sleep=task.wait,
-            Blocked=function(target)return getBlocked()[target.UserId]==true end,
+            Blocked=function(target)return nativeBlockedEvents[target.UserId]==true or getBlocked()[target.UserId]==true end,
             Settle=function()return math.clamp((state.PingMs or 100)/1000+.05,.15,.75)end})
     else
         block=function(target,active)
@@ -202,8 +205,8 @@ return function(ctx)
     end
     local queuedToken
     function state.QueueAutomation()
-        queuePreflight()
         if queuedToken and queuedToken==state.AutomationRunId then return end
+        queuePreflight()
         state.AutomationRunId=state.AutomationRunId or HttpService:GenerateGUID(false)
         state.AutomationResumeFeatures=snapshot()
         assert(state.SaveNow(),"Could not save automation settings")
@@ -232,10 +235,10 @@ end
         queue(code);queuedToken=state.AutomationRunId
     end
     local function clearRejoinAway()
-        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.ServerTeleportStarted=false
+        state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
     end
     local function escapeAfterRejoin()
-        if state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
+        if not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
             if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
         end
     end
@@ -282,7 +285,7 @@ end
     end
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
-        SettleSeconds=.15,SoloSeconds=.3,BlockSettleSeconds=0,
+        SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,
         NewId=function()return HttpService:GenerateGUID(false)end,Random=function(count)return math.random(1,count)end,
         Preflight=preflight,Save=save,GetBlocked=getBlocked,SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,
         GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
@@ -303,6 +306,12 @@ end
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
             state.SafeRejoinRequested=true
+            local dispatch={};state.SafeRejoinDispatch=dispatch
+            -- Defer runs after the native call is entered (or returns), so a
+            -- yielding Teleport call cannot hold the character at spawn.
+            task.defer(function()
+                if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end
+            end)
             local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not sent then clearRejoinAway();error(message)end
             escapeAfterRejoin()
