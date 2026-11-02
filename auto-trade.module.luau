@@ -1,15 +1,26 @@
 return function(ctx)
     local api={}
     local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
+    local pending,acceptedRequest
     function api.Event(kind,data)
         if not ctx.Active()then trade=nil;return end
         if kind=="Request"then
-            if ctx.Allowed(data)then ctx.Send("RequestAccept",{})end
-        elseif kind=="TradeChanged"then trade=data
-        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;lastSignature=nil;lastAction=nil end
+            pending=data
+            ctx.Status("Checking incoming trade request")
+        elseif kind=="TradeChanged"or kind=="RequestAccept"then
+            trade=data;pending=nil;acceptedRequest=nil
+        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;pending=nil;acceptedRequest=nil;lastSignature=nil;lastAction=nil end
     end
     function api.Update(now)
-        if not trade or not ctx.Active()then return false end
+        if not ctx.Active()then return false end
+        local requester=ctx.Pending and ctx.Pending()or (not ctx.Pending and pending or nil)
+        if not requester then acceptedRequest=nil
+        elseif not ctx.Allowed(requester)then ctx.Status("Trade request ignored · user is not whitelisted")
+        elseif requester~=acceptedRequest then
+            ctx.Send("RequestAccept",{});acceptedRequest=requester;pending=nil
+            ctx.Status("Accepted whitelisted trade request")
+        end
+        if not trade then return false end
         local role=trade.Requester==ctx.Player and "Requester"or trade.Partner==ctx.Player and "Partner"
         if not role then return false end
         local peer=role=="Requester"and "Partner"or "Requester"

@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.auto-trade-v1.9.3"
-local VERSION="1.9.3"
+local BUILD="2026-11-02.pending-trade-requests-v1.9.4"
+local VERSION="1.9.4"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8276,15 +8276,26 @@ do
 return function(ctx)
     local api={}
     local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
+    local pending,acceptedRequest
     function api.Event(kind,data)
         if not ctx.Active()then trade=nil;return end
         if kind=="Request"then
-            if ctx.Allowed(data)then ctx.Send("RequestAccept",{})end
-        elseif kind=="TradeChanged"then trade=data
-        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;lastSignature=nil;lastAction=nil end
+            pending=data
+            ctx.Status("Checking incoming trade request")
+        elseif kind=="TradeChanged"or kind=="RequestAccept"then
+            trade=data;pending=nil;acceptedRequest=nil
+        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;pending=nil;acceptedRequest=nil;lastSignature=nil;lastAction=nil end
     end
     function api.Update(now)
-        if not trade or not ctx.Active()then return false end
+        if not ctx.Active()then return false end
+        local requester=ctx.Pending and ctx.Pending()or (not ctx.Pending and pending or nil)
+        if not requester then acceptedRequest=nil
+        elseif not ctx.Allowed(requester)then ctx.Status("Trade request ignored · user is not whitelisted")
+        elseif requester~=acceptedRequest then
+            ctx.Send("RequestAccept",{});acceptedRequest=requester;pending=nil
+            ctx.Status("Accepted whitelisted trade request")
+        end
+        if not trade then return false end
         local role=trade.Requester==ctx.Player and "Requester"or trade.Partner==ctx.Player and "Partner"
         if not role then return false end
         local peer=role=="Requester"and "Partner"or "Requester"
@@ -8384,10 +8395,27 @@ end
         local balance=profile.Stats:FindFirstChild("Vel")
         return result,math.min(state.TradeVel,math.floor((balance and balance.Value or 0)/1.1))
     end
-    local worker=make({Player=player,Plan=plan,
+    local nativeTrade=require(rs.CardinalClient.MainModule.Services.UI.Trade)
+    local function pendingRequest()
+        local root=player:FindFirstChildOfClass("PlayerGui")
+        local cardinal=root and root:FindFirstChild("CardinalUI")
+        local pui=cardinal and cardinal:FindFirstChild("PlayerUI")
+        local hud=pui and pui:FindFirstChild("HUD")
+        local prompt=hud and hud:FindFirstChild("TradeRequest")
+        local label=prompt and prompt:FindFirstChild("PlayerText")
+        if not prompt or not prompt.Visible or not label then return nil end
+        local name=label.Text:match("^([%w_]+) wants to trade with you$")
+        return name and Players:FindFirstChild(name)or nil
+    end
+    local worker=make({Player=player,Plan=plan,Pending=pendingRequest,
         Active=function()return state.AutoTrade and state.Running and not state.StopEverything and not state.ModeratorBlocking end,
         Allowed=function(person)return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true end,
-        Send=function(action,args)rs.Event:FireServer("Trade",action,args)end,
+        Send=function(action,args)
+            if action=="RequestAccept"then
+                local person=pendingRequest()
+                if person and state.SafeWhitelistIds[tostring(person.UserId)]==true then nativeTrade.AcceptRequest()end
+            else rs.Event:FireServer("Trade",action,args)end
+        end,
         Status=function(text)status.Text=text end})
     bind(rs.Event.OnClientEvent,function(route,args)
         if route=="UI"and type(args)=="table"and args[1]=="Trade"then
