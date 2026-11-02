@@ -1,5 +1,8 @@
 return function(ctx)
     local api={}
+    function api.AlwaysInclude(name)
+        return name=="Upgrade Protection Scroll"or name=="Resurrection Crystal"
+    end
     local highRarities={Legendary=true,Tribute=true,Burst=true}
     function api.IncludesRarity(mode,rarity)
         return (mode=="Legendary"or mode=="Tribute")and highRarities[rarity]==true

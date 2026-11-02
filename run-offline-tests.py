@@ -148,6 +148,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("dismantle-protection.test.luau")) + "))()(" + quote(protection) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-trade.test.luau")) + "))()(" + quote(read("auto-trade.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("trade-hold.test.luau")) + "))()(" + quote(read("trade-hold.module.luau")) + ")\n"
+    plan_start=script.index("    local function plan()")
+    trade_plan=script[plan_start:script.index("    local nativeTrade=",plan_start)]
+    fixture += "assert(loadstring(" + quote(read("auto-trade-plan.test.luau")) + "))()(" + quote(trade_plan) + "," + quote(read("auto-trade.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.uncapped-trade-items-v1.9.9"
-local VERSION="1.9.9"
+local BUILD="2026-11-02.always-trade-consumables-v1.10.0"
+local VERSION="1.10.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8318,6 +8318,9 @@ do
 -- BEGIN BUNDLED AUTO TRADE
 return function(ctx)
     local api={}
+    function api.AlwaysInclude(name)
+        return name=="Upgrade Protection Scroll"or name=="Resurrection Crystal"
+    end
     local highRarities={Legendary=true,Tribute=true,Burst=true}
     function api.IncludesRarity(mode,rarity)
         return (mode=="Legendary"or mode=="Tribute")and highRarities[rarity]==true
@@ -8452,7 +8455,7 @@ end
         for _,item in ipairs(inventory:GetChildren())do
             local definition=rs.Database.Items:FindFirstChild(item.Name)
             local rarity=definition and definition:FindFirstChild("Rarity")
-            local chosen=state.TradeMode=="Selected"and state.TradeItems[item.Name]or rarity and worker.IncludesRarity(state.TradeMode,rarity.Value)
+            local chosen=worker.AlwaysInclude(item.Name)or state.TradeMode=="Selected"and state.TradeItems[item.Name]or rarity and worker.IncludesRarity(state.TradeMode,rarity.Value)
             if chosen and item:IsA("IntValue")and not item:GetAttribute("Locked")and not item:GetAttribute("Favorited")and restrictions.CanOfferTrading(profile,item)==true then
                 local equipped=false
                 for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")and slot.Value==item.Value then equipped=true;break end end
