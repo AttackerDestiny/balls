@@ -186,6 +186,14 @@ return function(ctx)
         pendingPlayer, api.Phase = target, "Block settling"
         settleUntil = ctx.Clock() + (ctx.BlockSettleSeconds or 3)
         announce("Waiting for the block to register...")
+        if ctx.BlockSettleSeconds==0 then
+            if ctx.IsPresent(target)then
+                local confirmed=ctx.GetBlocked()
+                if not live(token)then return end
+                assert(confirmed[target.UserId],"Block was not confirmed; no rejoin attempted")
+            end
+            hop(token)
+        end
     end
     function api.Update()
         if not api.Active or busy then return end

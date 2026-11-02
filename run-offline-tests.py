@@ -160,6 +160,9 @@ def main():
     hop=adapter[hop_start:adapter.index("        Notify=function",hop_start)]
     fixture += "assert(loadstring(" + quote(read("safe-rejoin-order.test.luau")) + "))()(" + quote(away_helpers) + "," + quote(hop) + ")\n"
     fixture += "assert(loadstring(" + quote(read("safe-kick-fallback.test.luau")) + "))()(" + quote(read("safe-kick-fallback.module.luau")) + ")\n"
+    panic_start=script.index("function state.PanicToSpawn(")
+    panic_end=script.index("\n\ndo\n",panic_start)
+    fixture += "assert(loadstring(" + quote(read("safe-panic-position.test.luau")) + "))()(" + quote(script[panic_start:panic_end]) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

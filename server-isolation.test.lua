@@ -170,10 +170,11 @@ end)
 test("Confirmed blocks need no second settle timer before the final native recheck",function()
     local f=fixture();f.ctx.SettleSeconds=.15;f.ctx.BlockSettleSeconds=0;f.ctx.SoloSeconds=.3
     f.start();f.tick(.14);assert(f.blocks==0)
-    f.tick(.16);assert(f.blocks==1 and f.hops==0)
-    f.tick(.17);assert(f.hops==1 and f.queues==1)
+    f.tick(.16);assert(f.blocks==1 and f.hops==1 and f.queues==1)
+    f.tick(.17);assert(f.hops==1)
     local g=fixture();g.ctx.SettleSeconds=.15;g.ctx.BlockSettleSeconds=0
-    g.start();g.tick(.16);g.blocked={};g.tick(.17)
+    g.ctx.Block=function()g.blocks=g.blocks+1;return true end
+    g.start();g.tick(.16);g.tick(.17)
     assert(g.hops==0 and not g.api.Active,"Fast rejoin still requires native block confirmation")
 end)
 test("Transient blocked-list failure recovers within the same search budget",function()

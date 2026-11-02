@@ -326,7 +326,7 @@ end
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
-        Panic=function()state.PanicToSpawn()end,ReleasePanic=function()state.ReleaseSafePanic()end,
+        Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,ReleasePanic=function()state.ReleaseSafePanic()end,
         Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
@@ -526,7 +526,7 @@ end
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true
                 api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
-                state.PanicToSpawn()
+                if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
             Prepare=function(person)

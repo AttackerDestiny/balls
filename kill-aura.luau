@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.safe-kick-fallback-v1.10.4"
-local VERSION="1.10.4"
+local BUILD="2026-11-02.direct-safe-rejoin-v1.10.5"
+local VERSION="1.10.5"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -5376,8 +5376,12 @@ local function runFrame()
             if state.PanicToSpawn then state.PanicToSpawn()end
             return
         end
-        if state.AutoJoinFriendHolding or state.SafeModePanic then
-            if state.PanicToSpawn then state.PanicToSpawn() end
+        if state.AutoJoinFriendHolding then
+            if state.PanicToSpawn then state.PanicToSpawn()end
+            return
+        end
+        if state.SafeModePanic then
+            if state.SafePanicHoldHere then state.PanicInPlace()else state.PanicToSpawn()end
             return
         end
         if state.AutoTradeBusy then return end
@@ -6156,7 +6160,10 @@ end
 
 
 
-function state.PanicToSpawn()
+function state.PanicToSpawn(inPlace)
+    local holdHere=inPlace==true
+    if state.SafePanicHoldHere~=holdHere then state.SafePanicHerePosition=nil;state.SafePanicHereRoot=nil end
+    state.SafePanicHoldHere=holdHere
     local first=not state.SafeModePanic
     state.SafeModePanic=true
     if first then
@@ -6166,27 +6173,33 @@ function state.PanicToSpawn()
         if state.CancelSkillAura then state.CancelSkillAura("Safe Mode panic") end
         if state.CancelMiscSkill then state.CancelMiscSkill() end
         if state.MultiSpotController then state.MultiSpotController.Reset() end
-        stopMovement("Safe Mode · holding at spawn",true)
+        stopMovement(holdHere and "Safe Mode · holding current position"or "Holding at teleport pad",true)
         state.FollowTarget=nil;state.TravelFocus=nil
     end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health<=0 then return false end
-    local pad=state.SafePanicSpawnPart
-    if not pad or not pad.Parent then
-        local reference=destinations.spawn and destinations.spawn.Position or root.Position
-        local bestDistance
-        for _,candidate in ipairs(workspace:QueryDescendants("SpawnLocation")) do
-            local distance=(candidate.Position-reference).Magnitude
-            if not bestDistance or distance<bestDistance then pad,bestDistance=candidate,distance end
-        end
-        state.SafePanicSpawnPart=pad
-    end
     local position=state.AutomationTeleporting and not state.ModeratorBlocking and state.SafeRejoinAway or nil
+    if not position and holdHere then
+        if state.SafePanicHereRoot~=root or not state.SafePanicHerePosition then
+            state.SafePanicHereRoot=root;state.SafePanicHerePosition=root.Position
+        end
+        position=state.SafePanicHerePosition
+    end
     if not position then
+        local pad=state.SafePanicSpawnPart
+        if not pad or not pad.Parent then
+            local reference=destinations.spawn and destinations.spawn.Position or root.Position
+            local bestDistance
+            for _,candidate in ipairs(workspace:QueryDescendants("SpawnLocation"))do
+                local distance=(candidate.Position-reference).Magnitude
+                if not bestDistance or distance<bestDistance then pad,bestDistance=candidate,distance end
+            end
+            state.SafePanicSpawnPart=pad
+        end
         if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
-        elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0) end
+        elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0)end
     end
     if not position then return false end
     if root~=movementRoot then stopMovement(nil,true) end
@@ -6196,6 +6209,7 @@ function state.PanicToSpawn()
     state.TravelHold=true;state.TravelHoldPosition=position;state.SafePanicPosition=position
     return true
 end
+function state.PanicInPlace()return state.PanicToSpawn(true)end
 function state.EscapeSafeRejoin()
     if not state.SafeRejoinRequested or not state.AutomationTeleporting or state.StopEverything or state.ModeratorBlocking then return false end
     if not state.SafeRejoinAway then
@@ -6204,12 +6218,12 @@ function state.EscapeSafeRejoin()
         if not origin then return false end
         state.SafeRejoinAway=origin+Vector3.new(10000,0,0)
     end
-    return state.PanicToSpawn()
+    return state.PanicToSpawn(state.SafePanicHoldHere==true)
 end
 function state.ReleaseSafePanic()
     state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil
     if not state.SafeModePanic then return end
-    state.SafeModePanic=false;state.SafePanicPosition=nil
+    state.SafeModePanic=false;state.SafePanicPosition=nil;state.SafePanicHoldHere=nil;state.SafePanicHerePosition=nil;state.SafePanicHereRoot=nil
     stopMovement("Safe Mode · server protected",true)
     state.FollowTarget=nil
 end
@@ -6405,6 +6419,14 @@ return function(ctx)
         pendingPlayer, api.Phase = target, "Block settling"
         settleUntil = ctx.Clock() + (ctx.BlockSettleSeconds or 3)
         announce("Waiting for the block to register...")
+        if ctx.BlockSettleSeconds==0 then
+            if ctx.IsPresent(target)then
+                local confirmed=ctx.GetBlocked()
+                if not live(token)then return end
+                assert(confirmed[target.UserId],"Block was not confirmed; no rejoin attempted")
+            end
+            hop(token)
+        end
     end
     function api.Update()
         if not api.Active or busy then return end
@@ -6501,7 +6523,7 @@ return function(ctx)
                         return
                     end
                     ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
-                else ctx.Status("Holding at spawn · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
+                else ctx.Status("Holding position · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
                 return
             end
         end
@@ -6546,7 +6568,7 @@ return function(ctx)
     function api.Pause(reason)
         api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
         if ctx.Panic then ctx.Panic() end
-        ctx.Status("Holding at spawn · "..tostring(reason))
+        ctx.Status("Holding position · "..tostring(reason))
     end
     function api.Joined(person)
         if state.SafeMode and not ctx.Allowed(person) then
@@ -7310,7 +7332,7 @@ end
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
-        Panic=function()state.PanicToSpawn()end,ReleasePanic=function()state.ReleaseSafePanic()end,
+        Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,ReleasePanic=function()state.ReleaseSafePanic()end,
         Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
@@ -7510,7 +7532,7 @@ end
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true
                 api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
-                state.PanicToSpawn()
+                if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
             Prepare=function(person)

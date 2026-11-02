@@ -36,7 +36,7 @@ return function(ctx)
                         return
                     end
                     ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
-                else ctx.Status("Holding at spawn · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
+                else ctx.Status("Holding position · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
                 return
             end
         end
@@ -81,7 +81,7 @@ return function(ctx)
     function api.Pause(reason)
         api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
         if ctx.Panic then ctx.Panic() end
-        ctx.Status("Holding at spawn · "..tostring(reason))
+        ctx.Status("Holding position · "..tostring(reason))
     end
     function api.Joined(person)
         if state.SafeMode and not ctx.Allowed(person) then
