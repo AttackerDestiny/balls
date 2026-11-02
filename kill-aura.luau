@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.same-server-recovery-v1.10.3"
-local VERSION="1.10.3"
+local BUILD="2026-11-02.safe-kick-fallback-v1.10.4"
+local VERSION="1.10.4"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7360,6 +7360,7 @@ end
         end
     end
     function state.SetSafeMode(on)
+        if state.SafeKickFallback then state.SafeKickFallback.Reset()end
         ensureToken();safe.Reset();state.SafeMode=on==true
         if not state.SafeMode then state.ReleaseSafePanic() end
         state.SafeModeStatus=state.SafeMode and "Checking selected floor..." or "Safe Mode is off"
@@ -7487,9 +7488,51 @@ end
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,message)
         if who==player then state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name) end
     end)
+    local function fallbackTicket()
+        local ticket=api.Ticket
+        if not ticket then
+            local ok,value=pcall(readTicket)
+            if ok and type(value)=="table"and type(value.RunId)=="string"then ticket=value end
+        end
+        if ticket then
+            assert(ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId,"Saved search scope mismatch · no fallback kick")
+            assert(type(ticket.StartedAt)=="number"and os.time()-ticket.StartedAt<900
+                and type(ticket.Hops)=="number"and ticket.Hops<12,"Safe Mode search limit reached · no fallback kick")
+        end
+        return ticket
+    end
+    local kickFallback
+    if ctx.MakeKickFallback then
+        kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
+            Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
+            Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,
+            Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Pause=function()
+                workerIdentity();state.SafeKickFallbackBusy=true
+                api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
+                state.PanicToSpawn()
+            end,
+            Block=function(person,active)return state.BlockPlayerNative(person,active)end,
+            Prepare=function(person)
+                local ticket=fallbackTicket() or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
+                    RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
+                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
+                ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
+                ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
+                ticket.LastBlockedUserId=person.UserId
+                save(ticket)
+                state.QueueAutomation()
+            end,
+            Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,
+            Kick=function(message)player:Kick(message)end,
+            Finish=function()state.SafeKickFallbackBusy=false end,
+            Status=function(message)state.SafeModeStatus=message;refresh()end})
+        state.SafeKickFallback=kickFallback
+    end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
+            if kickFallback then kickFallback.MarkStarted()end
             escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
@@ -7508,7 +7551,7 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
-                if state.ModeratorBlocking then return end
+                if state.ModeratorBlocking or state.SafeKickFallbackBusy or (kickFallback and kickFallback.Armed)then return end
                 friend.Update(os.clock())
                 safe.Update()
                 if state.AccountProgression then
@@ -7523,8 +7566,9 @@ end
     -- Population monitoring stays responsive even while the search worker yields.
     task.spawn(function()
         while state.Running do
-            if safe.ObserveProtected then pcall(safe.ObserveProtected)end
-            task.wait(.25)
+            if kickFallback then pcall(kickFallback.Update,os.clock())end
+            if not state.SafeKickFallbackBusy and not(kickFallback and kickFallback.Armed)and safe.ObserveProtected then pcall(safe.ObserveProtected)end
+            task.wait(state.SafeMode and .1 or 1)
         end
     end)
     return api
@@ -7649,7 +7693,72 @@ end
 
 -- END BUNDLED AUTO JOIN FRIEND
     end)()
-    attach({Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    local makeKickFallback=(function()
+-- BEGIN BUNDLED SAFE KICK FALLBACK
+-- Eight seconds with a present outsider in this job triggers one confirmed-block kick.
+return function(ctx)
+    local api={Armed=false,Attempts=0}
+    local seen,busy,retryAt,failures={},false,0,0
+    local generation=0
+    function api.Reset()generation=generation+1;seen={};retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
+    local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
+    function api.MarkStarted()if api.Armed and api.Attempts>0 then api.Started=true end end
+    function api.Update(now)
+        if api.Armed then return end
+        if not enabled()then seen={};return end
+        local present,target,oldest={}
+        for _,person in ipairs(ctx.Players())do
+            if not ctx.Allowed(person)then
+                present[person.UserId]=true
+                seen[person.UserId]=seen[person.UserId]or now
+                if not oldest or seen[person.UserId]<oldest then target,oldest=person,seen[person.UserId]end
+            end
+        end
+        for id in pairs(seen)do if not present[id]then seen[id]=nil end end
+        if not target then failures=0;retryAt=0;return end
+        if busy or failures>=3 or now<retryAt or now-oldest<8 then return end
+        busy=true
+        local token=generation
+        local function active()return token==generation and enabled()and not ctx.Allowed(target)and ctx.Present(target)end
+        ctx.Spawn(function()
+            local ok,reason=pcall(function()
+                if not active()then return end
+                if ctx.CheckLimits then ctx.CheckLimits()end
+                ctx.Pause()
+                if not active()then return end
+                assert(ctx.Block(target,active)==true,"Native block was not confirmed · no kick")
+                if not active()then return end
+                ctx.Prepare(target)
+                if not active()then return end
+                api.Armed=true
+                ctx.Status("Outsider still present after 8s · blocked · kicking and rejoining")
+                -- Arm recovery before Kick: it may throw or return after disconnect.
+                ctx.Spawn(function()
+                    ctx.Sleep(.2)
+                    for attempt=1,3 do
+                        if token~=generation or not enabled()or api.Started then return end
+                        api.Attempts=attempt
+                        local sent,message=pcall(ctx.Rejoin)
+                        if not sent then ctx.Status("Fallback rejoin · "..tostring(message))end
+                        ctx.Sleep(3)
+                    end
+                    if enabled()and not api.Started then ctx.Status("Fallback rejoin unavailable · rejoin manually")end
+                end)
+                ctx.Kick("Safe Mode: blocked @"..target.Name.." before automatic rejoin.")
+            end)
+            busy=false;ctx.Finish()
+            if not ok then
+                failures=failures+1;retryAt=ctx.Now()+math.min(8,2^failures)
+                ctx.Status("Safe fallback · "..tostring(reason))
+            end
+        end)
+    end
+    return api
+end
+
+-- END BUNDLED SAFE KICK FALLBACK
+    end)()
+    attach({MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end

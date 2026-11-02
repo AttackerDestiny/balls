@@ -376,6 +376,7 @@ end
         end
     end
     function state.SetSafeMode(on)
+        if state.SafeKickFallback then state.SafeKickFallback.Reset()end
         ensureToken();safe.Reset();state.SafeMode=on==true
         if not state.SafeMode then state.ReleaseSafePanic() end
         state.SafeModeStatus=state.SafeMode and "Checking selected floor..." or "Safe Mode is off"
@@ -503,9 +504,51 @@ end
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,message)
         if who==player then state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name) end
     end)
+    local function fallbackTicket()
+        local ticket=api.Ticket
+        if not ticket then
+            local ok,value=pcall(readTicket)
+            if ok and type(value)=="table"and type(value.RunId)=="string"then ticket=value end
+        end
+        if ticket then
+            assert(ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId,"Saved search scope mismatch · no fallback kick")
+            assert(type(ticket.StartedAt)=="number"and os.time()-ticket.StartedAt<900
+                and type(ticket.Hops)=="number"and ticket.Hops<12,"Safe Mode search limit reached · no fallback kick")
+        end
+        return ticket
+    end
+    local kickFallback
+    if ctx.MakeKickFallback then
+        kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
+            Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
+            Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,
+            Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Pause=function()
+                workerIdentity();state.SafeKickFallbackBusy=true
+                api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
+                state.PanicToSpawn()
+            end,
+            Block=function(person,active)return state.BlockPlayerNative(person,active)end,
+            Prepare=function(person)
+                local ticket=fallbackTicket() or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
+                    RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
+                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
+                ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
+                ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
+                ticket.LastBlockedUserId=person.UserId
+                save(ticket)
+                state.QueueAutomation()
+            end,
+            Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,
+            Kick=function(message)player:Kick(message)end,
+            Finish=function()state.SafeKickFallbackBusy=false end,
+            Status=function(message)state.SafeModeStatus=message;refresh()end})
+        state.SafeKickFallback=kickFallback
+    end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
+            if kickFallback then kickFallback.MarkStarted()end
             escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
@@ -524,7 +567,7 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
-                if state.ModeratorBlocking then return end
+                if state.ModeratorBlocking or state.SafeKickFallbackBusy or (kickFallback and kickFallback.Armed)then return end
                 friend.Update(os.clock())
                 safe.Update()
                 if state.AccountProgression then
@@ -539,8 +582,9 @@ end
     -- Population monitoring stays responsive even while the search worker yields.
     task.spawn(function()
         while state.Running do
-            if safe.ObserveProtected then pcall(safe.ObserveProtected)end
-            task.wait(.25)
+            if kickFallback then pcall(kickFallback.Update,os.clock())end
+            if not state.SafeKickFallbackBusy and not(kickFallback and kickFallback.Armed)and safe.ObserveProtected then pcall(safe.ObserveProtected)end
+            task.wait(state.SafeMode and .1 or 1)
         end
     end)
     return api
