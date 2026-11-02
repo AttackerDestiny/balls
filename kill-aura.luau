@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.shared-safe-autosave-v1.9.0"
-local VERSION="1.9.0"
+local BUILD="2026-11-02.safe-mode-recovery-v1.9.1"
+local VERSION="1.9.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6148,7 +6148,7 @@ do
 return function(ctx)
     local api = {Active=false, Phase="Idle", Status="Ready", JobId=ctx.JobId}
     local generation, soloSince, settleUntil, hopDeadline = 0, nil, 0, nil
-    local ticket, blocked, pendingPlayer, busy
+    local ticket, blocked, pendingPlayer, busy, retryBlockId
     local function announce(message)
         api.Status = message
         if ctx.Notify then ctx.Notify(api) end
@@ -6162,7 +6162,19 @@ return function(ctx)
         local ok, result = pcall(ctx.Save, ticket)
         if not ok or result ~= true then error("Could not save the search; stopped before rejoining") end
     end
+    local function recoverable(message)
+        local text=tostring(message or ""):lower()
+        return text:find("block dialog did not open",1,true)~=nil
+            or text:find("did not confirm the block",1,true)~=nil
+            or text:find("block was not confirmed",1,true)~=nil
+            or text:find("getblockeduserids",1,true)~=nil
+            or text:find("blocked-user list",1,true)~=nil
+            or text:find("another native block confirmation",1,true)~=nil
+            or text:find("has not been registered",1,true)~=nil
+    end
     function api.Stop(message,outcome)
+        api.RetryWasTeleporting=api.Phase=="Teleporting"
+        api.Retryable=outcome~="Safe"and (api.RetryWasTeleporting or recoverable(message))
         generation = generation + 1
         api.Active, api.Phase = false, "Idle"
         api.Outcome=outcome or "Stopped"
@@ -6192,6 +6204,7 @@ return function(ctx)
             return false
         end
         generation = generation + 1
+        retryBlockId=nil
         local token = generation
         api.Active, api.Phase = true, "Preparing"
         api.Outcome="Searching"
@@ -6273,7 +6286,7 @@ return function(ctx)
         local candidates = {}
         for _, target in ipairs(others) do
             if blocked[target.UserId] then
-                if ticket.Hops == 0 then ticket.LastBlockedUserId = target.UserId; hop(token); return end
+                if ticket.Hops == 0 or retryBlockId==target.UserId then ticket.LastBlockedUserId = target.UserId; hop(token); return end
                 error("A blocked player is in the joined server; matchmaking exclusion is not reliable here")
             end
             local friend = ctx.IsFriend(target)
@@ -6284,6 +6297,7 @@ return function(ctx)
         local target = ctx.ChooseTarget and ctx.ChooseTarget(candidates) or candidates[ctx.Random(#candidates)]
         if not ctx.IsPresent(target) then settleUntil = ctx.Clock() + 2; return end
         announce("Blocking @" .. target.Name .. "...")
+        retryBlockId=target.UserId
         local success = ctx.Block(target, function() return live(token) end)
         if not live(token) then return end
         if success ~= true then error("Roblox rejected the block; no rejoin attempted") end
@@ -6306,6 +6320,39 @@ return function(ctx)
     function api.TeleportFailed(message)
         if api.Active and api.Phase == "Teleporting" then api.Stop("Rejoin failed: " .. tostring(message)) end
     end
+    function api.Retry()
+        if api.Active or busy or not api.Retryable then return false end
+        if not ticket then return api.Start()end -- Preflight failed before any block/hop.
+        if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then
+            api.Retryable=false;announce("Search limit reached · toggle Safe Mode OFF/ON to begin a new search");return false
+        end
+        local wasTeleporting=api.RetryWasTeleporting
+        generation=generation+1;local token=generation
+        api.Active=true;api.Phase="Preparing";api.Outcome="Searching";busy=true
+        local ok,message=pcall(function()
+            ctx.Preflight()
+            if not live(token)then return end
+            blocked=ctx.GetBlocked();assert(type(blocked)=="table","Could not read the blocked-user list")
+            if not live(token)then return end
+            ticket.Active=true;persist()
+            if not live(token)then return end
+            if wasTeleporting then
+                local outsiders=0
+                for _,person in ipairs(ctx.GetPlayers())do
+                    if not ctx.IsAllowed or not ctx.IsAllowed(person)then outsiders=outsiders+1 end
+                end
+                if outsiders>0 then
+                    assert(ticket.LastBlockedUserId and blocked[ticket.LastBlockedUserId],"Cannot verify previous block · no rejoin attempted")
+                    hop(token);return
+                end
+            end
+            settleUntil=ctx.Clock();soloSince=nil;api.Phase="Waiting"
+            announce("Retrying Safe Mode · checking this server")
+        end)
+        busy=false
+        if not ok and live(token)then api.Stop(readable(message))end
+        return ok and live(token)
+    end
     function api.Destroy(preserveResume)
         if preserveResume then
             generation = generation + 1
@@ -6323,17 +6370,29 @@ return function(ctx)
     local state,search=ctx.State,ctx.Search
     local api={Seeking=false}
     local started=false
+    local retries,retryAt=0,nil
+    local clock=ctx.Clock or os.clock
     local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
     function api.Update()
-        if not state.SafeMode or not state.Running or state.ModeratorBlocking then return end
+        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
         if api.Paused then
             local protected=ctx.CurrentFloor()==targetFloor()
             for _,person in ipairs(ctx.Players()) do if not ctx.Allowed(person) then protected=false;break end end
-            if protected then api.Paused=false;api.PauseReason=nil
+            if protected then api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
             else
                 api.Seeking=true;if ctx.Panic then ctx.Panic() end
-                ctx.Status("Holding at spawn · "..tostring(api.PauseReason));return
+                if search.Retryable and type(search.Retry)=="function"and retries<3 then
+                    retryAt=retryAt or clock()+math.min(8,2^(retries+1))
+                    if clock()>=retryAt then
+                        retries=retries+1;retryAt=nil
+                        api.Paused=false;started=search.Retry()==true
+                        if not started then api.Pause(search.Status)end
+                        return
+                    end
+                    ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
+                else ctx.Status("Holding at spawn · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
+                return
             end
         end
         if state.SafeWhitelistResolving then
@@ -6374,7 +6433,7 @@ return function(ctx)
         if not started then api.Pause(search.Status);ctx.Save() end
     end
     function api.Pause(reason)
-        api.Paused=true;api.PauseReason=reason;api.Seeking=true
+        api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
         if ctx.Panic then ctx.Panic() end
         ctx.Status("Holding at spawn · "..tostring(reason))
     end
@@ -6385,7 +6444,7 @@ return function(ctx)
         end
     end
     function api.Reset()
-        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil
+        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
         if search.Active then search.Stop("Safe Mode settings changed") end
         if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
     end

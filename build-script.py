@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "SERVER ISOLATION": "server-isolation.module.luau",
     "AUTO DISMANTLE": "auto-dismantle.module.luau",
     "SKILL VISUALS": "skill-visuals.module.luau",
     "RESTART SCRIPT": "restart-script.module.luau",
@@ -55,7 +56,7 @@ def main():
     original = BODY.read_text(encoding="utf-8")
     body = original
     for marker, name in MODULES.items():
-        start, end = f"-- BEGIN BUNDLED {marker}\n", f"-- END BUNDLED {marker}"
+        start, end = f"-- BEGIN BUNDLED {marker}\n", f"-- END BUNDLED {marker}\n"
         assert body.count(start) == 1 and body.count(end) == 1, marker
         before, rest = body.split(start, 1)
         _, after = rest.split(end, 1)

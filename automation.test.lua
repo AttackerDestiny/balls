@@ -9,8 +9,8 @@ local function safeFixture()
     function search.Start()search.Starts=search.Starts+1;search.Active=true;search.Outcome="Searching";return true end
     function search.Update()end
     function search.Stop()search.Active=false;search.Outcome="Stopped"end
-    local f={State=s,Search=search,People={},White={},Floor=11,FloorChanges=0,Saves=0}
-    f.Api=safeFactory({State=s,Search=search,CurrentFloor=function()return f.Floor end,
+    local f={State=s,Search=search,People={},White={},Floor=11,FloorChanges=0,Saves=0,Clock=0}
+    f.Api=safeFactory({Clock=function()return f.Clock end,State=s,Search=search,CurrentFloor=function()return f.Floor end,
         TargetFloor=function()return f.ProgressionTarget or s.SafeFloorId end,Players=function()return f.People end,
         Allowed=function(p)return f.White[p.UserId]==true end,Travelling=function()return false end,
         ChangeFloor=function()f.FloorChanges=f.FloorChanges+1 end,Status=function(t)f.Status=t end,Save=function()f.Saves=f.Saves+1 end})
@@ -33,6 +33,23 @@ test("successful search monitors; failures keep Safe Mode holding",function()
     f.People={{UserId=3}};f.Api.Update();f.Search.Active=false;f.Search.Outcome="Stopped";f.Api.Update()
     assert(f.State.SafeMode and f.Api.Paused and f.Saves==1)
     f.People={};f.Api.Update();assert(not f.Api.Paused and not f.Api.Seeking)
+end)
+test("Safe Mode retries temporary failures three times without restarting fresh searches",function()
+    local f=safeFixture();f.People={{UserId=2}};f.Api.Update();f.Api.Update()
+    f.Search.Active=false;f.Search.Outcome="Stopped";f.Search.Retryable=true
+    local calls=0;f.Search.Retry=function()calls=calls+1;return false end
+    f.Api.Update();f.Api.Update();f.Clock=1.9;f.Api.Update();assert(calls==0)
+    f.Clock=2;f.Api.Update();assert(calls==1)
+    f.Api.Update();f.Clock=6;f.Api.Update();assert(calls==2)
+    f.Api.Update();f.Clock=14;f.Api.Update();assert(calls==3)
+    f.Clock=100;f.Api.Update();assert(calls==3 and f.Api.Paused and f.Search.Starts==1)
+    f.People={};f.Api.Update();assert(not f.Api.Paused and not f.Api.Seeking)
+end)
+test("Permanent failures and Stop Everything cannot auto-restart a search",function()
+    local f=safeFixture();f.People={{UserId=2}};f.Api.Pause("No queue support")
+    local calls=0;f.Search.Retry=function()calls=calls+1;return true end
+    f.Clock=100;f.Api.Update();assert(calls==0)
+    f.Search.Retryable=true;f.State.StopEverything=true;f.Api.Update();assert(calls==0)
 end)
 test("panic fires synchronously for an outsider and not for whitelist",function()
     local f=safeFixture();local panics=0

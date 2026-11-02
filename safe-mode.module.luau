@@ -2,17 +2,29 @@ return function(ctx)
     local state,search=ctx.State,ctx.Search
     local api={Seeking=false}
     local started=false
+    local retries,retryAt=0,nil
+    local clock=ctx.Clock or os.clock
     local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
     function api.Update()
-        if not state.SafeMode or not state.Running or state.ModeratorBlocking then return end
+        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
         if api.Paused then
             local protected=ctx.CurrentFloor()==targetFloor()
             for _,person in ipairs(ctx.Players()) do if not ctx.Allowed(person) then protected=false;break end end
-            if protected then api.Paused=false;api.PauseReason=nil
+            if protected then api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
             else
                 api.Seeking=true;if ctx.Panic then ctx.Panic() end
-                ctx.Status("Holding at spawn · "..tostring(api.PauseReason));return
+                if search.Retryable and type(search.Retry)=="function"and retries<3 then
+                    retryAt=retryAt or clock()+math.min(8,2^(retries+1))
+                    if clock()>=retryAt then
+                        retries=retries+1;retryAt=nil
+                        api.Paused=false;started=search.Retry()==true
+                        if not started then api.Pause(search.Status)end
+                        return
+                    end
+                    ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
+                else ctx.Status("Holding at spawn · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
+                return
             end
         end
         if state.SafeWhitelistResolving then
@@ -53,7 +65,7 @@ return function(ctx)
         if not started then api.Pause(search.Status);ctx.Save() end
     end
     function api.Pause(reason)
-        api.Paused=true;api.PauseReason=reason;api.Seeking=true
+        api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
         if ctx.Panic then ctx.Panic() end
         ctx.Status("Holding at spawn · "..tostring(reason))
     end
@@ -64,7 +76,7 @@ return function(ctx)
         end
     end
     function api.Reset()
-        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil
+        started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
         if search.Active then search.Stop("Safe Mode settings changed") end
         if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
     end

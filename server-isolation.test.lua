@@ -153,4 +153,32 @@ test("Confirmed blocks need no second settle timer before the final native reche
     g.start();g.tick(.16);g.blocked={};g.tick(.17)
     assert(g.hops==0 and not g.api.Active,"Fast rejoin still requires native block confirmation")
 end)
+test("Transient blocked-list failure recovers within the same search budget",function()
+    local f=fixture();f.start();local began=f.saved.StartedAt
+    f.ctx.GetBlocked=function()error("GetBlockedUserIds has not been registered")end
+    f.tick(8);assert(not f.api.Active and f.api.Retryable)
+    f.ctx.GetBlocked=function()return copy(f.blocked)end
+    assert(f.api.Retry());assert(f.saved.StartedAt==began and f.saved.Hops==0)
+    f.tick(9);f.tick(12);assert(f.blocks==1 and f.hops==1)
+end)
+test("Rejoin retry reconfirms the previous block and never adds another block",function()
+    local f=fixture();f.start();f.tick(8);f.tick(11);f.api.TeleportFailed("temporary failure")
+    assert(f.api.Retryable and not f.api.Active and f.api.Retry())
+    assert(f.blocks==1 and f.hops==2 and f.saved.Hops==2 and f.saved.StartedAt==1000)
+    f.api.TeleportFailed("temporary failure");f.blocked={};assert(not f.api.Retry())
+    assert(f.hops==2 and not f.api.Retryable)
+end)
+test("Search limits and missing executor support never gain an automatic restart",function()
+    local f=fixture();f.ctx.Preflight=function()error("No queue_on_teleport support")end
+    assert(not f.start()and not f.api.Retryable and not f.api.Retry())
+    f=fixture();f.start();f.tick(8);f.tick(11);f.api.TeleportFailed("temporary")
+    f.wall=1900;assert(not f.api.Retry()and f.hops==1 and not f.api.Retryable)
+end)
+test("A late block acknowledgment recovers without prompting or blocking twice",function()
+    local f=fixture();f.start()
+    f.ctx.Block=function(target)f.blocks=f.blocks+1;f.blocked[target.UserId]=true;error("Roblox did not confirm the block; no rejoin attempted")end
+    f.tick(8);assert(f.api.Retryable and not f.api.Active and f.hops==0)
+    assert(f.api.Retry());f.tick(9)
+    assert(f.blocks==1 and f.hops==1 and f.saved.LastBlockedUserId==2)
+end)
 print("All " .. count .. " server-isolation scenarios passed")

@@ -43,6 +43,7 @@ def main():
     print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
     for marker, name in [
+        ("SERVER ISOLATION", "server-isolation.module.luau"),
         ("SHARED SETTINGS", "shared-settings.module.luau"),
         ("MODERATOR WATCH", "moderator-watch.module.luau"),
         ("ENEMY HEALTH", "enemy-health.module.luau"),
