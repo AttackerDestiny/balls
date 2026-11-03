@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.saved-spot-label-v1.12.18"
-local VERSION="1.12.18"
+local BUILD="2026-11-03.feather-ui-button-v1.12.19"
+local VERSION="1.12.19"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -930,10 +930,11 @@ local hideUI=create("TextButton",{Name="HideUI",Text="-",Font=Enum.Font.GothamBo
     Size=UDim2.fromOffset(30,30),Position=UDim2.new(1,-78,0,12),BackgroundColor3=Color3.fromRGB(34,37,49),
     BorderSizePixel=0,TextColor3=Color3.fromRGB(188,192,210)},panel)
 corner(hideUI,8)
-local showUI=create("TextButton",{Name="ShowUI",Text="Show UI",Visible=false,Font=Enum.Font.GothamBold,TextSize=12,
-    Size=UDim2.fromOffset(96,34),Position=UDim2.new(1,-108,0,12),BackgroundColor3=Color3.fromRGB(93,72,174),
-    BorderSizePixel=0,TextColor3=Color3.fromRGB(239,234,255)},gui)
-corner(showUI,8)
+local showUI=create("TextButton",{Name="ShowUI",Text="🪶",Visible=false,Font=Enum.Font.GothamBold,TextSize=26,
+    Size=UDim2.fromOffset(44,44),Position=UDim2.new(.5,0,0,48),AnchorPoint=Vector2.new(.5,0),
+    BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0,TextColor3=Color3.fromRGB(239,239,241)},gui)
+corner(showUI,22)
+create("UIStroke",{Color=Color3.fromRGB(255,255,255),Transparency=.8,Thickness=1},showUI)
 function state.SetUIVisible(visible)
     panel.Visible=visible==true
     showUI.Visible=not panel.Visible
@@ -24965,6 +24966,16 @@ end
             return nativeMake(path)
         end},{__index=base}))
         library=run()
+        pcall(function()
+            local icon=library.Creator.Icon("feather")
+            if icon then
+                create("ImageLabel",{Name="FeatherIcon",BackgroundTransparency=1,Size=UDim2.fromOffset(26,26),
+                    Position=UDim2.fromScale(.5,.5),AnchorPoint=Vector2.new(.5,.5),Image=icon[1],
+                    ImageRectSize=icon[2].ImageRectSize,ImageRectOffset=icon[2].ImageRectPosition,
+                    ImageColor3=Color3.fromRGB(239,239,241)},showUI)
+                showUI.Text=""
+            end
+        end)
         roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
         local camera=workspace.CurrentCamera
         local size=camera and camera.ViewportSize or Vector2.new(1280,720)
@@ -24983,7 +24994,7 @@ end
             end,
             Visibility=function(visible)
                 panel.Visible=false
-                if state.Running then showUI.Visible=true;showUI.Text=visible and "Hide UI"or "Show UI" else showUI.Visible=false end
+                if state.Running then showUI.Visible=true else showUI.Visible=false end
                 roots(function(root)root.Enabled=visible end)
             end})
         state.WindUI=controller
