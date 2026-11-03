@@ -92,9 +92,13 @@ return function(source)
         Teleport=function()record("TeleportPlayer")end,
         SetViewing=function(on)record("SetViewing",on);s.ViewingPlayer=on end,
         SetInventoryVisible=function(on)record("SetInventoryVisible",on);s.ViewingPlayerInventory=on end}
+    local present=false
     local visible=true
-    local api=make({State=s,WindUI=wind,PlaceId=11,Visibility=function(value)visible=value end})
+    local api=make({State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
     local c=api.Controls
+    assert(c.AutoJoinFriendStatus.Title=="Status"and c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
+    present=true;api.Update(.3);assert(c.AutoJoinFriendStatus.Desc=="Friend Appeared")
+    present=false;api.Update(.6);assert(c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
     assert(c.RestartScript.Topbar,"Restart belongs in the window header")
     for _,key in ipairs({"MultiSpotStatus","TransparentMap","ProgressionStatus","ProgressionGear","PlayerInventory","PlayerStatus","AutoDismantleStatus","TradeStatus","TradeVelInfo","AntiAfkStatus","ModeratorStatus","SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
     assert(c.SafeMode.Desc==nil and c.SafeFloor.Desc==nil)

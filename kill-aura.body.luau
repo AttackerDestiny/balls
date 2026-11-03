@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.whitelist-label-v1.12.20"
-local VERSION="1.12.20"
+local BUILD="2026-11-03.friend-presence-status-v1.12.21"
+local VERSION="1.12.21"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24814,7 +24814,10 @@ return function(ctx)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
     end)
     stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
-    paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
+    paragraph("AutoJoinFriendStatus","Main","Status",function()
+        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
+        return ctx.FriendPresent and ctx.FriendPresent(name)and "Friend Appeared"or "Friend Unappeared"
+    end)
     local restart=guard(function()invoke("RestartScript")end)
     api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
     api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
@@ -24982,6 +24985,13 @@ end
         state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
         local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,
+            FriendPresent=function(name)
+                if name==""then return false end
+                for _,person in ipairs(Players:GetPlayers())do
+                    if person~=player and person.Name:lower()==name:lower()then return true end
+                end
+                return false
+            end,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
             MarkAutoHide=function(button,on)

@@ -148,7 +148,10 @@ return function(ctx)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
     end)
     stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
-    paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
+    paragraph("AutoJoinFriendStatus","Main","Status",function()
+        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
+        return ctx.FriendPresent and ctx.FriendPresent(name)and "Friend Appeared"or "Friend Unappeared"
+    end)
     local restart=guard(function()invoke("RestartScript")end)
     api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
     api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
