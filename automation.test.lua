@@ -43,10 +43,10 @@ test("Safe Mode retries temporary failures three times without restarting fresh 
     local f=safeFixture();f.People={{UserId=2}};f.Api.Update();f.Api.Update()
     f.Search.Active=false;f.Search.Outcome="Stopped";f.Search.Retryable=true
     local calls=0;f.Search.Retry=function()calls=calls+1;return false end
-    f.Api.Update();f.Api.Update();f.Clock=1.9;f.Api.Update();assert(calls==0)
-    f.Clock=2;f.Api.Update();assert(calls==1)
-    f.Api.Update();f.Clock=6;f.Api.Update();assert(calls==2)
-    f.Api.Update();f.Clock=14;f.Api.Update();assert(calls==3)
+    f.Api.Update();f.Api.Update();f.Clock=.49;f.Api.Update();assert(calls==0)
+    f.Clock=.5;f.Api.Update();assert(calls==1)
+    f.Api.Update();f.Clock=1.5;f.Api.Update();assert(calls==2)
+    f.Api.Update();f.Clock=3.5;f.Api.Update();assert(calls==3)
     f.Clock=100;f.Api.Update();assert(calls==3 and f.Api.Paused and f.Search.Starts==1)
     f.People={};f.Api.Update();assert(not f.Api.Paused and not f.Api.Seeking)
 end)

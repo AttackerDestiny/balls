@@ -45,5 +45,13 @@ return function(source)
         local f=fixture();f.Visible=true;f.ConfirmAt=0
         assert(f.Run({},f.Live)and f.Prompts==0 and f.Clicks==0)
     end)
+    test("Authoritative block acknowledgment can return on its first observation",function()
+        local now,clicks,confirmAt=0,0,math.huge
+        local run=make({Now=function()return now end,Find=function()return {}end,
+            Ready=function()return true end,Key=function()return "stable"end,Prompt=function()end,
+            Click=function()clicks+=1;confirmAt=now+.03 end,Sleep=function(dt)now+=dt end,
+            Blocked=function()return now>=confirmAt end,Settle=function()return 0 end})
+        assert(run({},function()return true end)and now<=.181 and clicks==1)
+    end)
     print("All "..count.." native block confirmation scenarios passed")
 end

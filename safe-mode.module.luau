@@ -28,7 +28,7 @@ return function(ctx)
             else
                 api.Seeking=true;if ctx.Panic then ctx.Panic() end
                 if search.Retryable and type(search.Retry)=="function"and retries<3 then
-                    retryAt=retryAt or clock()+math.min(8,2^(retries+1))
+                    retryAt=retryAt or clock()+math.min(2,.5*2^retries)
                     if clock()>=retryAt then
                         retries=retries+1;retryAt=nil
                         api.Paused=false;started=search.Retry()==true

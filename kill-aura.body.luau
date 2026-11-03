@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.config-transfer-v1.12.35"
-local VERSION="1.12.35"
+local BUILD="2026-11-03.fast-safe-mode-v1.12.36"
+local VERSION="1.12.36"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6770,7 +6770,7 @@ return function(ctx)
             else
                 api.Seeking=true;if ctx.Panic then ctx.Panic() end
                 if search.Retryable and type(search.Retry)=="function"and retries<3 then
-                    retryAt=retryAt or clock()+math.min(8,2^(retries+1))
+                    retryAt=retryAt or clock()+math.min(2,.5*2^retries)
                     if clock()>=retryAt then
                         retries=retries+1;retryAt=nil
                         api.Paused=false;started=search.Retry()==true
@@ -7327,7 +7327,7 @@ return function(ctx)
     local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
     local queuedResume = getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket = nil
-    local queue, savedSource,validatedSource
+    local queue, savedSource,validatedSource,validatedPath,validatedGeneration
     local GuiService = game:GetService("GuiService")
     -- Optional desktop input must not prevent Multi Spot / autosave on mobile.
     local virtualInput
@@ -7429,6 +7429,8 @@ return function(ctx)
             or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
         assert(typeof(queue) == "function", "This executor has no queue_on_teleport support")
         assert(isfile(state.SavedScriptPath), "Automatic source installation failed: " .. state.SavedScriptPath)
+        local generation=state.StorageBootstrap and state.StorageBootstrap.Generation or 0
+        if validatedSource and validatedPath==state.SavedScriptPath and validatedGeneration==generation then return end
         savedSource = readfile(state.SavedScriptPath)
         assert(string.find(savedSource, state.Build, 1, true)
             and string.find(savedSource, "-- BEGIN BUNDLED SERVER ISOLATION", 1, true),
@@ -7437,6 +7439,7 @@ return function(ctx)
             assert(loadstring(savedSource), "The saved script does not compile")
             validatedSource=savedSource
         end
+        validatedPath=state.SavedScriptPath;validatedGeneration=generation
     end
     local function preflight()
         queuePreflight()
@@ -7491,7 +7494,8 @@ return function(ctx)
             Key=function(button)return tostring(button.AbsolutePosition).."/"..tostring(button.AbsoluteSize)end,
             Click=click,Now=os.clock,Sleep=task.wait,
             Blocked=function(target)return nativeBlockedEvents[target.UserId]==true or getBlocked()[target.UserId]==true end,
-            Settle=function()return math.clamp((state.PingMs or 100)/1000+.05,.15,.75)end})
+            -- The native event/list is the acknowledgment; no extra ping timer is needed.
+            Settle=function()return 0 end})
     else
         block=function(target,active)
         local confirm = findPrompt(target)
@@ -7938,7 +7942,7 @@ end
             end)
             if not updated then fail(message) end
             refresh()
-            task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .5 or 1)
+            task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .2 or 1)
         end
     end)
     -- Population monitoring stays responsive even while the search worker yields.

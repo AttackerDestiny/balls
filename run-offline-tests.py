@@ -146,6 +146,8 @@ def main():
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    preflight = adapter[adapter.index("    local function queuePreflight()"):adapter.index("    local function preflight()")]
+    fixture += "assert(loadstring(" + quote(read("safe-preflight.test.luau")) + "))()(" + quote(preflight) + ")\n"
     unlock_start = adapter.index("    local ui\n")
     unlock = adapter[unlock_start:adapter.index("    local function snapshot()", unlock_start)]
     selection_start = adapter.index("    function state.SetSafeFloor(id)")
