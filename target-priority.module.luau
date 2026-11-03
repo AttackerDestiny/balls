@@ -32,5 +32,20 @@ return function()
         local bp=b:FindFirstChild("HumanoidRootPart")
         return (ap and (ap.Position-origin).Magnitude or math.huge)<(bp and (bp.Position-origin).Magnitude or math.huge)
     end
+    -- A common order for farming: never use a particular account's position
+    -- or previous target to break ties between otherwise eligible enemies.
+    function api.FarmLess(a,b)
+        if a==b then return false end
+        local ar,br=api.Rank(a),api.Rank(b)
+        if ar~=br then return ar<br end
+        if a.Name~=b.Name then return a.Name<b.Name end
+        local ap=a:FindFirstChild("HumanoidRootPart")or a.PrimaryPart or a:FindFirstChild("RootPart")
+        local bp=b:FindFirstChild("HumanoidRootPart")or b.PrimaryPart or b:FindFirstChild("RootPart")
+        if not ap or not bp then return ap~=nil and bp==nil end
+        local av,bv=ap.Position,bp.Position
+        if av.X~=bv.X then return av.X<bv.X end
+        if av.Z~=bv.Z then return av.Z<bv.Z end
+        return av.Y<bv.Y
+    end
     return api
 end

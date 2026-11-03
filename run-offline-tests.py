@@ -43,6 +43,10 @@ def main():
     print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
     for marker, name in [
+        ("TARGET PRIORITY", "target-priority.module.luau"),
+        ("ATTACK SCHEDULER", "attack-scheduler.module.luau"),
+        ("SKILL ACTIVATION", "skill-activation.module.luau"),
+        ("AURA TOUCH", "aura-touch.module.luau"),
         ("SERVER ISOLATION", "server-isolation.module.luau"),
         ("SHARED SETTINGS", "shared-settings.module.luau"),
         ("MODERATOR WATCH", "moderator-watch.module.luau"),
@@ -94,6 +98,13 @@ def main():
     valid_start = script.index("local function validMob(mob, mobs)")
     valid = script[valid_start:script.index("local function pauseHold", valid_start)] + "\nreturn validMob"
     fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + ")\n"
+    data_start = script.index("local function getMobData(mob)")
+    data = script[data_start:script.index("function state.ReadOwnDamage", data_start)]
+    farm_start = script.index("    if now>=nextAcquisition then")
+    farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
+    # The arena fixture needs validMob returned; the selection fixture embeds its definition.
+    valid_definition = valid.removesuffix("\nreturn validMob")
+    fixture += "assert(loadstring(" + quote(read("farm-sync.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("target-priority.module.luau"), data, valid_definition, farm_selection)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-dodge.test.luau")) + "))()(" + quote(read("atheon-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ground-follow.test.luau")) + "))()(" + quote(read("ground-follow.module.luau")) + ")\n"
     fixture += "local misc=assert(loadstring(" + quote(read("misc-skill.test.luau")) + "))()(" + quote(read("misc-skill.module.luau")) + ")\nassert(misc.Passed)\nprint('PASS Combat-only Cursed Enhancement and support skills')\n"
@@ -101,6 +112,10 @@ def main():
     activity = script[activity_start:script.index("local function pauseHold", activity_start)]
     fixture += "assert(loadstring(" + quote(read("combat-activity.test.luau")) + "))()(" + quote(activity) + ")\n"
     fixture += "assert(loadstring(" + quote(read("skill-burst-timing.test.luau")) + "))()(" + quote(read("skill-burst.module.luau")) + ")\n"
+    skill_start = script.index("local function updateSkillAura()")
+    skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
+    fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
     payload_start = script.index("local function settingsPayload()")
     payload = script[payload_start:script.index("function state.SaveNow()", payload_start)]
     fixture += "assert(loadstring(" + quote(read("above-below.test.luau")) + "))()(" + ",".join(quote(v) for v in (read("auto-range.module.luau"), read("auto-offset.module.luau"), script, payload)) + ")\n"
@@ -178,6 +193,7 @@ def main():
         fixture_file.write_text(fixture, encoding="utf-8")
         subprocess.run([tool("luau"), str(fixture_file)], check=True)
     subprocess.run([tool("luau-compile"), "--null", "kill-aura.luau",
+                    "attack-scheduler.module.luau", "skill-activation.module.luau", "skill-burst.module.luau", "aura-touch.module.luau",
                     "kill-aura.body.luau", "storage-bootstrap.module.luau",
                     "enemy-health.module.luau", "arena-travel.module.luau",
                     "multi-spot.module.luau", "server-isolation-client.module.luau", "runtime-owner.module.luau",

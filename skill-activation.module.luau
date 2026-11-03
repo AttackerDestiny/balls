@@ -1,14 +1,13 @@
--- Adapted from the supplied source's active-skill window: activate once,
--- then send the selected skill's existing damage bursts without spawning VFX.
+-- Supplied-source activation: activate once and keep the skill name active
+-- for its duration. Damage uses the same per-target cooldown as Kill Aura.
 return function(ctx)
     local api={}
     local windows={['Sweeping Strike']=1.4,['Downward Smash']=1,['Leaping Slash']=1.8,['Piercing Dash']=1,['Beam Rush']=2.8,
-        ['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.5,['Meteor Shot']=1,
+        ['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.2,['Meteor Shot']=1,
         ['Everfrost Strike']=1.5,['Cursed Three Fold Slash']=3.3,['Water Blast']=1.2,['Spearitual Strike']=1,
         ['Summon Rifle']=3,['Summon Minigun']=3}
     local retry={}
-    local gunProfiles={['Summon Pistol']={FirstHitDelay=.3,Rounds=1},
-        ['Summon Rifle']={FirstHitDelay=0,Rounds=12,RepeatWindow=true,RefreshTargets=true,MinimumInterval=.26}}
+    local gunProfiles={['Summon Pistol']={FirstHitDelay=0},['Summon Rifle']={FirstHitDelay=0}}
     local owner
     local clock=ctx.Clock or os.clock
     local wait=ctx.Wait or task.wait
@@ -32,9 +31,8 @@ return function(ctx)
         local profile=gunProfiles[name]
         local started=clock()
         local lease={Name=name,Started=started,ExpiresAt=started+api.Window(name),
-            FirstHitAt=started+(profile and profile.FirstHitDelay or 0),Rounds=profile and profile.Rounds or 3,
-            HoldWindow=profile~=nil,RepeatWindow=profile and profile.RepeatWindow,RefreshTargets=profile and profile.RefreshTargets,
-            MinimumInterval=profile and profile.MinimumInterval}
+            FirstHitAt=started+(profile and profile.FirstHitDelay or 0),SourceWindow=true,
+            HoldWindow=true,RefreshTargets=true,MinimumInterval=.3}
         owner=lease
         ctx.Skills.usingSkill=name
         ctx.Skills.SetCooldown(name,cooldown)
@@ -46,7 +44,7 @@ return function(ctx)
         if onEmit then onEmit(lease) end
         local deadline=clock()+math.clamp(.35+(ctx.State.PingMs or 100)/500,.4,1.2)
         repeat
-            if before-stamina.Value>=math.max(1,cost*.5) then
+            if cost<=0 or before-stamina.Value>=math.max(1,cost*.5) then
                 return true,nil,lease
             end
             if not stamina.Parent or not root.Parent or not valid() then return false,"Cast interrupted" end

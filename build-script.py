@@ -8,6 +8,10 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "TARGET PRIORITY": "target-priority.module.luau",
+    "AURA TOUCH": "aura-touch.module.luau",
+    "ATTACK SCHEDULER": "attack-scheduler.module.luau",
+    "SKILL ACTIVATION": "skill-activation.module.luau",
     "SAFE KICK FALLBACK": "safe-kick-fallback.module.luau",
     "TRADE HOLD": "trade-hold.module.luau",
     "AUTO TRADE": "auto-trade.module.luau",

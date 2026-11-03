@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.live-floor-unlocks-v1.10.6"
-local VERSION="1.10.6"
+local BUILD="2026-11-03.source-combat-v1.11.0"
+local VERSION="1.11.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -391,7 +391,7 @@ local state = {
     Build=BUILD, Version=VERSION, UserId=player.UserId, StopEverything=false,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
-    AttackInterval = 0.04, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.04,
+    AttackInterval = 0.30, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.30,
     Threat = math.clamp(math.floor(restore.Threat), 1, 3), BurstsSent = 0, LastBurstSize = 0,
     AttackBurstInterval = 0.30, AttackBurstActive = false, AttackBurstHistory = {},
     BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
@@ -415,7 +415,7 @@ local state = {
     SkillAura = false, SelectedSkill = restore.Skill, SkillCasts = 0, SkillStatus = "Skill aura is off",
     AttackingTarget = nil, HealthUpdates = 0,
     HideSkillAnimation = true, SuppressSkillMotion = true, HiddenSkillAnimations = 0,
-    SkillBurstHits = 3, SkillBurstInterval = 0.24, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
+    SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
     AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, TransparentMap = restore.TransparentMap, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
@@ -464,142 +464,58 @@ local candidates = {}
 local targetCursor = 0
 local normalScheduler=(function()
 -- BEGIN BUNDLED ATTACK SCHEDULER
+-- Supplied-source rule: one damage call per target, then a 0.3s cooldown.
+-- Timestamps replace a delayed coroutine per hit; skills share these timers.
 return function(state)
-    local nextReserveHit,reserving=0,false
     local api={}
-    local active=setmetatable({}, {__mode="k"})
     local nextHit=setmetatable({}, {__mode="k"})
-    local observers={}
-    local tokens,refill=6,os.clock()
+    local tokens,refill=4,os.clock()
+    local nextReserveHit=0
     local ctx
-    function api.Bind(value) ctx=value end
-    function api.SelectThreat(data,distance,range,hasCredit)
-        if state.ReserveGunStamina then state.CurrentThreat=1; state.ThreatReason="Recovering gun stamina"; return 1,state.ThreatReason end
-        local maximum=math.clamp(math.floor(state.Threat),1,3)
-        local cap,reason=maximum,"Stable target"
-        if maximum==3 then
-            if not hasCredit and not data.RegisteredDamage then cap=1; reason="Registering target"
-            elseif (data.AttackBackoff or 1)>1 or (data.AttackMisses or 0)>0 then cap=1; reason="Checking missed hits"
-            elseif (state.PingMs or 0)>450 or (state.AverageFrameTime or 0)>1/35 then cap=1; reason="Network/frame pressure"
-            elseif (state.PingMs or 0)>380 then cap=2; reason="High latency"
-            end
-            if distance>range-1.5 then cap=1; reason="Edge of reach"
-            elseif distance>range-4 then cap=math.min(cap,2); reason="Near reach boundary" end
-        end
-        if data.HitLives then cap=math.min(cap,math.max(1,math.floor(data.HitLives.Value))) end
-        if data.NormalDamagePerHit and data.NormalDamagePerHit>0 then
-            cap=math.min(cap,math.max(1,math.ceil(data.Health.Value/data.NormalDamagePerHit)))
-        end
-        local desired=cap
-        if maximum==3 and cap>1 then
-            local roll=(ctx.RandomInteger or math.random)(1,100)
-            desired=math.min(cap,roll<=15 and 1 or roll<=45 and 2 or 3)
-            reason=reason.." · varied burst"
-        end
-        state.CurrentThreat, state.ThreatReason=desired,reason
-        return desired,reason
-    end
-    local function snapshot(record,reason)
-        if record.Finished then return end
-        record.Finished=true
-        record.Status=reason
-        record.After=record.Health.Value
-        record.HealthDamage=math.max(0,record.Before-record.After)
-        local credited=ctx.Contribution and ctx.Contribution(record.Health,record.Counter)
-        record.Damage=credited~=nil and math.max(0,credited-(record.BeforeContribution or 0)) or record.HealthDamage
-        record.FinishedAt=os.clock()
-        if record.Connection then record.Connection:Disconnect(); observers[record.Connection]=nil end
-        state.LastBurstSize=record.Requested
-        if record.Requested==record.Desired then state.BurstsSent+=1 end
-        state.AttackBurstHistory[#state.AttackBurstHistory+1]=record
-        if #state.AttackBurstHistory>8 then table.remove(state.AttackBurstHistory,1) end
-    end
+    function api.Bind(value)ctx=value end
+    function api.Ready(mob,now)return now>=(nextHit[mob] or 0)end
+    function api.Next(mob)return nextHit[mob] or 0 end
+    function api.Mark(mob,now,gap)nextHit[mob]=now+math.max(.3,gap or 0)end
     function api.Cancel(reason)
-        for mob,record in pairs(active) do snapshot(record,reason or "Paused"); active[mob]=nil end
         state.AttackBurstActive=false
+        state.ThreatReason=reason or "Paused"
     end
-    function api.Destroy()
-        api.Cancel("Script closed")
-        for connection in pairs(observers) do connection:Disconnect() end
-        observers={}
-    end
+    function api.Destroy()api.Cancel("Script closed");table.clear(nextHit)end
     function api.Update(now,candidates,root,folder)
+        state.AttackBurstActive=false
+        if state.StopEverything or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy then return end
         local reserve=state.ReserveGunStamina==true
-        if reserve~=reserving then
-            api.Cancel("Switching gun stamina pacing"); reserving=reserve; nextReserveHit=0
-        end
+        if state.SkillWantsWindow and not reserve then return "Skill aura owns damage" end
         if reserve and now<nextReserveHit then return end
-        local batch=math.clamp(state.FrameRequestCap or 4,1,4)
-        if reserve then batch=1 end
-        local gap=math.max(0.24,state.AttackInterval or 0,0.24+math.min(0.04,(state.PingMs or 0)/10000))
-        state.EffectiveInterval=gap
+        local batch=reserve and 1 or math.clamp(state.FrameRequestCap or 4,1,4)
         tokens=math.min(batch,tokens+math.max(0,now-refill)*(state.MaxRequestsPerSecond or 48))
         refill=now
-        local activeCount=0
-        for mob,record in pairs(active) do
-            if mob.Parent~=folder or record.Health.Value<=0 then snapshot(record,"Target defeated or removed"); active[mob]=nil
-            else
-                if now<(record.NextRangeCheck or 0) then activeCount+=1; continue end
-                record.NextRangeCheck=now+.1
-                local data=ctx.GetData(mob)
-                local range=ctx.Radius(mob)
-                local delta=data and (ctx.Delta and ctx.Delta(data,root) or data.Root.Position-root.Position)
-                if not delta or delta:Dot(delta)>range*range then
-                    record.OutOfReachAt=record.OutOfReachAt or now
-                    if now-record.OutOfReachAt>0.4 then snapshot(record,"Target moved out of reach"); active[mob]=nil
-                    else activeCount+=1 end
-                else activeCount+=1 end
-            end
-        end
-        local sent,visual=0,false
-        for _,mob in ipairs(candidates) do
+        local gap=math.max(.3,state.AttackInterval or 0)
+        state.EffectiveInterval=gap
+        state.CurrentThreat=1;state.ThreatReason="Source per-target cooldown"
+        local sent=0
+        for _,mob in ipairs(candidates)do
             if sent>=batch or tokens<1 then break end
-            if now<(nextHit[mob] or 0) then continue end
-            if not active[mob] and ((state.SkillWantsWindow and not reserve) or activeCount>=8) then continue end
+            if state.SkillRegistrationTarget and not state.Enabled and mob~=state.SkillRegistrationTarget then continue end
+            if not api.Ready(mob,now)then continue end
             local data=mob.Parent==folder and ctx.GetData(mob)
-            local record=active[mob]
-            if data and data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0) and not data.Entity:FindFirstChild("Immortal") then
-                local delta=ctx.Delta and ctx.Delta(data,root) or data.Root.Position-root.Position
-                local range=ctx.Radius(mob)
-                if delta:Dot(delta)<=range*range then
-                    if now>=(nextHit[mob] or 0) and tokens>=1 and sent<batch
-                        and (record or ((not state.SkillWantsWindow or reserve) and activeCount<8)) then
-                        if not record then
-                            record={Target=mob,TargetName=mob.Name,Requested=0,Health=data.Health,Before=data.Health.Value,HealthDrops=0,Values={},Status="Sending burst"}
-                            if ctx.Contribution then record.BeforeContribution,record.Counter=ctx.Contribution(data.Health) end
-                            record.Desired,record.ThreatReason=api.SelectThreat(data,delta.Magnitude,range,record.BeforeContribution~=nil)
-                            local before=data.Health.Value
-                            record.Connection=data.Health:GetPropertyChangedSignal("Value"):Connect(function()
-                                local hp=data.Health.Value
-                                if hp<before then record.HealthDrops+=1; if #record.Values<8 then record.Values[#record.Values+1]=hp end end
-                                before=hp
-                            end)
-                            observers[record.Connection]=true
-                            active[mob]=record; activeCount+=1
-                        end
-                        record.OutOfReachAt=nil
-                        ctx.Damage(mob)
-                        nextHit[mob]=now+gap*math.max(1,data.AttackBackoff or 1)
-                        record.Requested+=1
-                        state.LastAttackBurst=record
-                        ctx.Sent(mob,data,now)
-                        if reserve then nextReserveHit=now+.5 end
-                        if not visual then ctx.Visual(); visual=true end
-                        sent+=1; tokens-=1
-                        if record.Requested>=record.Desired then
-                            active[mob]=nil; activeCount-=1
-                            local complete=record
-                            task.delay(math.clamp((state.PingMs or 150)/1000+0.05,0.2,0.6),function() snapshot(complete,"Burst complete") end)
-                        end
-                    end
-                elseif record then
-                    record.OutOfReachAt=record.OutOfReachAt or now
-                    if now-record.OutOfReachAt>0.4 then snapshot(record,"Target moved out of reach"); active[mob]=nil; activeCount-=1 end
-                end
-            elseif record then snapshot(record,"Target unavailable"); active[mob]=nil; activeCount-=1 end
+            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
+                or data.Entity:FindFirstChild("Immortal")then continue end
+            local delta=ctx.Delta and ctx.Delta(data,root)or data.Root.Position-root.Position
+            local range=ctx.Radius(mob)
+            if delta:Dot(delta)>range*range then continue end
+            ctx.Damage(mob)
+            api.Mark(mob,now,gap*math.max(1,data.AttackBackoff or 1))
+            ctx.Sent(mob,data,now)
+            sent+=1;tokens-=1
+            if reserve then nextReserveHit=now+.5 end
         end
-        state.AttackBurstActive=activeCount>0
-        return #candidates>0 and string.format("Active · %d targets · %d requests",#candidates,state.HitsSent) or "Active · waiting for mobs"
+        if sent>0 then
+            state.LastBurstSize=1
+            state.BurstsSent=(state.BurstsSent or 0)+sent
+            ctx.Visual()
+        end
+        return #candidates>0 and string.format("Active · %d targets · %d requests",#candidates,state.HitsSent or 0)or "Active · waiting for mobs"
     end
     return api
 end
@@ -616,7 +532,7 @@ return function(ctx)
     local cancelled=false
     local rounds=math.clamp(ctx.Rounds or 3,1,ctx.RepeatWindow and 12 or 3)
     local seen={}
-    record.Desired=rounds
+    record.Desired=ctx.SourceWindow and "Active window" or rounds
     record.Targets={}
     record.TotalRequests=0
     local function captureTargets(first)
@@ -625,7 +541,7 @@ return function(ctx)
         for _,mob in ipairs(ctx.Targets(first)) do
             local data=ctx.Valid(mob)
             local item=seen[mob]
-            if data and not item and #record.Targets<(ctx.RefreshTargets and 16 or 8) then
+            if data and not item and (ctx.SourceWindow or #record.Targets<(ctx.RefreshTargets and 16 or 8)) then
                 item={Target=mob,TargetName=mob.Name,Health=data.Health,Before=data.Health.Value,Requested=0,HealthDrops=0}
                 seen[mob]=item
                 item.Distance=ctx.Distance and ctx.Distance(mob,data) or nil
@@ -648,11 +564,53 @@ return function(ctx)
             if data and item and not included[mob] then
                 included[mob]=true
                 current[#current+1]=item
-                if #current>=8 then break end
+                if not ctx.SourceWindow and #current>=8 then break end
             end
         end
         record.TargetCount=#record.Targets
         return current
+    end
+    local function runSourceWindow(extra)
+        local nextScan=0
+        local targets={}
+        local tokens,refill=math.clamp(state.FrameRequestCap or 4,1,4),os.clock()
+        local nextHit=setmetatable({}, {__mode="k"})
+        record.Status="Source skill window"
+        while not cancelled and not state.StopEverything and ctx.CanRun() and os.clock()<ctx.ExpiresAt do
+            local now=os.clock()
+            if now>=nextScan then targets=captureTargets();nextScan=now+.08 end
+            local batch=math.clamp(state.FrameRequestCap or 4,1,4)
+            tokens=math.min(batch,tokens+math.max(0,now-refill)*(state.MaxRequestsPerSecond or 48));refill=now
+            local sent=0
+            for _,item in ipairs(targets)do
+                if sent>=batch or tokens<1 then break end
+                if cancelled or state.StopEverything or not ctx.CanRun() or os.clock()>=ctx.ExpiresAt then break end
+                now=os.clock()
+                if ctx.Pacing and not ctx.Pacing.Ready(item.Target,now)or now<(nextHit[item.Target]or 0)then continue end
+                local data=ctx.Valid(item.Target)
+                if not data then continue end
+                if ctx.Budget and ctx.Budget.Remaining(item,data.Health.Value,now)<=0 then
+                    record.SkippedOverkill=(record.SkippedOverkill or 0)+1;continue
+                end
+                local hp=data.Health.Value
+                if ctx.Send(item.Target,data,extra)==false then continue end
+                local gap=math.max(.3,ctx.Spacing or 0)
+                if ctx.Pacing then ctx.Pacing.Mark(item.Target,now,gap)end
+                nextHit[item.Target]=now+gap
+                if ctx.Budget then
+                    local estimate=ctx.EstimateDamage and ctx.EstimateDamage(item.Target,data)or 0
+                    ctx.Budget.Reserve(item,hp,estimate,now,math.max(.35,(state.PingMs or 100)/1000+.15))
+                end
+                if record.LastTarget and record.LastTarget~=item.Target then record.Retargets=(record.Retargets or 0)+1 end
+                record.LastTarget=item.Target;record.LastRequestAt=now
+                item.Requested+=1;record.TotalRequests+=1
+                state.SkillHitRequests=(state.SkillHitRequests or 0)+1
+                record.Requested=record.TotalRequests;state.LastSkillBurstSize=record.TotalRequests
+                sent+=1;tokens-=1
+            end
+            task.wait(.03)
+        end
+        record.Status=cancelled and record.Status or "Source skill window completed"
     end
     function api.Start(first,extra)
         if cancelled or state.StopEverything or api.Started or (not ctx.RefreshTargets and not ctx.Valid(first)) then return false end
@@ -665,6 +623,7 @@ return function(ctx)
             local ok,message=pcall(function()
                 local delay=math.max(0,(ctx.FirstHitAt or 0)-os.clock())
                 if delay>0 then task.wait(delay) end
+                if ctx.SourceWindow then runSourceWindow(extra);return end
                 for round=1,rounds do
                     if round>1 then
                         local due=(record.LastRequestAt or os.clock())+ctx.Spacing
@@ -711,7 +670,7 @@ return function(ctx)
                 end
             end)
             if not ok then record.Status="Skill burst error"; state.LastSkillError=tostring(message) end
-            record.FinishedAt=os.clock()
+            record.FinishedAt=record.FinishedAt or os.clock()
         end)
         return true
     end
@@ -777,6 +736,21 @@ return function()
         local bp=b:FindFirstChild("HumanoidRootPart")
         return (ap and (ap.Position-origin).Magnitude or math.huge)<(bp and (bp.Position-origin).Magnitude or math.huge)
     end
+    -- A common order for farming: never use a particular account's position
+    -- or previous target to break ties between otherwise eligible enemies.
+    function api.FarmLess(a,b)
+        if a==b then return false end
+        local ar,br=api.Rank(a),api.Rank(b)
+        if ar~=br then return ar<br end
+        if a.Name~=b.Name then return a.Name<b.Name end
+        local ap=a:FindFirstChild("HumanoidRootPart")or a.PrimaryPart or a:FindFirstChild("RootPart")
+        local bp=b:FindFirstChild("HumanoidRootPart")or b.PrimaryPart or b:FindFirstChild("RootPart")
+        if not ap or not bp then return ap~=nil and bp==nil end
+        local av,bv=ap.Position,bp.Position
+        if av.X~=bv.X then return av.X<bv.X end
+        if av.Z~=bv.Z then return av.Z<bv.Z end
+        return av.Y<bv.Y
+    end
     return api
 end
 
@@ -827,7 +801,9 @@ end
 local function getMobData(mob)
     local cached = mobCache[mob]
     if cached and cached.Root and cached.Root.Parent and cached.Entity.Parent == mob and cached.Health.Parent == cached.Entity then
-        if os.clock()>=(cached.MetaAt or 0) then cached.HitLives=cached.Entity:FindFirstChild("HitLives"); cached.Motion=cached.Root:FindFirstChild("BodyVelocity"); cached.MetaAt=os.clock()+.5 end
+        -- HitLives can arrive or disappear independently of cached geometry.
+        cached.HitLives=cached.Entity:FindFirstChild("HitLives")
+        if os.clock()>=(cached.MetaAt or 0) then cached.Motion=cached.Root:FindFirstChild("BodyVelocity"); cached.MetaAt=os.clock()+.5 end
         return cached
     end
     local now = os.clock()
@@ -1290,6 +1266,7 @@ end
 function state.SetSkillAura(enabled)
     if state.StopEverything and enabled==true then return false end
     state.SkillAura = enabled == true
+    if state.AuraTouch then state.AuraTouch.Update()end
     if state.WakeSkillAura then state.WakeSkillAura() end
     if not state.SkillAura and state.CancelSkillAura then state.CancelSkillAura("Skill aura disabled") end
     skillToggle.Text = state.SkillAura and "Skill aura · ON" or "Skill aura · OFF"
@@ -4333,14 +4310,14 @@ local function updateMovement()
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
     if now>=nextAcquisition then
-        nextAcquisition=now+0.2
+        nextAcquisition=now+0.15
         local preferred=targetRoot and state.FollowTarget or nil
         local best=preferred
         state.TargetScans+=1
         for mob in pairs(trackedMobs) do
             local mobRoot=validMob(mob,mobs)
             if mobRoot and (mobRoot.Position-root.Position).Magnitude<=state.FarmRange then
-                if not best or targetPriority.Less(mob,best,root.Position,preferred) then best=mob end
+                if not best or targetPriority.FarmLess(mob,best) then best=mob end
             end
         end
         state.FollowTarget=best
@@ -4417,6 +4394,67 @@ local function updateMovement()
     end
 end
 
+do
+    local make=(function()
+-- BEGIN BUNDLED AURA TOUCH
+-- The supplied source disables native blade touches while aura sends damage.
+-- Watch only this player's weapon container and restore original properties.
+return function(ctx)
+    local api={}
+    local originals=setmetatable({}, {__mode="k"})
+    local root,connection,enabled
+    local nextPoll=0
+    local function restore()
+        for blade,value in pairs(originals)do pcall(function()blade.CanTouch=value end)end
+        table.clear(originals)
+    end
+    local function apply(blade)
+        local tool=blade and blade.Parent
+        local weapon=tool and tool.Parent
+        if not enabled or not blade or not blade:IsA("BasePart")or blade.Name~="Blade"or not tool or tool.Name~="Tool"
+            or not weapon or weapon.Parent~=root or (weapon.Name~="RightWeapon"and weapon.Name~="LeftWeapon")then return end
+        pcall(function()
+            if originals[blade]==nil then originals[blade]=blade.CanTouch end
+            if blade.CanTouch then blade.CanTouch=false end
+        end)
+    end
+    function api.Update(now)
+        now=now or os.clock()
+        local active=ctx.Active()==true
+        if now<nextPoll and active==enabled then return end
+        nextPoll=now+.5
+        local current=ctx.Items()
+        if current~=root then
+            if connection then connection:Disconnect();connection=nil end
+            restore();root=current
+            if root then connection=root.DescendantAdded:Connect(apply)end
+        end
+        enabled=active
+        if not enabled then restore();return end
+        if not root then return end
+        for _,name in ipairs({"RightWeapon","LeftWeapon"})do
+            local weapon=root:FindFirstChild(name)
+            local tool=weapon and weapon:FindFirstChild("Tool")
+            local blade=tool and tool:FindFirstChild("Blade")
+            if blade then apply(blade)end
+        end
+    end
+    function api.Destroy()
+        if connection then connection:Disconnect();connection=nil end
+        enabled=false;restore();root=nil
+    end
+    return api
+end
+
+-- END BUNDLED AURA TOUCH
+    end)()
+    state.AuraTouch=make({Active=function()return state.Running and not state.StopEverything and (state.Enabled or state.SkillAura)end,
+        Items=function()
+            local items=workspace:FindFirstChild("CharacterItems")
+            return items and items:FindFirstChild(tostring(player.UserId))
+        end})
+end
+
 local swingThread
 local swingTrack,nextSwingAt,swingIndex=nil,0,0
 local function stopSword(force)
@@ -4460,17 +4498,16 @@ end
 do
     local create=(function()
 -- BEGIN BUNDLED SKILL ACTIVATION
--- Adapted from the supplied source's active-skill window: activate once,
--- then send the selected skill's existing damage bursts without spawning VFX.
+-- Supplied-source activation: activate once and keep the skill name active
+-- for its duration. Damage uses the same per-target cooldown as Kill Aura.
 return function(ctx)
     local api={}
     local windows={['Sweeping Strike']=1.4,['Downward Smash']=1,['Leaping Slash']=1.8,['Piercing Dash']=1,['Beam Rush']=2.8,
-        ['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.5,['Meteor Shot']=1,
+        ['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.2,['Meteor Shot']=1,
         ['Everfrost Strike']=1.5,['Cursed Three Fold Slash']=3.3,['Water Blast']=1.2,['Spearitual Strike']=1,
         ['Summon Rifle']=3,['Summon Minigun']=3}
     local retry={}
-    local gunProfiles={['Summon Pistol']={FirstHitDelay=.3,Rounds=1},
-        ['Summon Rifle']={FirstHitDelay=0,Rounds=12,RepeatWindow=true,RefreshTargets=true,MinimumInterval=.26}}
+    local gunProfiles={['Summon Pistol']={FirstHitDelay=0},['Summon Rifle']={FirstHitDelay=0}}
     local owner
     local clock=ctx.Clock or os.clock
     local wait=ctx.Wait or task.wait
@@ -4494,9 +4531,8 @@ return function(ctx)
         local profile=gunProfiles[name]
         local started=clock()
         local lease={Name=name,Started=started,ExpiresAt=started+api.Window(name),
-            FirstHitAt=started+(profile and profile.FirstHitDelay or 0),Rounds=profile and profile.Rounds or 3,
-            HoldWindow=profile~=nil,RepeatWindow=profile and profile.RepeatWindow,RefreshTargets=profile and profile.RefreshTargets,
-            MinimumInterval=profile and profile.MinimumInterval}
+            FirstHitAt=started+(profile and profile.FirstHitDelay or 0),SourceWindow=true,
+            HoldWindow=true,RefreshTargets=true,MinimumInterval=.3}
         owner=lease
         ctx.Skills.usingSkill=name
         ctx.Skills.SetCooldown(name,cooldown)
@@ -4508,7 +4544,7 @@ return function(ctx)
         if onEmit then onEmit(lease) end
         local deadline=clock()+math.clamp(.35+(ctx.State.PingMs or 100)/500,.4,1.2)
         repeat
-            if before-stamina.Value>=math.max(1,cost*.5) then
+            if cost<=0 or before-stamina.Value>=math.max(1,cost*.5) then
                 return true,nil,lease
             end
             if not stamina.Parent or not root.Parent or not valid() then return false,"Cast interrupted" end
@@ -4542,6 +4578,7 @@ end
         CanRun=function()
             local c=player.Character; local e=c and c:FindFirstChild("Entity"); local hp=e and e:FindFirstChild("Health")
             return state.Running and state.SkillAura and hp and hp.Value>0 and not state.TravelBusy and not state.Dodging and not state.Recovering and not state.ProtectionRetreating
+                and not state.StopEverything and not state.SafeModePanic and not state.ModeratorBlocking and not state.AutoTradeBusy
         end,
     })
 end
@@ -4550,6 +4587,7 @@ function state.WakeSkillAura()nextSkillCheck=0 end
 local skillCastSerial=0
 function state.CancelSkillAura(reason)
     state.ReserveGunStamina=false
+    state.SkillRegistrationTarget=nil
     local active=state.ActiveSkillCast
     if active then
         active.Cancelled=true
@@ -4560,7 +4598,7 @@ function state.CancelSkillAura(reason)
     if skillThread then pcall(task.cancel,skillThread); skillThread=nil end
     state.ActiveSkillCast=nil
     state.SkillPreparing=false; state.SkillCastRunning=false; state.SkillWantsWindow=false
-    state.CombatReadyAt=os.clock()+.24
+    state.CombatReadyAt=os.clock()
     nextSkillCheck=0
 end
 state.CleanupSkillCast=state.CancelSkillAura
@@ -4608,6 +4646,7 @@ local function updateSkillAura()
     nextSkillCheck=now+(state.NetworkPressureLimited and .04 or 1/60)
     state.SkillWantsWindow=false; state.SkillPreparing=false
     state.ReserveGunStamina=false
+    state.SkillRegistrationTarget=nil
     if state.SafeModePanic or state.MultiSpotTravelPending or state.MultiSpotOwnsTravel or not state.SkillAura or state.StopEverything then return end
     local weapons=state.WeaponSkills
     if not weapons or not weapons.Ready or not weapons.IsCompatible(state.SelectedSkill) then state.SkillStatus="Waiting for equipped weapon skills"; return end
@@ -4641,6 +4680,12 @@ local function updateSkillAura()
     if primary then consider(primary) end
     for mob in pairs(trackedMobs) do if mob~=primary then consider(mob) end end
     if not target then nextSkillCheck=now+(state.NetworkPressureLimited and .15 or .08);return end
+    local targetData=getMobData(target)
+    if state.ReadOwnDamage(targetData.Health)==nil then
+        state.SkillRegistrationTarget=target
+        state.SkillStatus="Registering enemy before skill activation"
+        return
+    end
     if not Skills.HasStamina(definition.Cost.Value) then
         state.ReserveGunStamina=true; state.SkillWantsWindow=true
         state.SkillStatus="Recovering stamina for "..name
@@ -4649,9 +4694,7 @@ local function updateSkillAura()
     state.SkillWantsWindow=true
     if state.AttackBurstActive then finishAttackBurst("Handing off to ready skill") end
     state.SkillPreparing=true
-    local sharedGap=.24+math.min(.04,(state.PingMs or 0)/10000)
-    local windup=gunProfile and gunProfile.FirstHitDelay or 0
-    if now-(state.LastPulseAt or 0)<math.max(0,sharedGap-windup) then return end
+    if not normalScheduler.Ready(target,now)then return end
     state.SkillPreparing=false; state.SkillCastRunning=true
     skillCastSerial+=1
     local cast={Id=skillCastSerial,Name=name,Version=weapons.Version,Character=character,Cancelled=false}
@@ -4669,9 +4712,10 @@ local function updateSkillAura()
             and state.SkillAura and weapons.Version==cast.Version and weapons.Ready and state.SelectedSkill==name
             and player.Character==character and root.Parent~=nil and health.Value>0
             and not state.TravelBusy and not state.Dodging and os.clock()>=state.LagPauseUntil
+            and not state.SafeModePanic and not state.ModeratorBlocking and not state.AutoTradeBusy and not state.Recovering
     end
     skillThread=task.defer(function()
-        local burst={Skill=name,Target=target.Name,Desired=3,Requested=0,HealthDrops=0,Before=0,Direct=true,Status="Activating equipped weapon skill"}
+        local burst={Skill=name,Target=target.Name,Requested=0,HealthDrops=0,Before=0,Direct=true,Status="Activating equipped weapon skill"}
         state.LastSkillBurst=burst; state.LastSkillBurstSize=0
         local function observe()
             if not cast.Multi or burst.ObservationFinished then return end
@@ -4696,10 +4740,10 @@ local function updateSkillAura()
             local function startDamage(lease)
             cast.Lease=lease
             burst.DamageSkill=name
-            burst.Spacing=math.max(state.SkillBurstInterval,.24+math.min(.04,(state.PingMs or 0)/10000),lease.MinimumInterval or 0)
+            burst.Spacing=math.max(state.SkillBurstInterval,.3,lease.MinimumInterval or 0)
             burst.ActivationAt=lease.Started; burst.FirstHitAt=lease.FirstHitAt; burst.AimDirection=lease.Direction
             cast.Multi=createSkillBurst({State=state,Record=burst,Spacing=burst.Spacing,Contribution=state.ReadOwnDamage,
-                Rounds=lease.Rounds,FirstHitAt=lease.FirstHitAt,RepeatWindow=lease.RepeatWindow,
+                SourceWindow=lease.SourceWindow,Pacing=normalScheduler,FirstHitAt=lease.FirstHitAt,
                 RefreshTargets=true,ExpiresAt=lease.ExpiresAt,FocusBudget=true,Budget=state.SkillDamageBudget,
                 EstimateDamage=function(mob)
                     local key=name..":"..cast.Version
@@ -4715,7 +4759,10 @@ local function updateSkillAura()
                 end,
                 Targets=function()
                     local list={}
-                    for mob in pairs(trackedMobs) do list[#list+1]=mob end
+                    for mob in pairs(trackedMobs) do
+                        local entry=validMob(mob,mobs)and getMobData(mob)
+                        if entry and attackDeltaFor(entry,root).Magnitude<=state.AutoRanges.Range("Skill",entry,name)then list[#list+1]=mob end
+                    end
                     table.sort(list,function(a,b) return targetPriority.Less(a,b,root.Position,target) end)
                     return list
                 end,
@@ -4723,7 +4770,7 @@ local function updateSkillAura()
                 RangeDistance=function(_,entry) return attackDeltaFor(entry,root).Magnitude end,
                 CanRun=function() return current() and os.clock()<lease.ExpiresAt end,
                 Send=function(mob,entry)
-                    if not current() then return end
+                    if not current() then return false end
                     if state.MultiSpotEncounter then state.MultiSpotEncounter[mob]=true end
                     Combat.DealDamage(mob,name)
                     state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob
@@ -4735,7 +4782,7 @@ local function updateSkillAura()
             if not cast.Multi.Start(target,table.pack()) then burst.Status="Target changed before skill damage"; return end
             end
             local acknowledged,reason,lease=state.SkillActivation.Begin(name,definition,entity,root,current,function(window)
-                if state.SkillActivation.Window(name)<.65 and current() then startDamage(window) end
+                if current() then startDamage(window) end
             end, state.SkillActivation.Profile(name) and targetRoot.Parent and (targetRoot.Position-root.Position) or nil)
             burst.ActivationAcknowledged=acknowledged
             if not acknowledged or not current() then
@@ -4765,8 +4812,7 @@ local function updateSkillAura()
         end
         if state.ActiveSkillCast==cast then
             state.ActiveSkillCast=nil; state.SkillCastRunning=false; state.SkillWantsWindow=false; skillThread=nil
-            local gap=.24+math.min(.04,(state.PingMs or 0)/10000)
-            state.CombatReadyAt=math.max(state.CombatReadyAt or 0,(burst.LastRequestAt or burst.FinishedAt or os.clock())+gap)
+            state.CombatReadyAt=os.clock()
         end
         if not ok then burst.Status=tostring(message) end
         state.SkillBurstHistory[#state.SkillBurstHistory+1]=burst
@@ -4914,6 +4960,7 @@ function state.SetEnabled(enabled)
     if state.StopEverything and enabled==true then return false end
     if not state.Running then return end
     state.Enabled = enabled == true
+    if state.AuraTouch then state.AuraTouch.Update()end
     if state.Enabled then state.AutoSwing=true end
     if not state.Enabled then finishAttackBurst("Paused"); stopSword(); stopMovement("Aura paused · movement stopped") end
     state.LastError = nil
@@ -5004,6 +5051,7 @@ function state.Destroy(replacing, teleportCleanup)
     stopSword()
     stopMovement(nil,replacing==true)
     if state.FarmNoclip then state.FarmNoclip.Destroy()end
+    if state.AuraTouch then state.AuraTouch.Destroy()end
     healthHUD.Destroy()
     if mobAddedConnection then mobAddedConnection:Disconnect() end
     if mobRemovedConnection then mobRemovedConnection:Disconnect() end
@@ -5196,7 +5244,7 @@ normalScheduler.Bind({
 local function scan()
     if state.Dodging or os.clock()<(state.FarmPauseUntil or 0) then finishAttackBurst("Dodging or repositioning"); stopSword(); return "Special-wave dodge / repositioning" end
     if state.TravelBusy or state.MultiSpotOwnsTravel then finishAttackBurst("Travelling"); stopSword(); return "Travelling to a floor destination" end
-    if not state.Enabled then stopSword(); return "Paused" end
+    if not state.Enabled and not (state.SkillAura and state.SkillRegistrationTarget)then stopSword(); return "Paused" end
     local now = os.clock()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -5371,6 +5419,7 @@ end
 local nextPresentationUpdate=0
 local function runFrame()
         if state.TradeHold then state.TradeHold.Update()end
+        if state.AuraTouch then state.AuraTouch.Update()end
         if state.StopEverything then return end
         if state.ModeratorBlocking then
             if state.PanicToSpawn then state.PanicToSpawn()end

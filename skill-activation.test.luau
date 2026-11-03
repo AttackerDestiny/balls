@@ -36,10 +36,10 @@ return function(moduleSource)
         time=10; expectedName="Summon Pistol"; acknowledge=true; stamina.Value=100
         local ack,_,pistol=api.Begin(expectedName,definition,entity,root,nil,nil,Vector3.yAxis)
         assert(ack and pistol.Direction==Vector3.yAxis,"Aim gun at the target's actual vertical direction")
-        assert(pistol.Rounds==1 and math.abs(pistol.FirstHitAt-pistol.Started-.3)<.001 and math.abs(pistol.ExpiresAt-pistol.Started-.5)<.001,"Pistol must include its windup and one shot")
+        assert(pistol.SourceWindow and pistol.FirstHitAt==pistol.Started and math.abs(pistol.ExpiresAt-pistol.Started-.2)<.001,"Pistol uses the supplied source's immediate 0.2s active window")
         api.Release(); time=20; expectedName="Summon Rifle"; stamina.Value=100
         local ack,_,rifle=api.Begin(expectedName,definition,entity,root)
-        assert(ack and rifle.HoldWindow and rifle.ExpiresAt-rifle.Started==3 and rifle.Rounds==12 and rifle.RepeatWindow and rifle.RefreshTargets,"Rifle must use its entire firing window with paced shots and live retargeting")
+        assert(ack and rifle.SourceWindow and rifle.HoldWindow and rifle.ExpiresAt-rifle.Started==3 and rifle.RefreshTargets and rifle.MinimumInterval==.3,"Rifle uses the full active window with the source per-target cooldown and live retargeting")
         return {Passed=true,NoDuplicateCasts=true,ResourcesRespected=true,WeaponReset=true,GunTiming=true,VerticalAim=true,ScytheWindow=api.Window("Reaper Frenzy")}
     end)
     api.Release();entity:Destroy();definition:Destroy()
