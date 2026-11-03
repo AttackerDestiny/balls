@@ -42,7 +42,11 @@ def main():
         assert not re.search(r"[\u00c3\u00c2][^\x00-\x7f]|\u00e2[\u2000-\u2122]|\ufffd", text), f"Corrupt UI encoding: {source_file.name}"
     print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
+    import hashlib
+    assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
+    assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("WINDUI", "windui.module.luau"),
         ("ANTI AFK", "anti-afk.module.luau"),
         ("TARGET PRIORITY", "target-priority.module.luau"),
         ("ATTACK SCHEDULER", "attack-scheduler.module.luau"),
@@ -118,6 +122,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("windui.test.luau")) + "))()(" + quote(read("windui.module.luau")) + ")\n"
     payload_start = script.index("local function settingsPayload()")
     payload = script[payload_start:script.index("function state.SaveNow()", payload_start)]
     fixture += "assert(loadstring(" + quote(read("above-below.test.luau")) + "))()(" + ",".join(quote(v) for v in (read("auto-range.module.luau"), read("auto-offset.module.luau"), script, payload)) + ")\n"
@@ -196,6 +201,7 @@ def main():
         subprocess.run([tool("luau"), str(fixture_file)], check=True)
     subprocess.run([tool("luau-compile"), "--null", "kill-aura.luau",
                     "anti-afk.module.luau",
+                    "windui.module.luau", "vendor/WindUI-1.6.66.lua",
                     "attack-scheduler.module.luau", "skill-activation.module.luau", "skill-burst.module.luau", "aura-touch.module.luau",
                     "kill-aura.body.luau", "storage-bootstrap.module.luau",
                     "enemy-health.module.luau", "arena-travel.module.luau",

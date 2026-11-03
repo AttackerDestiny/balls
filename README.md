@@ -2,6 +2,10 @@
 
 Swordburst 2 Luau script with a loader that fetches the latest published version.
 
+The interface uses [WindUI](https://footagesus.github.io/WindUI-Docs/docs), with every existing feature available across Main, Combat, Challenge Floors, Auto Skill, Misc, Player, Utility and Speacial. It includes searchable selectors for floors, arenas, skills, players and trade items, plus multi-select performance and dismantle options. Controls use the existing gameplay controllers and shared autosave; WindUI's separate config system is not enabled. Hide UI and Right Shift hide the window while keeping enemy health bars visible. Closing the script releases both interfaces and automation. If WindUI initialization fails on an executor, the compatibility window remains available.
+
+WindUI release 1.6.66 is bundled locally, with acrylic disabled and a narrow sidebar on small screens. UI status refreshes run at most four times per second; dynamic choices refresh once per second only while visible. The MIT license and original release are in `vendor/`. The standalone loader does not download WindUI separately, though the library may fetch its normal visual assets. Offline checks use WindUI API doubles and compile the actual bundled release; mobile rendering still requires live device validation.
+
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()
 ```

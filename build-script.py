@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "WINDUI": "windui.module.luau",
     "ANTI AFK": "anti-afk.module.luau",
     "TARGET PRIORITY": "target-priority.module.luau",
     "AURA TOUCH": "aura-touch.module.luau",
@@ -69,6 +70,16 @@ def main():
         before, rest = body.split(start, 1)
         _, after = rest.split(end, 1)
         body = before + start + (ROOT / name).read_text(encoding="utf-8") + "\n" + end + after
+    start, end = "-- BEGIN BUNDLED WINDUI SOURCE\n", "-- END BUNDLED WINDUI SOURCE\n"
+    assert body.count(start) == 1 and body.count(end) == 1
+    before, rest = body.split(start, 1)
+    _, after = rest.split(end, 1)
+    library = (ROOT / "vendor/WindUI-1.6.66.lua").read_text(encoding="utf-8")
+    license_text = (ROOT / "vendor/WindUI-LICENSE.txt").read_text(encoding="utf-8")
+    library = "--[[\n" + license_text + "\n]]\n" + library
+    library = "\n".join(line.rstrip() for line in library.splitlines()) + "\n"
+    assert "]==========]" not in library
+    body = (before + start + "return [==========[\n" + library + "]==========]\n\n" + end + after).rstrip() + "\n"
     entry = package(body)
     if args.check:
         assert original == body, "Stale module bundles: run python build-script.py"

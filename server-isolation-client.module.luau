@@ -470,6 +470,21 @@ end
         if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId) then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
     end
+    function state.SetMultiSpotSelections(selected)
+        local result=table.clone(state.MultiSpotSelected)
+        for id in pairs(result)do
+            local spot=catalog.SpotById[id]
+            if spot and spot.PlaceId==game.PlaceId then result[id]=nil end
+        end
+        for id,on in pairs(selected or {})do
+            if on then
+                local spot=catalog.SpotById[catalog.Aliases[id]or id]
+                if not spot or spot.PlaceId~=game.PlaceId or not state.IsAutomationFloorUnlocked(spot.PlaceId)then return false end
+                result[spot.Id]=true
+            end
+        end
+        state.MultiSpotSelected=result;multi.Reset();state.SaveNow();refresh();return true
+    end
     local function joinFriendAtPad(id,active)
         state.AutoJoinFriendHolding=true
         local function permitted()
