@@ -423,7 +423,14 @@ end
     end
     local whitelistGeneration=0
     function state.SetSafeWhitelist(text)
-        text=tostring(text or "");if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
+        text=tostring(text or ""):gsub("[^%w_]", " ")
+        local entries,seen={},{}
+        for word in text:gmatch("%S+")do
+            local key=word:lower()
+            if not seen[key]then seen[key]=true;entries[#entries+1]=word end
+        end
+        text=table.concat(entries,", ")
+        if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
         whitelistGeneration=whitelistGeneration+1;local token=whitelistGeneration
         safe.Reset();state.SafeWhitelistResolving=true
         task.delay(12,function()

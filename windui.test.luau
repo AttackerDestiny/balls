@@ -90,11 +90,13 @@ return function(source)
     local visible=true
     local api=make({State=s,WindUI=wind,PlaceId=11,Visibility=function(value)visible=value end})
     local c=api.Controls
+    for _,key in ipairs({"CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
+    assert(c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",
         "SkillAura","SelectedSkill","MiscSkillEnabled","SelectedMiscSkill","SafeMode","SafeFloor","SafeWhitelist",
-        "MultiSpot","MultiSpotAreas","AutoJoinFriend","JoinFriendUsername","RestartScript","HideUI","Unload",
-        "TeleportDestination","Teleport","RefreshDestinations","SaveMiniBossArea","OpenDismantle","OpenUpgrade","OpenThe Forge",
+        "MultiSpot","MultiSpotAreas","AutoJoinFriend","JoinFriendUsername","RestartScript",
+        "TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory","PlayerInventory",
         "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression","AntiAfkStatus","ModeratorStatus"})do
         assert(c[key],"Every available feature must be present: "..key)
@@ -129,7 +131,7 @@ return function(source)
     assert(#calls==before,"Inventory quantity refreshes cannot change trade selections or invoke actions")
     assert(c.TradeItems.Value[1]=="Gem x80"and s.TradeItems.Gem)
     for i=1,20 do api.Update(5+i*.01)end
-    local reads=inventoryReads;c.HideUI.Callback()
+    local reads=inventoryReads;api.SetVisible(false)
     assert(not visible and s.UIHidden and s.HealthVisible,"Hiding WindUI must leave the health HUD visible")
     api.Update(10);flush();assert(inventoryReads==reads,"A hidden UI must not scan inventory choices")
     api.SetVisible(true);assert(visible and not s.UIHidden)

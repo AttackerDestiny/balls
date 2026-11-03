@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.windui-v1.12.0"
-local VERSION="1.12.0"
+local BUILD="2026-11-03.ui-cleanup-v1.12.1"
+local VERSION="1.12.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -941,7 +941,7 @@ function state.SetUIVisible(visible)
     state.UIHidden=not panel.Visible
 end
 bind(hideUI.Activated,function()state.SetUIVisible(false)end)
-bind(showUI.Activated,function()state.SetUIVisible(true)end)
+bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
 local content=create("ScrollingFrame",{Name="Content",Position=UDim2.fromOffset(0,178),Size=UDim2.new(1,0,1,-202),
     BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=Color3.fromRGB(114,100,180),
     CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollingDirection=Enum.ScrollingDirection.Y,
@@ -2252,7 +2252,6 @@ function state.SetAutoFarm(enabled, reason)
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if humanoid then humanoid:Move(Vector3.zero, false) end
-        state.SetEnabled(true)
     end
     if state.FarmNoclip then state.FarmNoclip.Update()end
     requestSave()
@@ -7553,7 +7552,14 @@ end
     end
     local whitelistGeneration=0
     function state.SetSafeWhitelist(text)
-        text=tostring(text or "");if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
+        text=tostring(text or ""):gsub("[^%w_]", " ")
+        local entries,seen={},{}
+        for word in text:gmatch("%S+")do
+            local key=word:lower()
+            if not seen[key]then seen[key]=true;entries[#entries+1]=word end
+        end
+        text=table.concat(entries,", ")
+        if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
         whitelistGeneration=whitelistGeneration+1;local token=whitelistGeneration
         safe.Reset();state.SafeWhitelistResolving=true
         task.delay(12,function()
@@ -24708,8 +24714,6 @@ return function(ctx)
     end,function(label,map)destination=map[label]end)
     button("Teleport","Main","Teleport",function()if destination then invoke("TeleportToDestination",destination)end end)
     button("RefreshDestinations","Main","Refresh teleport destinations",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
-    button("SaveMiniBossArea","Main","Save current spot as mini-boss area",function()invoke("SaveCurrentMiniBossArea");nextChoices=0 end)
-    paragraph("TravelStatus","Main","Travel",function()return s.TravelStatus or s.FloorName end)
     stateToggle("SafeMode","Main","Safe Mode","SetSafeMode","Find a protected server; only whitelisted players may stay.")
     dropdown("SafeFloor","Main","Safe floor",function()
         local options,map,value={},{},nil
@@ -24749,21 +24753,14 @@ return function(ctx)
     stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
     paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
     button("RestartScript","Main","Restart script",function()invoke("RestartScript")end)
-    button("HideUI","Main","Hide UI",function()api.SetVisible(false)end,"Enemy health bars stay visible.")
-    button("Unload","Main","Close script",function()invoke("Destroy")end)
-    paragraph("AutoSaveStatus","Main","Settings",function()return s.AutoSaveStatus end)
 
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
-    stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm","Main boss = 1 · mini-boss = 2 · regular mobs = 3.")
-    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword","Highest damage usable weapon; no dual wielding.")
+    stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
+    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
-    stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing","Normal animation speed.")
-    paragraph("CombatStatus","Combat","Combat",function()
-        return (s.MovementStatus or "").."\n"..(s.KillRangeStatus or "Auto range").."\n"..(s.OffsetStatus or "")
-    end)
+    stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
     stateToggle("TransparentMap","Challenge Floors","Transparent map","SetTransparentMap")
-    paragraph("DodgeStatus","Challenge Floors","Dodge status",function()return s.DodgeStatus or s.LastDodgeError or "Waiting for a challenge attack"end)
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
     dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
@@ -24924,7 +24921,7 @@ end
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
             Visibility=function(visible)
                 panel.Visible=false
-                if state.Running then showUI.Visible=not visible else showUI.Visible=false end
+                if state.Running then showUI.Visible=true;showUI.Text=visible and "Hide UI"or "Show UI" else showUI.Visible=false end
                 roots(function(root)root.Enabled=visible end)
             end})
         state.WindUI=controller
