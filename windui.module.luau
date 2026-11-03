@@ -129,7 +129,7 @@ return function(ctx)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
-    dropdown("MultiSpotAreas","Main","Boss / mini-boss arenas",function()
+    dropdown("MultiSpotAreas","Main","Saved Spot",function()
         local options,map={},{ }
         local catalog=s.AutomationCatalog
         if catalog then catalog.AddCurrent(s.FloorDestinations,ctx.PlaceId);catalog.Sort()end
@@ -142,7 +142,7 @@ return function(ctx)
     end,function(values,map)
         local chosen={};for _,label in ipairs(values or {})do if map[label]then chosen[map[label]]=true end end
         invoke("SetMultiSpotSelections",chosen)
-    end,true,"Current floor only. Clear every enemy before rotating.")
+    end,true)
     api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end

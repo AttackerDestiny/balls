@@ -107,6 +107,7 @@ return function(source)
         "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
+    assert(c.MultiSpotAreas.Title=="Saved Spot"and c.MultiSpotAreas.Desc==nil)
     assert(#c.MultiSpotAreas.Values==2,"Arena dropdown contains only the current floor")
     assert(#c.SelectedMiscSkill.Values==1,"Locked support skills cannot be selected")
     c.SafeFloor:Emit("F2 · locked");assert(s.SafeFloorId==11)
