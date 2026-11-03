@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.source-combat-v1.11.0"
-local VERSION="1.11.0"
+local BUILD="2026-11-03.anti-afk-v1.11.1"
+local VERSION="1.11.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -842,6 +842,50 @@ local function bind(signal, callback)
     local connection = signal:Connect(callback)
     table.insert(connections, connection)
     return connection
+end
+
+do
+    local make=(function()
+-- BEGIN BUNDLED ANTI AFK
+-- One idle listener, no polling loop, movement or combat remote requests.
+return function(ctx)
+    local api={Enabled=true,Pulses=0}
+    local state=ctx.State
+    local stopped,busy=false,false
+    local nextPulse=0
+    local clock=ctx.Clock or os.clock
+    state.AntiAfkStatus="Active · waiting for idle"
+    local connection=ctx.Player.Idled:Connect(function()
+        if stopped or busy or state.Running==false or clock()<nextPulse then return end
+        busy=true;nextPulse=clock()+20
+        local ok,message=pcall(ctx.Pulse)
+        busy=false
+        if stopped or state.Running==false then return end
+        if ok then
+            api.Pulses+=1;state.LastAntiAfkError=nil
+            state.AntiAfkStatus="Active · idle input sent"
+        else
+            state.LastAntiAfkError=tostring(message)
+            state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
+        end
+    end)
+    function api.Destroy()
+        if stopped then return end
+        stopped=true;api.Enabled=false;connection:Disconnect()
+        state.AntiAfkStatus="Stopped"
+    end
+    return api
+end
+
+-- END BUNDLED ANTI AFK
+    end)()
+    local virtualUser
+    state.AntiAfk=make({State=state,Player=player,Pulse=function()
+        virtualUser=virtualUser or game:GetService("VirtualUser")
+        pcall(function()virtualUser:CaptureController()end)
+        local camera=workspace.CurrentCamera
+        virtualUser:ClickButton2(Vector2.new(0,0),camera and camera.CFrame or CFrame.new())
+    end})
 end
 
 local gui=runtimeOwner.Root
@@ -5027,6 +5071,7 @@ function state.Destroy(replacing, teleportCleanup)
     state.AutoFarm = false
     state.SkillAura = false
     state.Running = false
+    if state.AntiAfk then state.AntiAfk.Destroy()end
     runtimeOwner.Release()
     if state.SoloServerSearch then state.SoloServerSearch.Destroy(preserveSearch) end
     if state.SafeController and not preserveSearch then state.SafeController.Destroy() end

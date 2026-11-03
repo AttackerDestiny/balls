@@ -43,6 +43,7 @@ def main():
     print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
     for marker, name in [
+        ("ANTI AFK", "anti-afk.module.luau"),
         ("TARGET PRIORITY", "target-priority.module.luau"),
         ("ATTACK SCHEDULER", "attack-scheduler.module.luau"),
         ("SKILL ACTIVATION", "skill-activation.module.luau"),
@@ -116,6 +117,7 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
     payload_start = script.index("local function settingsPayload()")
     payload = script[payload_start:script.index("function state.SaveNow()", payload_start)]
     fixture += "assert(loadstring(" + quote(read("above-below.test.luau")) + "))()(" + ",".join(quote(v) for v in (read("auto-range.module.luau"), read("auto-offset.module.luau"), script, payload)) + ")\n"
@@ -193,6 +195,7 @@ def main():
         fixture_file.write_text(fixture, encoding="utf-8")
         subprocess.run([tool("luau"), str(fixture_file)], check=True)
     subprocess.run([tool("luau-compile"), "--null", "kill-aura.luau",
+                    "anti-afk.module.luau",
                     "attack-scheduler.module.luau", "skill-activation.module.luau", "skill-burst.module.luau", "aura-touch.module.luau",
                     "kill-aura.body.luau", "storage-bootstrap.module.luau",
                     "enemy-health.module.luau", "arena-travel.module.luau",
