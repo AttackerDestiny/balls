@@ -8,6 +8,8 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "PLAYER TOOLS": "player-tools.module.luau",
+    "INVENTORY VIEW": "inventory-view.module.luau",
     "MULTI SPOT HUD": "multi-spot-hud.module.luau",
     "WINDUI": "windui.module.luau",
     "ANTI AFK": "anti-afk.module.luau",

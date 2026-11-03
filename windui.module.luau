@@ -208,13 +208,13 @@ return function(ctx)
     end,applyBoost,true)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
-    dropdown("AutoDismantle","Utility","Auto Dismantle rarities",function()
+    dropdown("AutoDismantle","Utility","Auto Dismantle",function()
         local value={};for _,name in ipairs(rarities)do if s.AutoDismantle[name]then value[#value+1]=name end end
         return {Options=rarities,Value=value}
     end,function(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
-    end,true,"Equipped, locked and favorited items are preserved.")
+    end,true)
     api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Accept requests only from whitelisted players; final acceptance is automatic.")
     dropdown("TradeMode","Utility","Trade offer mode",function()

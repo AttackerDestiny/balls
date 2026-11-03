@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.skill-labels-v1.12.23"
-local VERSION="1.12.23"
+local BUILD="2026-11-03.native-inventory-view-v1.12.24"
+local VERSION="1.12.24"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6031,6 +6031,10 @@ return function(ctx)
     function api.SetInventoryVisible(enabled)
         if enabled and state.StopEverything then return false,"Stop Everything is on" end
         if enabled and not api.GetSelected() then return false,"Select a player first" end
+        if ctx.NativeInventory then
+            local ok,reason=ctx.NativeInventory(enabled and api.GetSelected()or nil)
+            if not ok then return false,reason end
+        end
         api.InventoryVisible=enabled==true
         state.ViewingPlayerInventory=api.InventoryVisible
         watchInventory()
@@ -6040,6 +6044,10 @@ return function(ctx)
     function api.Select(userId)
         local target=players:GetPlayerByUserId(tonumber(userId) or 0)
         if not target or target==localPlayer then return false,"Player is no longer in this server" end
+        if api.InventoryVisible and ctx.NativeInventory then
+            local ok,reason=ctx.NativeInventory(target)
+            if not ok then return false,reason end
+        end
         if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
         selected=target
         state.SelectedPlayerId=target.UserId
@@ -6083,9 +6091,62 @@ return function(ctx)
     end
     return api
 end
+
 -- END BUNDLED PLAYER TOOLS
     end)()
+    local makeInventoryView=(function()
+-- BEGIN BUNDLED INVENTORY VIEW
+-- Supplied source uses profile upvalue #2 of Inventory.GetInventoryData.
+-- Verify its identity first; never change replicated inventory instances.
+return function(ctx)
+    local fn,original,owned
+    local api={}
+    function api.Set(profile)
+        local ok,reason=pcall(function()
+            if not profile then
+                if owned then
+                    if ctx.Read(fn,2)==owned then ctx.Write(fn,2,original)end
+                    owned=nil
+                end
+                return
+            end
+            if not fn then
+                local candidate=ctx.Function()
+                assert(type(candidate)=="function","Native inventory renderer unavailable")
+                local profile=ctx.Read(candidate,2)
+                assert(profile==ctx.OwnProfile,"Inventory renderer profile layout differs from the supplied source")
+                fn,original=candidate,profile
+            end
+            local current=ctx.Read(fn,2)
+            assert(current==original or current==owned,"Inventory renderer is controlled by another script")
+            ctx.Write(fn,2,profile)
+            assert(ctx.Read(fn,2)==profile,"Executor did not switch inventory profile")
+            owned=profile
+        end)
+        return ok,not ok and tostring(reason)or nil
+    end
+    return api
+end
+
+-- END BUNDLED INVENTORY VIEW
+    end)()
+    local inventoryView=makeInventoryView({OwnProfile=ReplicatedStorage.Profiles:FindFirstChild(player.Name),
+        Function=function()return require(services.UI.Inventory).GetInventoryData end,
+        Read=function(fn,index)
+            assert(type(debug.getupvalue)=="function","Executor cannot read inventory renderer upvalues")
+            local first,second=debug.getupvalue(fn,index)
+            return second~=nil and second or first
+        end,
+        Write=function(fn,index,value)
+            assert(type(debug.setupvalue)=="function","Executor cannot change inventory renderer upvalues")
+            debug.setupvalue(fn,index,value)
+        end})
     tools=makePlayerTools({State=state,Players=Players,LocalPlayer=player,Workspace=workspace,Profiles=ReplicatedStorage:FindFirstChild("Profiles"),
+        NativeInventory=function(target)
+            local profile=target and ReplicatedStorage.Profiles:FindFirstChild(target.Name)
+            if target and not profile then return false,"Selected player's inventory profile is not loaded"end
+            return inventoryView.Set(profile)
+        end,
         Changed=render,RosterChanged=function() if ui.PlayerOptions.Visible then refreshPlayers() end end,
         Inventory=function(rows,reason,target)
             if not state.Running then return end
@@ -24874,13 +24935,13 @@ return function(ctx)
     end,applyBoost,true)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
-    dropdown("AutoDismantle","Utility","Auto Dismantle rarities",function()
+    dropdown("AutoDismantle","Utility","Auto Dismantle",function()
         local value={};for _,name in ipairs(rarities)do if s.AutoDismantle[name]then value[#value+1]=name end end
         return {Options=rarities,Value=value}
     end,function(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
-    end,true,"Equipped, locked and favorited items are preserved.")
+    end,true)
     api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Accept requests only from whitelisted players; final acceptance is automatic.")
     dropdown("TradeMode","Utility","Trade offer mode",function()

@@ -105,6 +105,10 @@ return function(ctx)
     function api.SetInventoryVisible(enabled)
         if enabled and state.StopEverything then return false,"Stop Everything is on" end
         if enabled and not api.GetSelected() then return false,"Select a player first" end
+        if ctx.NativeInventory then
+            local ok,reason=ctx.NativeInventory(enabled and api.GetSelected()or nil)
+            if not ok then return false,reason end
+        end
         api.InventoryVisible=enabled==true
         state.ViewingPlayerInventory=api.InventoryVisible
         watchInventory()
@@ -114,6 +118,10 @@ return function(ctx)
     function api.Select(userId)
         local target=players:GetPlayerByUserId(tonumber(userId) or 0)
         if not target or target==localPlayer then return false,"Player is no longer in this server" end
+        if api.InventoryVisible and ctx.NativeInventory then
+            local ok,reason=ctx.NativeInventory(target)
+            if not ok then return false,reason end
+        end
         if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
         selected=target
         state.SelectedPlayerId=target.UserId

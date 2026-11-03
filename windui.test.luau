@@ -101,6 +101,7 @@ return function(source)
     present=false;api.Update(.6);assert(c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
     assert(c.RestartScript.Topbar,"Restart belongs in the window header")
     for _,key in ipairs({"MultiSpotStatus","TransparentMap","ProgressionStatus","ProgressionGear","PlayerInventory","PlayerStatus","AutoDismantleStatus","TradeStatus","TradeVelInfo","AntiAfkStatus","ModeratorStatus","SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
+    assert(c.AutoDismantle.Title=="Auto Dismantle"and c.AutoDismantle.Desc==nil)
     assert(c.SafeMode.Desc==nil and c.SafeFloor.Desc==nil)
     assert(c.SafeWhitelist.Title=="Whitelist"and c.SafeWhitelist.Desc=="Input A List Of User")
     assert(c.AccountProgression.Desc==nil and c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
