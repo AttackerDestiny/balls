@@ -205,7 +205,7 @@ test("saved/live arenas merge and old duplicate selections migrate",function()
         ["mob:Ka"]={Id="mob:Ka",Name="Ka",Kind="Mini boss",Position=vector(5130,1619,2152)},
         ["mob:Za, the Eldest"]={Id="mob:Za, the Eldest",Name="Za, the Eldest",Kind="Mini boss",Position=vector(1762,930,-6389)}}
     c.AddCurrent(areas,5287433115);c.AddCurrent(areas,5287433115);c.Sort()
-    assert(#c.Spots==5,"No saved/live duplicates or three copies of one mini-boss arena")
+    assert(#c.Spots==4,"No saved/live duplicates or three copies of one mini-boss arena")
     local selected=c.NormalizeSelection({["5287433115/mob:Ra"]=true,["5287433115/Miniboss"]=true,["5287433115/mob:Za, the Eldest"]=true})
     local count=0;for _ in pairs(selected)do count=count+1 end
     assert(count==2 and selected["5287433115/Miniboss"] and selected["5287433115/Za, the Eldest"])
@@ -264,7 +264,7 @@ test("Only the named floor boss can refine or alias the canonical F1 boss arena"
     assert(main.DestinationId=="source:Boss"and c.Aliases["542351431/mob:Gorilla Berserker"]~=main.Id)
     local rahjin={Id="mob:Rahjin the Thief King",Name="Rahjin the Thief King",Kind="Boss",Position=vector(original.X+20,original.Y,original.Z)}
     c.AddCurrent({[gorilla.Id]=gorilla,[rahjin.Id]=rahjin},542351431)
-    assert(main.DestinationId==rahjin.Id and main.Position==rahjin.Position)
+    assert(main.DestinationId=="source:Boss" and main.Position==original,"Live discoveries cannot overwrite supplied positions")
     assert(c.Aliases["542351431/mob:Rahjin the Thief King"]==main.Id)
     Vector3=oldVector
 end)

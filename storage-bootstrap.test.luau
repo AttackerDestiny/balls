@@ -26,12 +26,12 @@ return function(source,body,entry,saveSource)
     end
     test("A fresh executor workspace installs the exact runnable source and all required initial files",function()
         local f=fixture();f.Start()
-        assert(f.Api.Ready and f.Makes==1 and f.Writes==4)
+        assert(f.Api.Ready and f.Makes==1 and f.Writes==3)
         assert(f.Files["SB2Codex/kill-aura.luau"]==entry)
         assert(loadstring(f.Files["SB2Codex/kill-aura.luau"]),"The saved self-copy must compile")
         local ticket=f.Encoded[f.Files["SB2Codex/solo-search_123.json"]]
         assert(ticket.Active==false and ticket.UserId==123 and ticket.PlaceId==542351431)
-        assert(f.Encoded[f.Files["SB2Codex/destinations_542351431.json"]].PlaceId==542351431)
+        assert(f.Files["SB2Codex/destinations_542351431.json"]==nil,"Startup must not create teleport-position files")
     end)
     test("Fresh-device setup preserves existing settings, whitelist, active tickets and destination caches",function()
         local files={["SB2Codex/settings_123.json"]="user preferences + whitelist",

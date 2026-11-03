@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.auto-quest-v1.12.31"
-local VERSION="1.12.31"
+local BUILD="2026-11-03.source-multi-spots-v1.12.32"
+local VERSION="1.12.32"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -62,7 +62,6 @@ return function(ctx)
             end
             ensureFile(folder.."/settings_"..ctx.UserId..".json",ctx.Encode({Version=1}))
             ensureFile(folder.."/solo-search_"..ctx.UserId..".json",ctx.Encode({Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId}))
-            ensureFile(folder.."/destinations_"..ctx.PlaceId..".json",ctx.Encode({Version=1,PlaceId=ctx.PlaceId,Areas={}}))
         end)
         api.Ready=ok;api.Error=not ok and tostring(message)or nil
         return ok,api.Error
@@ -3744,7 +3743,6 @@ end
 end
 
 -- Area coordinates remain usable when distance-based spawning removes the mob.
-local destinationPath = configFolder .. "/destinations_" .. tostring(game.PlaceId) .. ".json"
 local destinations = {}
 local destinationsDirty=false
 local function finitePoint(point)
@@ -3762,22 +3760,26 @@ end
 if game.PlaceId == 582198062 then
     rememberDestination("mob:Frogazoid", "Frogazoid", "Mini boss", Vector3.new(-154.811, 1214.301, -758.796))
 end
+-- Only user-created spots use a position file; built-in arenas stay in source.
+local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
+local lastCustomSpots
 if filePersistence then
     pcall(function()
-        if not isfile(destinationPath) then return end
-        local raw = readfile(destinationPath)
-        if #raw > 65536 then return end
-        local data = HttpService:JSONDecode(raw)
-        if data.Version ~= 1 or data.PlaceId ~= game.PlaceId or type(data.Areas) ~= "table" then return end
-        for index, area in ipairs(data.Areas) do
-            if index > 64 then break end
-            if type(area.Id) == "string" and type(area.Name) == "string" and type(area.Kind) == "string" and type(area.Position) == "table" then
-                local p = area.Position
-                if type(p[1]) == "number" and type(p[2]) == "number" and type(p[3]) == "number" then
-                    rememberDestination(area.Id, area.Name, area.Kind, Vector3.new(p[1], p[2], p[3]))
+        if not isfile(customSpotPath)then return end
+        local raw=readfile(customSpotPath)
+        assert(#raw<=32768,"Custom spots file exceeds size limit")
+        local data=HttpService:JSONDecode(raw)
+        if data.Version~=1 or data.PlaceId~=game.PlaceId or type(data.Areas)~="table"then return end
+        for index,area in ipairs(data.Areas)do
+            if index>20 then break end
+            if type(area.Id)=="string"and area.Id:sub(1,16)=="saved:multispot:"and type(area.Name)=="string"and type(area.Position)=="table"then
+                local p=area.Position
+                if type(p[1])=="number"and type(p[2])=="number"and type(p[3])=="number"then
+                    rememberDestination(area.Id,area.Name,"Arena",Vector3.new(p[1],p[2],p[3]))
                 end
             end
         end
+        lastCustomSpots=raw
     end)
 end
 -- Fixed destination coordinates from the supplied source, available before areas stream in.
@@ -3856,20 +3858,22 @@ do
 end
 local lastAreaPayload
 local function saveDestinations()
-    if not filePersistence or not destinationsDirty then return end
-    pcall(function()
-        if not isfolder(configFolder) then makefolder(configFolder) end
-        local areas = {}
-        for _, area in pairs(destinations) do
-            if #areas >= 64 then break end
-            local p = area.Position
-            areas[#areas + 1] = { Id = area.Id, Name = area.Name, Kind = area.Kind, Position = { p.X, p.Y, p.Z } }
+    destinationsDirty=false
+    if not filePersistence then return end
+    local areas={}
+    for id,area in pairs(destinations)do
+        if id:sub(1,16)=="saved:multispot:"then
+            local p=area.Position
+            areas[#areas+1]={Id=id,Name=area.Name,Position={p.X,p.Y,p.Z}}
         end
-        table.sort(areas, function(a, b) return a.Id < b.Id end)
-        local payload = HttpService:JSONEncode({ Version = 1, PlaceId = game.PlaceId, Areas = areas })
-        if payload ~= lastAreaPayload then writefile(destinationPath, payload); lastAreaPayload = payload end
-        destinationsDirty=false
+    end
+    if #areas==0 then return end
+    table.sort(areas,function(a,b)return a.Id<b.Id end)
+    local ok,reason=pcall(function()
+        local raw=HttpService:JSONEncode({Version=1,PlaceId=game.PlaceId,Areas=areas})
+        if raw~=lastCustomSpots then writefile(customSpotPath,raw);lastCustomSpots=raw end
     end)
+    state.CustomSpotSaveError=not ok and tostring(reason)or nil
 end
 local function rankMob(mob)
     local priority=targetPriority.Rank(mob)
@@ -3989,7 +3993,7 @@ function state.RegisterAutomationDestination(spot)
     if spot.PlaceId~=game.PlaceId then return false end
     local existing=destinations[spot.DestinationId]
     if existing then
-        if spot.MainBoss then rememberDestination(spot.DestinationId,existing.Name,spot.Kind,spot.Position)end
+        if spot.MainBoss or spot.PositionLocked then rememberDestination(spot.DestinationId,existing.Name,spot.Kind,spot.Position)end
         if spot.DestinationId:sub(1,4)=="mob:" then existing.Name=spot.DestinationId:sub(5) end
         return true
     end
@@ -6926,68 +6930,98 @@ end
 -- Source-provided arena coordinates; current-floor discoveries may refine them.
 return function(ctx)
     local source = {
-        [542351431] = { -- floor 1
-            Boss = Vector3.new(-2977.1355, -229.28125, 1221.8555),
-            Portal = Vector3.new(-2940.8562, -207.597794, 982.687012),
-            Miniboss = Vector3.new(139.343933, 225.040985, -132.926147)
+        [542351431]={
+            ["Boss"]=Vector3.new(-2939,-234,1216),
         },
-        [548231754] = { -- floor 2
-            Boss = Vector3.new(-2013.0431, 445.54346, -8953.9512),
-            Portal = Vector3.new(-2181.09204, 466.482727, -8955.31055)
+        [548231754]={
+            ["Boss"]=Vector3.new(-2010,443,-8956),
         },
-        [555980327] = { -- floor 3
-            Boss = Vector3.new(448.331146, 4279.3374, -385.050385),
-            Portal = Vector3.new(-381.196564, 4184.99902, -327.238312)
+        [555980327]={
+            ["Boss"]=Vector3.new(-393,4168,-369),
         },
-        [572487908] = { -- floor 4
-            Boss = Vector3.new(-2318.12964, 2280.41992, -514.067749),
-            Portal = Vector3.new(-2319.54028, 2091.30078, -106.37648),
-            Miniboss = Vector3.new(-1361.35596, 5173.21387, -390.738007)
+        [572487908]={
+            ["Boss"]=Vector3.new(-2319,2073,95),
         },
-        [580239979] = { -- floor 5
-            Boss = Vector3.new(2189.17822, 1308.125, -121.071182),
-            Portal = Vector3.new(2188.29614, 1255.37036, -407.864594)
+        [580239979]={
+            ["Boss"]=Vector3.new(2182,1236,-717),
         },
-        [582198062] = { -- floor 7
-            Boss = Vector3.new(3347.78955, 800.043884, -804.310425),
-            Portal = Vector3.new(3336.35645, 747.824036, -614.307983)
+        [582198062]={
+            ["Boss"]=Vector3.new(3329,730,-475),
         },
-        [548878321] = { -- floor 8
-            Boss = Vector3.new(1848.35413, 4110.43945, 7723.38623),
-            Portal = Vector3.new(1665.46252, 4094.20312, 7722.29443),
-            Miniboss = Vector3.new(-811.7854, 3179.59814, -949.255676)
+        [548878321]={
+            ["Boss"]=Vector3.new(1550,4081,7720),
+            ["Miniboss"]=Vector3.new(3772,5743,-9686),
         },
-        [573267292] = { -- floor 9
-            Boss = Vector3.new(12241.4648, 461.776215, -3655.09009),
-            Portal = Vector3.new(12357.0059, 439.948914, -3470.23218),
-            Miniboss = Vector3.new(1928, 2889, -11349),
-            ['Second miniboss'] = Vector3.new(1973.94238, 2986.00952, -4486.8125)
+        [573267292]={
+            ["Boss"]=Vector3.new(12392,429,-3415),
+            ["Miniboss"]=Vector3.new(1926,2889,-11348),
+            ["Second miniboss"]=Vector3.new(-3613,2905,-7708),
         },
-        [2659143505] = { -- floor 10
-            Boss = Vector3.new(45.494194, 1003.77246, 25432.9902),
-            Portal = Vector3.new(110.383698, 940.75531, 24890.9922),
-            Miniboss = Vector3.new(-894.185791, 467.646698, 6505.85254)
+        [2659143505]={
+            ["Boss"]=Vector3.new(104,931,23842),
+            ["Miniboss"]=Vector3.new(50,261,18107),
         },
-        [5287433115] = { -- floor 11
-            Boss = Vector3.new(4916.49414, 2312.97021, 7762.28955),
-            Portal = Vector3.new(5224.18994, 2602.94019, 6438.44678),
-            Miniboss = Vector3.new(4801.12695, 1646.30347, 2083.19116),
-            ['Za, the Eldest'] = Vector3.new(4001.55908, 421.515015, -3794.19727),
-            ['Wa, the Curious'] = Vector3.new(4821.5874, 3226.32788, 5868.81787),
-            ['Duality Reaper  '] = Vector3.new(4763.06934, 501.713593, -4344.83838),
-            ['Neon chest       '] = Vector3.new(5204.35449, 2294.14502, 5778.00195)
+        [5287433115]={
+            ["Duality Reaper"]=Vector3.new(6154,846,-4251),
+            ["Za, the Eldest"]=Vector3.new(1753,921,-6389),
+            ["Miniboss"]=Vector3.new(5129,1614,2104),
+            ["Boss"]=Vector3.new(5187,2343,6239),
         },
-        [134019705603409] = { -- Atlantis: native client arena discovery
-            Leviathan = Vector3.new(15.89453125, 1320.01953125, -797.10546875)
+        [6144637080]={
+            ["Limor the Devourer"]=Vector3.new(450,-337,7912),
+            ["Radioactive Experiment"]=Vector3.new(-3754,167,3570),
+            ["Suspended Unborn"]=Vector3.new(-2439,60,5389),
+            ["C-618 Uriotol, The Forgotten Hunter"]=Vector3.new(1685,288,3749),
+            ["Warlord"]=Vector3.new(1031,108,5474),
         },
-        [13965775911] = { -- Atheon / floor 13 (user-provided arena)
-            ['Atheon arena'] = Vector3.new(840, 798, 336)
+        [13965775911]={["Atheon arena"]=Vector3.new(840,798,336)},
+        [134019705603409]={Leviathan=Vector3.new(15.89453125,1320.01953125,-797.10546875)},
+    }
+    local supplied = {
+        [542351431]={
+            ["Boss"]={Name="Rahjin the Thief King",Kind="Boss",RespawnSeconds=90,EncounterNames={["Rahjin the Thief King"]=true}},
         },
-        [6144637080] = { -- floor 12
-            ['Suspended Unborn'] = Vector3.new(-5324.62305, 427.934784, 3754.23682),
-            ['Limor the Devourer'] = Vector3.new(-1093.02625, -169.141785, 7769.1875),
-            ['Radioactive Experiment'] = Vector3.new(-4643.86816, 425.090515, 3782.8252)
-        }
+        [548231754]={
+            ["Boss"]={Name="Borik the BeeKeeper",Kind="Boss",RespawnSeconds=90,EncounterNames={["Borik the BeeKeeper"]=true}},
+        },
+        [555980327]={
+            ["Boss"]={Name="Ra'thae the Ice King",Kind="Boss",RespawnSeconds=90,EncounterNames={["Ra'thae the Ice King"]=true}},
+        },
+        [572487908]={
+            ["Boss"]={Name="Irath The Lion",Kind="Boss",RespawnSeconds=90,EncounterNames={["Irath The Lion"]=true}},
+        },
+        [580239979]={
+            ["Boss"]={Name="Sa'jun the Centurian Chieftain",Kind="Boss",RespawnSeconds=90,EncounterNames={["Sa'jun the Centurian Chieftain"]=true}},
+        },
+        [582198062]={
+            ["Boss"]={Name="Smashroom the Mushroom Behemoth",Kind="Boss",RespawnSeconds=90,EncounterNames={["Smashroom the Mushroom Behemoth"]=true}},
+        },
+        [548878321]={
+            ["Boss"]={Name="Formaug the Jungle Giant",Kind="Boss",RespawnSeconds=90,EncounterNames={["Formaug the Jungle Giant"]=true}},
+            ["Miniboss"]={Name="Hippogriff",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Hippogriff"]=true}},
+        },
+        [573267292]={
+            ["Boss"]={Name="Mortis the Flaming Sear",Kind="Boss",RespawnSeconds=90,EncounterNames={["Mortis the Flaming Sear"]=true}},
+            ["Miniboss"]={Name="Polyserpant",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Polyserpant"]=true}},
+            ["Second miniboss"]={Name="Gargoyle Reaper",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Gargoyle Reaper"]=true}},
+        },
+        [2659143505]={
+            ["Boss"]={Name="Grim the Overseer",Kind="Boss",RespawnSeconds=90,EncounterNames={["Grim the Overseer"]=true}},
+            ["Miniboss"]={Name="Baal, The Tormentor",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Baal, The Tormentor"]=true}},
+        },
+        [5287433115]={
+            ["Duality Reaper"]={Name="Duality Reaper",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Duality Reaper"]=true}},
+            ["Za, the Eldest"]={Name="Za, the Eldest",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Za, the Eldest"]=true}},
+            ["Miniboss"]={Name="DA, RA, KA",Kind="Mini boss",RespawnSeconds=45,EncounterNames={Da=true,Ra=true,Ka=true}},
+            ["Boss"]={Name="Saurus, the All-Seeing",Kind="Boss",RespawnSeconds=90,EncounterNames={["Saurus, the All-Seeing"]=true}},
+        },
+        [6144637080]={
+            ["Limor the Devourer"]={Name="Limor the Devourer",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Limor the Devourer"]=true}},
+            ["Radioactive Experiment"]={Name="Radioactive Experiment",Kind="Boss",RespawnSeconds=90,EncounterNames={["Radioactive Experiment"]=true}},
+            ["Suspended Unborn"]={Name="Suspended Unborn",Kind="Boss",RespawnSeconds=90,EncounterNames={["Suspended Unborn"]=true}},
+            ["C-618 Uriotol, The Forgotten Hunter"]={Name="C-618 Uriotol, The Forgotten Hunter",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["C-618 Uriotol, The Forgotten Hunter"]=true}},
+            ["Warlord"]={Name="Warlord",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Warlord"]=true}},
+        },
     }
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
         [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14}
@@ -7019,13 +7053,14 @@ return function(ctx)
         local floor=catalog.FloorById[placeId]
         if floor then for original,point in pairs(areas) do
             local key=original:match('^%s*(.-)%s*$')
-            local kind=key=='Boss' and 'Boss' or (key=='Miniboss' or key=='Second miniboss') and 'Mini boss' or extraKinds[key]
+            local info=supplied[placeId]and supplied[placeId][key]
+            local kind=info and info.Kind or key=='Boss' and 'Boss' or (key=='Miniboss' or key=='Second miniboss') and 'Mini boss' or extraKinds[key]
             if kind then
-                local name=key=='Boss' and 'Boss arena' or key=='Miniboss' and 'Mini-boss arena' or key
+                local name=info and info.Name or key=='Boss' and 'Boss arena' or key=='Miniboss' and 'Mini-boss arena' or key
                 local spot={Id=tostring(placeId)..'/'..key,PlaceId=placeId,Name=name,Kind=kind,Position=point,
                     DestinationId='source:'..key,Floor=floor,Label=floor.Label..' · '..name,
-                    MainBoss=key=='Boss',PositionLocked=(placeId==573267292 and key=='Miniboss') or placeId==13965775911,
-                    EncounterNames=placeId==13965775911 and {Atheon=true,['Corrupted Atheon']=true}
+                    RespawnSeconds=info and info.RespawnSeconds,MainBoss=key=='Boss',PositionLocked=info~=nil or placeId==13965775911,
+                    EncounterNames=info and info.EncounterNames or placeId==13965775911 and {Atheon=true,['Corrupted Atheon']=true}
                         or (placeId==134019705603409 and key=='Leviathan' and {Leviathan=true})
                         or (key=='Boss' and mainBossNames[placeId]) or nil}
                 catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[spot.Id]=spot
@@ -7069,7 +7104,7 @@ return function(ctx)
                         primary=catalog.SpotById[tostring(placeId)..'/Atheon arena']
                     end
                     for _,spot in ipairs(catalog.Spots) do
-                        if not primary and spot.PlaceId==placeId and spot.Name:lower()==name:lower() then primary=spot;break end
+                        if not primary and spot.PlaceId==placeId and (spot.Name:lower()==name:lower() or (spot.EncounterNames and spot.EncounterNames[name])) then primary=spot;break end
                     end
                     if primary then
                         if not primary.PositionLocked then
@@ -7087,7 +7122,7 @@ return function(ctx)
                     end
                     if primary then
                         catalog.Aliases[key]=primary.Id;catalog.SpotById[key]=primary
-                    else
+                    elseif not supplied[placeId] then
                         local spot={Id=key,PlaceId=placeId,Name=name,Kind=area.Kind,Position=area.Position,
                             DestinationId=id,Floor=floor,Label=floor.Label..' · '..name}
                         catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot

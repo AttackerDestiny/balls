@@ -202,6 +202,12 @@ def main():
     release=script[release_start:script.index("\ndo\n",release_start)]
     fixture += "assert(loadstring(" + quote(read("movement-release.test.luau")) + "))()(" + quote(release) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-quest.test.luau")) + "))()(" + quote(read("auto-quest.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("default-spots.test.luau")) + "))()(" + quote(read("floor-catalog.module.luau")) + ")\n"
+    assert "destinations_" not in read("storage-bootstrap.module.luau")
+    assert "destinationPath" not in script
+    custom_start=script.index("local function saveDestinations()")
+    custom_save=script[custom_start:script.index("local function rankMob",custom_start)]
+    fixture += "assert(loadstring(" + quote(read("custom-spots-save.test.luau")) + "))()(" + quote(custom_save) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

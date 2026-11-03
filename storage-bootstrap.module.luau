@@ -42,7 +42,6 @@ return function(ctx)
             end
             ensureFile(folder.."/settings_"..ctx.UserId..".json",ctx.Encode({Version=1}))
             ensureFile(folder.."/solo-search_"..ctx.UserId..".json",ctx.Encode({Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId}))
-            ensureFile(folder.."/destinations_"..ctx.PlaceId..".json",ctx.Encode({Version=1,PlaceId=ctx.PlaceId,Areas={}}))
         end)
         api.Ready=ok;api.Error=not ok and tostring(message)or nil
         return ok,api.Error
