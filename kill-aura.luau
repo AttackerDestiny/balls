@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.startup-budget-v1.12.34"
-local VERSION="1.12.34"
+local BUILD="2026-11-03.config-transfer-v1.12.35"
+local VERSION="1.12.35"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -247,7 +247,7 @@ return function(ctx)
     local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
-        "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
+        "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
         local result={Version=1}
         for _,key in ipairs(keys)do result[key]=value[key]end
@@ -317,7 +317,15 @@ end
         Encode=function(v)return HttpService:JSONEncode(v)end,Decode=function(v)return HttpService:JSONDecode(v)end})
     if ok then sharedSettings=value;sharedPreferences=value.Values else configLoadError=tostring(value)end
 end
+local importedConfig=env.SB2ConfigImport
+if importedConfig and importedConfig.UserId~=player.UserId then importedConfig=nil end
+env.SB2ConfigImport=nil
 local function preference(key, fallback)
+    if importedConfig then
+        local value=importedConfig.Settings[key]
+        if value~=nil then return value end
+        return fallback
+    end
     if sharedPreferences[key]~=nil then return sharedPreferences[key]end
     if previous and key=="StopEverything" and previous.ResumeRequested then return false end
     if previous and previous.StopEverything and previous.ResumeFeatures and previous.ResumeFeatures[key]~=nil then return previous.ResumeFeatures[key] end
@@ -396,7 +404,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
-    Build=BUILD, Version=VERSION, UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
+    Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
     AttackInterval = 0.30, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.30,
@@ -1020,7 +1028,7 @@ local function settingsPayload()
         AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge, TransparentMap = features.TransparentMap,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
-        WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,
+        WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,
         SelectedPlayerId=state.SelectedPlayerId,
         ViewingPlayer=features.ViewingPlayer==true,ViewingPlayerInventory=features.ViewingPlayerInventory==true,
         HealthHUDPosition = { healthPosition.X.Scale, healthPosition.X.Offset, healthPosition.Y.Scale, healthPosition.Y.Offset },
@@ -1502,7 +1510,7 @@ do
     state.UI.PlayerMessage=create("TextLabel",{Name="PlayerMessage",Text="",Visible=false,LayoutOrder=70,Size=UDim2.new(1,0,0,30),
         BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextWrapped=true,
         TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,TextColor3=Color3.fromRGB(179,184,205)},pages.Player)
-    state.SetTab(previous and previous.UI and previous.UI.ActiveTab or "Main")
+    state.SetTab(preference("ActiveTab",previous and previous.UI and previous.UI.ActiveTab or "Main"))
 end
 
 
@@ -3783,6 +3791,11 @@ if game.PlaceId == 582198062 then
     rememberDestination("mob:Frogazoid", "Frogazoid", "Mini boss", Vector3.new(-154.811, 1214.301, -758.796))
 end
 -- Only user-created spots use a position file; built-in arenas stay in source.
+if importedConfig and filePersistence then
+    for id,areas in pairs(importedConfig.CustomSpots or {})do
+        writefile(configFolder.."/custom-spots_"..id..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(id),Areas=areas}))
+    end
+end
 local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
 local lastCustomSpots
 if filePersistence then
@@ -9187,6 +9200,116 @@ end
             task.wait(.25)
         end
     end)
+end
+
+do
+    local make=(function()
+-- BEGIN BUNDLED CONFIG TRANSFER
+-- Portable preferences and custom arenas; never execute imported text as code.
+return function(ctx)
+    local api={}
+    local kinds={}
+    for _,key in ipairs({"Enabled","AutoFarm","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
+    for _,key in ipairs({"TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
+    for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
+    local function plain(value,depth)
+        assert(depth<=12,"Config nesting is too deep")
+        local kind=type(value)
+        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number")
+        elseif kind=="table"then
+            local count=0
+            for key,item in pairs(value)do
+                count+=1;assert(count<=4096,"Config table is too large")
+                assert(type(key)=="string"or type(key)=="number","Invalid config key")
+                plain(item,depth+1)
+            end
+        else assert(kind=="string"or kind=="boolean","Invalid config value")end
+    end
+    function api.Validate(value)
+        assert(type(value)=="table"and value.Format=="FeatherConfig"and value.Version==1,"Not a Feather config")
+        assert(type(value.Settings)=="table"and value.Settings.Version==1,"Invalid settings")
+        plain(value,0)
+        for key,item in pairs(value.Settings)do assert(kinds[key]and type(item)==kinds[key],"Invalid setting: "..tostring(key))end
+        for _,key in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do
+            local position=value.Settings[key]
+            if position then
+                assert(#position==4,"Invalid UI position")
+                for _,coordinate in ipairs(position)do assert(type(coordinate)=="number","Invalid UI position")end
+            end
+        end
+        for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
+            for name,on in pairs(value.Settings[key]or {})do assert(type(name)=="string"and type(on)=="boolean","Invalid selection: "..key)end
+        end
+        assert(type(value.CustomSpots)=="table","Missing custom spots")
+        local floors=0
+        for id,spots in pairs(value.CustomSpots)do
+            floors+=1;assert(floors<=64 and tostring(id):match("^%d+$"),"Invalid spot floor")
+            assert(type(spots)=="table"and #spots<=20,"Too many custom spots")
+            for _,spot in ipairs(spots)do
+                assert(type(spot)=="table"and type(spot.Id)=="string"and spot.Id:sub(1,16)=="saved:multispot:","Invalid custom spot")
+                assert(type(spot.Name)=="string"and #spot.Name<=200 and type(spot.Position)=="table"and #spot.Position==3,"Invalid spot name/position")
+                for _,coordinate in ipairs(spot.Position)do assert(type(coordinate)=="number"and math.abs(coordinate)<=1e7,"Invalid coordinate")end
+            end
+        end
+        return value
+    end
+    function api.Export()
+        local value=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
+        local text=ctx.Encode(value);assert(#text<=262144,"Config exceeds 256 KB")
+        assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
+        ctx.Copy(text);return text
+    end
+    function api.Import(text)
+        assert(type(text)=="string"and #text<=262144,"Config exceeds 256 KB")
+        local value=api.Validate(ctx.Decode(text))
+        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
+        ctx.Apply(value)
+        return true
+    end
+    return api
+end
+
+-- END BUNDLED CONFIG TRANSFER
+    end)()
+    local transfer=make({Settings=settingsPayload,Encode=function(v)return HttpService:JSONEncode(v)end,
+        Decode=function(v)return HttpService:JSONDecode(v)end,Copy=setclipboard or toclipboard,
+        Spots=function()
+            local result={}
+            if filePersistence and type(listfiles)=="function"then
+                for _,file in ipairs(listfiles(configFolder))do
+                    local id=file:match("custom%-spots_(%d+)%.json$")
+                    if id then
+                        local raw=readfile(file)
+                        assert(#raw<=32768,"Custom spots file too large")
+                        local value=HttpService:JSONDecode(raw)
+                        assert(value.Version==1 and type(value.Areas)=="table","Invalid custom spots file")
+                        result[id]=value.Areas
+                    end
+                end
+            end
+            local current={}
+            for id,area in pairs(destinations)do
+                if id:sub(1,16)=="saved:multispot:"then
+                    local point=area.Position
+                    current[#current+1]={Id=id,Name=area.Name,Position={point.X,point.Y,point.Z}}
+                end
+            end
+            result[tostring(game.PlaceId)]=current
+            return result
+        end,
+        Apply=function(value)
+            assert(filePersistence or next(value.CustomSpots)==nil,"Importing saved spots requires executor file access")
+            -- Compile first; the imported JSON is data, never executable text.
+            local run=assert(loadstring(embeddedSource,"Feather config reload"))
+            env.SB2ConfigImport={UserId=player.UserId,Settings=value.Settings,CustomSpots=value.CustomSpots}
+            state.AutoSaveSuspended=true
+            state.Destroy(true)
+            run(embeddedSource)
+        end})
+    state.ExportConfig=transfer.Export
+    state.ImportConfig=transfer.Import
 end
 
 -- WindUI is bundled at a fixed release; queued rejoins need no library download.
@@ -24873,6 +24996,7 @@ return aa
 -- WindUI presentation; existing controllers remain the owners of gameplay/settings.
 return function(ctx)
     local s=ctx.State
+    local restoreTab=s.UI.ActiveTab or "Main"
     local api={Controls={},Tabs={},Ready=false,Visible=true}
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
@@ -24885,9 +25009,12 @@ return function(ctx)
         if ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
         if disposed or s.Running==false then error("UI initialization cancelled")end
     end
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up"}
-    local function report(reason)s.WindUIError=tostring(reason)end
+    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local function report(reason)
+        s.WindUIError=tostring(reason)
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=s.WindUIError,Duration=5})end
+    end
     local function guard(fn)
         return function(...)
             if disposed or s.Running==false then return end
@@ -24905,8 +25032,9 @@ return function(ctx)
         assert(type(s[name])=="function","Control unavailable: "..name)
         return s[name](...)
     end
+    if not ctx.WindUI:GetThemes()[s.Theme or "Dark"]then s.Theme="Dark"end
     local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..s.Version,
-        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme="Dark",Transparent=false,
+        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=s.Theme or "Dark",Transparent=false,
         Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,HideSearchBar=false,ScrollBarEnabled=true,
         User={Enabled=false},OpenButton={Title="Feather"}})
     assert(window,"WindUI window was not created")
@@ -24914,7 +25042,13 @@ return function(ctx)
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    for i,name in ipairs(tabs)do yieldBuild();api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
+    local function buildTabs(first,last)
+        for i=first,last do
+            yieldBuild();local name=tabs[i]
+            api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})
+        end
+    end
+    buildTabs(1,ctx.Defer and 1 or #tabs)
     local function button(key,tab,title,fn,desc)
         yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
@@ -25125,6 +25259,22 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    dropdown("Theme","Settings","Theme",function()
+        local options={}
+        for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end
+        table.sort(options)
+        return {Options=options,Value=s.Theme or "Dark"}
+    end,function(name)
+        if ctx.WindUI:SetTheme(name)then s.Theme=name;if s.SaveNow then s.SaveNow()end end
+    end)
+    input("ConfigImport","Settings","Config Import","",function(text)
+        if text:match("%S")then invoke("ImportConfig",text)end
+    end)
+    button("ConfigExport","Settings","Config Export",function()
+        invoke("ExportConfig")
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+    end)
+
 
     end
 
@@ -25177,7 +25327,11 @@ return function(ctx)
     if ctx.Defer then
         ctx.Defer(function()
             if disposed or s.Running==false then return end
-            local ok,reason=pcall(buildOtherTabs)
+            local ok,reason=pcall(function()
+                buildTabs(2,#tabs)
+                buildOtherTabs()
+                if window.CurrentTab==1 and api.Tabs[restoreTab]then api.Tabs[restoreTab]:Select()end
+            end)
             if not ok and not disposed then report(reason)end
         end)
     else buildOtherTabs()end
@@ -25226,6 +25380,7 @@ end
         roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
         local camera=workspace.CurrentCamera
         local size=camera and camera.ViewportSize or Vector2.new(1280,720)
+        state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
         state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
         local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,Yield=state.YieldStartup,Defer=task.defer,

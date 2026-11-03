@@ -1,6 +1,7 @@
 -- WindUI presentation; existing controllers remain the owners of gameplay/settings.
 return function(ctx)
     local s=ctx.State
+    local restoreTab=s.UI.ActiveTab or "Main"
     local api={Controls={},Tabs={},Ready=false,Visible=true}
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
@@ -13,9 +14,12 @@ return function(ctx)
         if ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
         if disposed or s.Running==false then error("UI initialization cancelled")end
     end
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up"}
-    local function report(reason)s.WindUIError=tostring(reason)end
+    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local function report(reason)
+        s.WindUIError=tostring(reason)
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=s.WindUIError,Duration=5})end
+    end
     local function guard(fn)
         return function(...)
             if disposed or s.Running==false then return end
@@ -33,8 +37,9 @@ return function(ctx)
         assert(type(s[name])=="function","Control unavailable: "..name)
         return s[name](...)
     end
+    if not ctx.WindUI:GetThemes()[s.Theme or "Dark"]then s.Theme="Dark"end
     local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..s.Version,
-        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme="Dark",Transparent=false,
+        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=s.Theme or "Dark",Transparent=false,
         Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,HideSearchBar=false,ScrollBarEnabled=true,
         User={Enabled=false},OpenButton={Title="Feather"}})
     assert(window,"WindUI window was not created")
@@ -42,7 +47,13 @@ return function(ctx)
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    for i,name in ipairs(tabs)do yieldBuild();api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
+    local function buildTabs(first,last)
+        for i=first,last do
+            yieldBuild();local name=tabs[i]
+            api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})
+        end
+    end
+    buildTabs(1,ctx.Defer and 1 or #tabs)
     local function button(key,tab,title,fn,desc)
         yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
@@ -253,6 +264,22 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    dropdown("Theme","Settings","Theme",function()
+        local options={}
+        for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end
+        table.sort(options)
+        return {Options=options,Value=s.Theme or "Dark"}
+    end,function(name)
+        if ctx.WindUI:SetTheme(name)then s.Theme=name;if s.SaveNow then s.SaveNow()end end
+    end)
+    input("ConfigImport","Settings","Config Import","",function(text)
+        if text:match("%S")then invoke("ImportConfig",text)end
+    end)
+    button("ConfigExport","Settings","Config Export",function()
+        invoke("ExportConfig")
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+    end)
+
 
     end
 
@@ -305,7 +332,11 @@ return function(ctx)
     if ctx.Defer then
         ctx.Defer(function()
             if disposed or s.Running==false then return end
-            local ok,reason=pcall(buildOtherTabs)
+            local ok,reason=pcall(function()
+                buildTabs(2,#tabs)
+                buildOtherTabs()
+                if window.CurrentTab==1 and api.Tabs[restoreTab]then api.Tabs[restoreTab]:Select()end
+            end)
             if not ok and not disposed then report(reason)end
         end)
     else buildOtherTabs()end

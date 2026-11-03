@@ -42,7 +42,7 @@ return function(source)
     function window:Open()self.Closed=false;if self.Opened then self.Opened()end end
     function window:Close()self.Closed=true;if self.ClosedCallback then self.ClosedCallback()end end
     function window:Destroy()self.Destroyed=true;if self.DestroyedCallback then self.DestroyedCallback()end end
-    local wind={CreateWindow=function(_,opts)
+    local wind={GetThemes=function()return {Dark={},Light={}}end,SetTheme=function(_,name)return name=="Dark"or name=="Light"end,CreateWindow=function(_,opts)
         assert(opts.Acrylic==false and opts.Folder=="SB2Codex/WindUI","Use the existing workspace and avoid mobile acrylic overhead")
         assert(not opts.KeySystem,"No new key system")
         return window
@@ -83,7 +83,7 @@ return function(source)
     function s.SetTradeItems(value)record("SetTradeItems",value);s.TradeItems=value end
     local inventoryReads=0;local gemCount=64
     function s.GetTradeItemChoices()inventoryReads+=1;return {{Name="Gem",Count=gemCount},{Name="Scroll",Count=1}}end
-    for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu"})do
+    for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu","ExportConfig","ImportConfig"})do
         s[name]=function(...)record(name,...)end
     end
     function s.SetAutoHideUI(on)record("SetAutoHideUI",on);s.AutoHideUI=on end
@@ -109,7 +109,7 @@ return function(source)
     assert(c.SafeMode.Desc==nil and c.SafeFloor.Desc==nil)
     assert(c.SafeWhitelist.Title=="Whitelist"and c.SafeWhitelist.Desc=="Input A List Of User")
     assert(c.AccountProgression.Desc==nil and c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
-    flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
+    flush();assert(tabCount==9 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge",
         "SkillAuraSection","SkillAura","SelectedSkill","MiscSkillSection","MiscSkillEnabled","SelectedMiscSkill","SafeModeSection","SafeMode","SafeFloor","SafeWhitelist",
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
@@ -170,6 +170,10 @@ return function(source)
     assert(staged.Controls.SafeMode and not staged.Controls.Enabled,"Main controls become available before background tabs")
     deferred();flush()
     assert(staged.Controls.Enabled and staged.Controls.AutoTrade,"Background build must finish every feature")
+    assert(staged.Tabs.Settings and staged.Controls.Theme and staged.Controls.ConfigImport and staged.Controls.ConfigExport)
+    staged.Controls.Theme:Emit("Light");assert(s.Theme=="Light")
+    staged.Controls.ConfigExport.Callback();assert(calls[#calls].Name=="ExportConfig")
+    staged.Controls.ConfigImport:Emit("config-text");assert(calls[#calls].Name=="ImportConfig"and calls[#calls].Args[1]=="config-text")
     staged.Destroy();s.Running=true;tabCount=0
     local cancelled=make({State=s,WindUI=wind,PlaceId=11,Defer=function(fn)deferred=fn end,Visibility=function()end})
     cancelled.Destroy();deferred()
