@@ -151,6 +151,12 @@ return function(ctx)
     paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
     local restart=guard(function()invoke("RestartScript")end)
     api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
+    api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
+        invoke("SetAutoHideUI",not s.AutoHideUI)
+        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
+    end),995)
+    if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
+
 
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")

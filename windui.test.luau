@@ -33,7 +33,7 @@ return function(source)
         return tab
     end
     function window:CreateTopbarButton(name,icon,callback,order)
-        assert(name=="Restart script"and icon=="rotate-cw"and order==996)
+        assert((name=="Restart script"and icon=="rotate-cw"and order==996)or (name=="Auto-hide UI on execute"and icon=="eye-off"and order==995))
         return {Callback=callback,Topbar=true}
     end
     function window:OnOpen(fn)self.Opened=fn end
@@ -85,6 +85,7 @@ return function(source)
     for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu"})do
         s[name]=function(...)record(name,...)end
     end
+    function s.SetAutoHideUI(on)record("SetAutoHideUI",on);s.AutoHideUI=on end
     function s.Destroy()record("Destroy");s.Running=false end
     s.PlayerTools={Choices=function()return {{UserId=123,Name="Friend",DisplayName="Friend"}}end,
         Select=function(id)record("SelectPlayer",id);s.SelectedPlayerId=id end,
@@ -120,6 +121,7 @@ return function(source)
     c.AutoDismantle:Emit({"Rare"});assert(s.AutoDismantle.Rare and not s.AutoDismantle.Common)
     c.TradeMode:Emit("Selected items");assert(s.TradeMode=="Selected")
     c.TradeItems:Emit({"Gem x64","Scroll x1"});assert(s.TradeItems.Gem and s.TradeItems.Scroll)
+    c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")
     c.JoinFriendUsername:Emit("NewFriend");assert(s.JoinFriendUsername=="NewFriend")
     c.SelectedSkill:Emit("Beam Rush");assert(s.SelectedSkill=="Beam Rush")

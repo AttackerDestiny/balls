@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.save-multi-spot-v1.12.16"
-local VERSION="1.12.16"
+local BUILD="2026-11-03.hud-drag-auto-hide-v1.12.17"
+local VERSION="1.12.17"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -247,7 +247,7 @@ return function(ctx)
     local keys={"AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
-        "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition"}
+        "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
         local result={Version=1}
         for _,key in ipairs(keys)do result[key]=value[key]end
@@ -387,7 +387,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
-    Build=BUILD, Version=VERSION, UserId=player.UserId, StopEverything=false,
+    Build=BUILD, Version=VERSION, UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
     AttackInterval = 0.30, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.30,
@@ -1006,7 +1006,7 @@ local function settingsPayload()
         AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge, TransparentMap = features.TransparentMap,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
-        WindUIPosition=state.WindUIPosition,
+        WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,
         SelectedPlayerId=state.SelectedPlayerId,
         ViewingPlayer=features.ViewingPlayer==true,ViewingPlayerInventory=features.ViewingPlayerInventory==true,
         HealthHUDPosition = { healthPosition.X.Scale, healthPosition.X.Offset, healthPosition.Y.Scale, healthPosition.Y.Offset },
@@ -24816,6 +24816,12 @@ return function(ctx)
     paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
     local restart=guard(function()invoke("RestartScript")end)
     api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
+    api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
+        invoke("SetAutoHideUI",not s.AutoHideUI)
+        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
+    end),995)
+    if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
+
 
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
@@ -24963,9 +24969,18 @@ end
         local camera=workspace.CurrentCamera
         local size=camera and camera.ViewportSize or Vector2.new(1280,720)
         state.WindUIPosition=preference("WindUIPosition",nil)
+        function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
         local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
+            MarkAutoHide=function(button,on)
+                local dot=button:FindFirstChild("AutoHideIndicator")
+                if not dot then
+                    dot=create("Frame",{Name="AutoHideIndicator",Size=UDim2.fromOffset(6,6),Position=UDim2.new(1,-8,1,-8),BorderSizePixel=0},button)
+                    corner(dot,3)
+                end
+                dot.BackgroundColor3=on and Color3.fromRGB(51,199,89)or Color3.fromRGB(110,110,115)
+            end,
             Visibility=function(visible)
                 panel.Visible=false
                 if state.Running then showUI.Visible=true;showUI.Text=visible and "Hide UI"or "Show UI" else showUI.Visible=false end
@@ -24993,7 +25008,7 @@ end
                 state.WindUIPosition={p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset};requestSave()
             end)
         end
-        controller.SetVisible(not state.UIHidden)
+        controller.SetVisible(not state.AutoHideUI and not state.UIHidden)
         task.spawn(function()
             while state.Running do
                 local updated,reason=pcall(controller.Update,os.clock())
@@ -25043,7 +25058,7 @@ end
 -- END BUNDLED MULTI SPOT HUD
     end)()
     local root=create("Frame",{Name="MultiSpotHUD",Visible=false,Size=UDim2.fromOffset(280,70),
-        Position=UDim2.new(.5,0,.7,46),AnchorPoint=Vector2.new(.5,0),BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0},gui)
+        Position=UDim2.new(.5,0,.5,0),AnchorPoint=Vector2.new(.5,.5),Active=true,BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0},gui)
     corner(root,14)
     create("UIStroke",{Color=Color3.new(1,1,1),Transparency=.92,Thickness=1},root)
     create("TextLabel",{Name="Heading",Text="Multi Spot",BackgroundTransparency=1,Position=UDim2.fromOffset(12,8),
@@ -25051,6 +25066,24 @@ end
     local label=create("TextLabel",{Name="Status",Text="",BackgroundTransparency=1,Position=UDim2.fromOffset(12,28),
         Size=UDim2.new(1,-24,0,34),TextWrapped=true,Font=Enum.Font.Gotham,TextSize=11,
         TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},root)
+    local drag,startPoint,startPosition
+    bind(root.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            drag=input;startPoint=input.Position;startPosition=root.Position
+        end
+    end)
+    bind(UserInputService.InputChanged,function(input)
+        if not drag or not root.Visible then return end
+        if input~=drag and input.UserInputType~=Enum.UserInputType.MouseMovement then return end
+        local delta=input.Position-startPoint
+        local size=gui.AbsoluteSize
+        local x=startPosition.X.Scale*size.X+startPosition.X.Offset+delta.X
+        local y=startPosition.Y.Scale*size.Y+startPosition.Y.Offset+delta.Y
+        root.Position=UDim2.fromOffset(math.clamp(x,140,math.max(140,size.X-140)),math.clamp(y,35,math.max(35,size.Y-35)))
+    end)
+    bind(UserInputService.InputEnded,function(input)
+        if input==drag or input.UserInputType==Enum.UserInputType.MouseButton1 then drag=nil end
+    end)
     state.MultiSpotHUD=make({State=state,Pulse=RunService.Heartbeat,Now=os.clock,
         Visible=function(value)if root.Visible~=value then root.Visible=value end end,
         Text=function(value)if label.Text~=value then label.Text=value end end,

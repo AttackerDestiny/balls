@@ -85,3 +85,5 @@ UI cleanup in v1.12.1 removes the Combat, Travel, Settings and Dodge status card
 Auto Farm keeps its living target when same-priority mobs move or spawn. Only a higher-priority eligible enemy can interrupt: main boss over mini-boss/regular, mini-boss over regular. Death, exhausted HitLives, despawning or an explicit arena/progression change releases the lock. Temporary missing health data, invulnerability and offset retries preserve it.
 
 Multi Spot has a Save Spot button. It stores the current X/Z with the detected floor height as a numbered custom arena, selectable in the current-floor dropdown and persisted in the normal floor destination file. Custom arenas remain separate from boss discoveries, up to 20 per floor. Saved selections use existing Multi Spot autosave and clear-all-enemies behavior.
+
+The Multi Spot status HUD starts centered on execution and can be dragged with mouse or touch. The top-bar eye-off button toggles Auto-hide UI on execute (green indicator = ON); the preference shares normal autosave. The floating Show UI button and Right Shift still reopen the window, while the health and Multi Spot overlays remain independent.
