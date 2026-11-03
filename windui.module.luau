@@ -216,18 +216,18 @@ return function(ctx)
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
     end,true)
     api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
-    stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Accept requests only from whitelisted players; final acceptance is automatic.")
-    dropdown("TradeMode","Utility","Trade offer mode",function()
+    stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
+    dropdown("TradeMode","Utility","Mode",function()
         return {Options={"Selected items","Legendary+"},Value=s.TradeMode=="Legendary"and "Legendary+"or "Selected items"}
     end,function(value)invoke("SetTradeMode",value=="Legendary+"and "Legendary"or "Selected")end)
-    dropdown("TradeItems","Utility","Trade inventory items",function()
+    dropdown("TradeItems","Utility","Inventory",function()
         local options,map={},{ }
         for _,item in ipairs(s.GetTradeItemChoices())do local label=item.Name.." x"..item.Count;options[#options+1]=label;map[label]=item.Name end
         return {Options=options,Map=map,Value=selected(options,map,function(name)return s.TradeItems[name]==true end)}
     end,function(values,map)
         local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
         invoke("SetTradeItems",picked)
-    end,true,"All selected copies. Upgrade Protection Scroll and Resurrection Crystal are always included.")
+    end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
 
     function api.SetVisible(value)
