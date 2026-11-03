@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("AUTO CRAFT", "auto-craft.module.luau"),
         ("INVENTORY VIEW", "inventory-view.module.luau"),
         ("PLAYER TOOLS", "player-tools.module.luau"),
         ("MULTI SPOT HUD", "multi-spot-hud.module.luau"),
@@ -195,6 +196,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("safe-panic-position.test.luau")) + "))()(" + quote(script[panic_start:panic_end]) + ")\n"
     fixture += "assert(loadstring(" + quote(read("multi-spot-hud.test.luau")) + "))()(" + quote(read("multi-spot-hud.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("inventory-view.test.luau")) + "))()(" + quote(read("inventory-view.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("auto-craft.test.luau")) + "))()(" + quote(read("auto-craft.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

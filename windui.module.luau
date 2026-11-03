@@ -215,6 +215,15 @@ return function(ctx)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
     end,true)
+    api.Controls.AutoCraftSection=api.Tabs.Utility:Section({Title="Auto Craft",TextSize=17})
+    dropdown("AutoCraft","Utility","Auto Craft",function()
+        local options={"Uncommon → Rare","Rare → Legendary"}
+        local map={[options[1]]="Rare Upgrade Crystal",[options[2]]="Legendary Upgrade Crystal"}
+        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.AutoCraft and s.AutoCraft[name]==true end)}
+    end,function(values,map)
+        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
+        invoke("SetAutoCraft",picked)
+    end,true)
     api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
     dropdown("TradeMode","Utility","Mode",function()

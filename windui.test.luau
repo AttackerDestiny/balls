@@ -79,6 +79,7 @@ return function(source)
     end
     function s.SetAutoDismantle(name,on)record("SetAutoDismantle",name,on);s.AutoDismantle[name]=on end
     function s.SetPerformanceBoost(name,on)record("SetPerformanceBoost",name,on);s.PerformanceBoosters[name]=on end
+    function s.SetAutoCraft(value)record("SetAutoCraft",value);s.AutoCraft=value end
     function s.SetTradeItems(value)record("SetTradeItems",value);s.TradeItems=value end
     local inventoryReads=0;local gemCount=64
     function s.GetTradeItemChoices()inventoryReads+=1;return {{Name="Gem",Count=gemCount},{Name="Scroll",Count=1}}end
@@ -112,7 +113,7 @@ return function(source)
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportSection","TeleportDestination","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
-        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
+        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoCraftSection","AutoCraft","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
     assert(c.MultiSpotAreas.Title=="Saved Spot"and c.MultiSpotAreas.Desc==nil)
@@ -127,6 +128,7 @@ return function(source)
     assert(calls[#calls].Name=="SetMultiSpotSelections","Arena changes use one batch save")
     c.PerformanceBoosters:Emit({"No damage particles"})
     assert(s.PerformanceBoosters["No damage particles"]and not s.PerformanceBoosters["Hide effects"])
+    c.AutoCraft:Emit({"Uncommon → Rare","Rare → Legendary"});assert(s.AutoCraft["Rare Upgrade Crystal"]and s.AutoCraft["Legendary Upgrade Crystal"])
     c.AutoDismantle:Emit({"Rare"});assert(s.AutoDismantle.Rare and not s.AutoDismantle.Common)
     c.TradeMode:Emit("Selected items");assert(s.TradeMode=="Selected")
     c.TradeItems:Emit({"Gem x64","Scroll x1"});assert(s.TradeItems.Gem and s.TradeItems.Scroll)

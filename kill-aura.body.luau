@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.trade-labels-v1.12.25"
-local VERSION="1.12.25"
+local BUILD="2026-11-03.auto-craft-v1.12.26"
+local VERSION="1.12.26"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -244,7 +244,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -328,6 +328,7 @@ local restore = {
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
+    AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
     AutoFarm=preference("AutoFarm",false)==true,
@@ -397,6 +398,7 @@ local state = {
     AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
     LagPauseUntil = 0, PingMs = nil, Backoff = 1,
     AutoTrade=restore.AutoTrade,TradeMode=restore.TradeMode,TradeItems=type(restore.TradeItems)=="table"and restore.TradeItems or {},
+    AutoCraft=type(restore.AutoCraft)=="table"and restore.AutoCraft or {},
     AutoDismantle=type(restore.AutoDismantle)=="table"and restore.AutoDismantle or {},
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
@@ -987,7 +989,7 @@ local function settingsPayload()
     local position = panel.Position
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -9041,6 +9043,94 @@ end
             task.wait(state.AutoTrade and .3 or 1)
         end
         state.AutoTradeBusy=false
+    end)
+end
+
+-- Native forge action and five-to-one recipes inspected through connected MCP.
+do
+    local make=(function()
+-- BEGIN BUNDLED AUTO CRAFT
+-- One acknowledged forge request at a time; never retry a stalled spend blindly.
+return function(ctx)
+    local api={}
+    local pending,nextTry=nil,0
+    local recipes={{Output="Legendary Upgrade Crystal",Input="Rare Upgrade Crystal"},
+        {Output="Rare Upgrade Crystal",Input="Uncommon Upgrade Crystal"}}
+    function api.Reset()api.Paused=false;nextTry=0 end
+    function api.Update(now)
+        if not ctx.Active()then return end
+        if pending then
+            local input,output=ctx.Count(pending.Input),ctx.Count(pending.Output)
+            if input<=pending.BeforeInput-pending.Required and output>=pending.BeforeOutput+1 then
+                pending=nil;api.Paused=false;nextTry=now+.2;ctx.Status("Crystal crafted")
+            elseif now-pending.At>=10 then
+                api.Paused=true;ctx.Status("Craft not acknowledged · waiting without duplicate requests")
+            end
+            if pending then return end
+        end
+        if api.Paused or ctx.Busy()or now<nextTry then return end
+        nextTry=now+.5
+        for _,recipe in ipairs(recipes)do
+            if ctx.Selected(recipe.Output)then
+                local required=ctx.Recipe(recipe.Output,recipe.Input)
+                if type(required)=="number"and required>0 and required%1==0 then
+                    local input,output=ctx.Count(recipe.Input),ctx.Count(recipe.Output)
+                    if input>=required then
+                        pending={Input=recipe.Input,Output=recipe.Output,Required=required,BeforeInput=input,BeforeOutput=output,At=now}
+                        local ok,reason=pcall(ctx.Send,recipe.Output)
+                        if not ok then api.Paused=true;ctx.Status("Craft request failed · "..tostring(reason))
+                        else ctx.Status("Crafting "..recipe.Output)end
+                        return
+                    end
+                end
+            end
+        end
+    end
+    return api
+end
+
+-- END BUNDLED AUTO CRAFT
+    end)()
+    local profile=ReplicatedStorage.Profiles[player.Name]
+    local restrictions=require(ReplicatedStorage.Shared.Util.ItemRestrictions)
+    local function count(name)
+        local total=0
+        for _,item in ipairs(profile.Inventory:GetChildren())do
+            if item.Name==name and item:IsA("IntValue")and restrictions.CanOfferCrafting(profile,item)==true then
+                local stack=item:FindFirstChild("Count")
+                total+=stack and math.max(0,stack.Value)or 1
+            end
+        end
+        return total
+    end
+    local worker=make({Active=function()return state.Running end,
+        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutoTradeBusy
+            or state.TravelBusy or state.AutomationTeleporting end,
+        Selected=function(name)return state.AutoCraft[name]==true end,Count=count,
+        Recipe=function(output,input)
+            local definition=ReplicatedStorage.Database.Items:FindFirstChild(output)
+            local recipe=definition and definition:FindFirstChild("Recipe")
+            if not recipe then return end
+            local amount
+            for _,part in ipairs(recipe:GetChildren())do
+                if part.Name==input and part:IsA("ValueBase")then amount=part.Value
+                else return end -- Do not spend currency or additional materials for changed recipes.
+            end
+            return amount
+        end,
+        Send=function(name)ReplicatedStorage.Event:FireServer("Item",{"Craft",name})end,
+        Status=function(text)state.AutoCraftStatus=text end})
+    function state.SetAutoCraft(selected)
+        local result={}
+        for _,name in ipairs({"Rare Upgrade Crystal","Legendary Upgrade Crystal"})do if selected and selected[name]==true then result[name]=true end end
+        state.AutoCraft=result;worker.Reset();requestSave()
+    end
+    task.spawn(function()
+        while state.Running do
+            local ok,reason=pcall(worker.Update,os.clock())
+            if not ok then state.AutoCraftStatus=tostring(reason)end
+            task.wait(.25)
+        end
     end)
 end
 
@@ -24941,6 +25031,15 @@ return function(ctx)
     end,function(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
+    end,true)
+    api.Controls.AutoCraftSection=api.Tabs.Utility:Section({Title="Auto Craft",TextSize=17})
+    dropdown("AutoCraft","Utility","Auto Craft",function()
+        local options={"Uncommon → Rare","Rare → Legendary"}
+        local map={[options[1]]="Rare Upgrade Crystal",[options[2]]="Legendary Upgrade Crystal"}
+        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.AutoCraft and s.AutoCraft[name]==true end)}
+    end,function(values,map)
+        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
+        invoke("SetAutoCraft",picked)
     end,true)
     api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
