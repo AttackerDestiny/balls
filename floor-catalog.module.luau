@@ -109,6 +109,17 @@ return function(ctx)
     end
     function catalog.AddCurrent(areas,placeId)
         local floor=catalog.FloorById[placeId];if not floor then return end
+        for id,area in pairs(areas or {})do
+            if id:sub(1,16)=="saved:multispot:" then
+                local key=tostring(placeId).."/"..id
+                local spot=catalog.SpotById[key]
+                if not spot then
+                    spot={Id=key,PlaceId=placeId,Name=area.Name,Kind="Arena",Position=area.Position,
+                        DestinationId=id,Floor=floor,Label=floor.Label.." · "..area.Name,PositionLocked=true}
+                    catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
+                else spot.Position=area.Position end
+            end
+        end
         for _,kind in ipairs({'Boss','Mini boss'}) do
             local generic=catalog.SpotById[tostring(placeId)..'/'..(kind=='Boss' and 'Boss' or 'Miniboss')]
             -- Keep the user's explicit F9 first-arena location even if only the second mini-boss is loaded.

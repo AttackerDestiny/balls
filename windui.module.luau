@@ -128,6 +128,7 @@ return function(ctx)
     paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
+    button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
     dropdown("MultiSpotAreas","Main","Boss / mini-boss arenas",function()
         local options,map={},{ }
         local catalog=s.AutomationCatalog

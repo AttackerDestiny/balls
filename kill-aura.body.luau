@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.multi-spot-hud-v1.12.15"
-local VERSION="1.12.15"
+local BUILD="2026-11-03.save-multi-spot-v1.12.16"
+local VERSION="1.12.16"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -4220,6 +4220,26 @@ function state.SaveCurrentMiniBossArea()
             local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
             if root then rememberDestination("saved:mini", "Saved mini-boss area", "Mini boss", root.Position); saveDestinations(); refreshTravelChoices(); setTravelStatus("Mini-boss area saved for " .. floorName) end
 end
+function state.SaveMultiSpot()
+    if state.StopEverything or state.TravelBusy or state.AutomationTeleporting then return false end
+    local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    local point=root.Position
+    local surface=waveDodge.FloorY(point)
+    if type(surface)=="number"then point=Vector3.new(point.X,surface,point.Z)end
+    if not finitePoint(point)then return false end
+    local count=0
+    for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
+    if count>=20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
+    local id="saved:multispot:"..HttpService:GenerateGUID(false)
+    rememberDestination(id,"Saved Spot "..(count+1),"Arena",point)
+    state.FloorDestinations=destinations
+    saveDestinations()
+    if state.AutomationCatalog then state.AutomationCatalog.AddCurrent(destinations,game.PlaceId);state.AutomationCatalog.Sort()end
+    state.MultiSpotStatus="Saved Spot "..(count+1).." saved · select it in arenas"
+    if state.RefreshAutomationUI then state.RefreshAutomationUI()end
+    return true
+end
 state.RefreshTeleportDestinations = refreshTravelChoices
 bind(travelDropdown.Activated, function()
     if state.StopEverything or state.TravelBusy then return end
@@ -6949,6 +6969,17 @@ return function(ctx)
     end
     function catalog.AddCurrent(areas,placeId)
         local floor=catalog.FloorById[placeId];if not floor then return end
+        for id,area in pairs(areas or {})do
+            if id:sub(1,16)=="saved:multispot:" then
+                local key=tostring(placeId).."/"..id
+                local spot=catalog.SpotById[key]
+                if not spot then
+                    spot={Id=key,PlaceId=placeId,Name=area.Name,Kind="Arena",Position=area.Position,
+                        DestinationId=id,Floor=floor,Label=floor.Label.." · "..area.Name,PositionLocked=true}
+                    catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
+                else spot.Position=area.Position end
+            end
+        end
         for _,kind in ipairs({'Boss','Mini boss'}) do
             local generic=catalog.SpotById[tostring(placeId)..'/'..(kind=='Boss' and 'Boss' or 'Miniboss')]
             -- Keep the user's explicit F9 first-arena location even if only the second mini-boss is loaded.
@@ -24762,6 +24793,7 @@ return function(ctx)
     paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
+    button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
     dropdown("MultiSpotAreas","Main","Boss / mini-boss arenas",function()
         local options,map={},{ }
         local catalog=s.AutomationCatalog

@@ -82,7 +82,7 @@ return function(source)
     function s.SetTradeItems(value)record("SetTradeItems",value);s.TradeItems=value end
     local inventoryReads=0;local gemCount=64
     function s.GetTradeItemChoices()inventoryReads+=1;return {{Name="Gem",Count=gemCount},{Name="Scroll",Count=1}}end
-    for _,name in ipairs({"TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu"})do
+    for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu"})do
         s[name]=function(...)record(name,...)end
     end
     function s.Destroy()record("Destroy");s.Running=false end
@@ -100,7 +100,7 @@ return function(source)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge",
         "SkillAuraSection","SkillAura","SelectedSkill","MiscSkillSection","MiscSkillEnabled","SelectedMiscSkill","SafeModeSection","SafeMode","SafeFloor","SafeWhitelist",
-        "MultiSpotSection","MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
+        "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportSection","TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
         "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do

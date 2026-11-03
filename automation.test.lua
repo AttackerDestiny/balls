@@ -253,6 +253,13 @@ test("Only the named floor boss can refine or alias the canonical F1 boss arena"
     local main=c.SpotById["542351431/Boss"];local original=main.Position
     local gorilla={Id="mob:Gorilla Berserker",Name="Gorilla Berserker",Kind="Boss",Position=original}
     c.AddCurrent({[gorilla.Id]=gorilla},542351431)
+    local custom={Id="saved:multispot:test",Name="Saved Spot 1",Kind="Arena",Position=original}
+    c.AddCurrent({[custom.Id]=custom},542351431)
+    local customSpot=c.SpotById["542351431/"..custom.Id]
+    assert(customSpot and customSpot.Kind=="Arena"and customSpot.DestinationId==custom.Id)
+    local total=#c.Spots
+    c.AddCurrent({[custom.Id]=custom},542351431)
+    assert(#c.Spots==total and customSpot~=main and not customSpot.MainBoss)
     assert(main.MainBoss and main.EncounterNames["Rahjin the Thief King"]and main.Position==original)
     assert(main.DestinationId=="source:Boss"and c.Aliases["542351431/mob:Gorilla Berserker"]~=main.Id)
     local rahjin={Id="mob:Rahjin the Thief King",Name="Rahjin the Thief King",Kind="Boss",Position=vector(original.X+20,original.Y,original.Z)}
