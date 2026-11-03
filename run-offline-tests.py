@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("MULTI SPOT HUD", "multi-spot-hud.module.luau"),
         ("WINDUI", "windui.module.luau"),
         ("ANTI AFK", "anti-afk.module.luau"),
         ("TARGET PRIORITY", "target-priority.module.luau"),
@@ -190,6 +191,7 @@ def main():
     panic_start=script.index("function state.PanicToSpawn(")
     panic_end=script.index("\n\ndo\n",panic_start)
     fixture += "assert(loadstring(" + quote(read("safe-panic-position.test.luau")) + "))()(" + quote(script[panic_start:panic_end]) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("multi-spot-hud.test.luau")) + "))()(" + quote(read("multi-spot-hud.module.luau")) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

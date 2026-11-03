@@ -142,7 +142,6 @@ return function(ctx)
         local chosen={};for _,label in ipairs(values or {})do if map[label]then chosen[map[label]]=true end end
         invoke("SetMultiSpotSelections",chosen)
     end,true,"Current floor only. Clear every enemy before rotating.")
-    paragraph("MultiSpotStatus","Main","Arena rotation",function()return s.MultiSpotStatus end)
     api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end

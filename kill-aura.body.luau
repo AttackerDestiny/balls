@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.utility-sections-v1.12.14"
-local VERSION="1.12.14"
+local BUILD="2026-11-03.multi-spot-hud-v1.12.15"
+local VERSION="1.12.15"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -5136,6 +5136,7 @@ function state.Destroy(replacing, teleportCleanup)
     stopMovement(nil,replacing==true)
     if state.FarmNoclip then state.FarmNoclip.Destroy()end
     if state.AuraTouch then state.AuraTouch.Destroy()end
+    if state.MultiSpotHUD then state.MultiSpotHUD.Destroy()end
     healthHUD.Destroy()
     if mobAddedConnection then mobAddedConnection:Disconnect() end
     if mobRemovedConnection then mobRemovedConnection:Disconnect() end
@@ -24775,7 +24776,6 @@ return function(ctx)
         local chosen={};for _,label in ipairs(values or {})do if map[label]then chosen[map[label]]=true end end
         invoke("SetMultiSpotSelections",chosen)
     end,true,"Current floor only. Clear every enemy before rotating.")
-    paragraph("MultiSpotStatus","Main","Arena rotation",function()return s.MultiSpotStatus end)
     api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
@@ -24982,4 +24982,45 @@ end
         panel.Visible=true;showUI.Visible=false;state.UIHidden=false
         warn("[SB2 WindUI] Using the compatibility window: "..state.WindUIError)
     end
+end
+
+-- Independent status overlay; hiding WindUI leaves this under the runtime root.
+do
+    local make=(function()
+-- BEGIN BUNDLED MULTI SPOT HUD
+-- Status only; no gameplay work or world scans.
+return function(ctx)
+    local disposed,nextUpdate=false,0
+    local api={}
+    function api.Update(now)
+        if disposed or now<nextUpdate then return end
+        nextUpdate=now+.2
+        local visible=ctx.State.Running and ctx.State.MultiSpot==true
+        ctx.Visible(visible==true)
+        if visible then ctx.Text(ctx.State.MultiSpotStatus or "Starting arena rotation...")end
+    end
+    local connection=ctx.Pulse:Connect(function()api.Update(ctx.Now())end)
+    function api.Destroy()
+        if disposed then return end
+        disposed=true;connection:Disconnect();ctx.Destroy()
+    end
+    api.Update(ctx.Now())
+    return api
+end
+
+-- END BUNDLED MULTI SPOT HUD
+    end)()
+    local root=create("Frame",{Name="MultiSpotHUD",Visible=false,Size=UDim2.fromOffset(280,70),
+        Position=UDim2.new(.5,0,.7,46),AnchorPoint=Vector2.new(.5,0),BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0},gui)
+    corner(root,14)
+    create("UIStroke",{Color=Color3.new(1,1,1),Transparency=.92,Thickness=1},root)
+    create("TextLabel",{Name="Heading",Text="Multi Spot",BackgroundTransparency=1,Position=UDim2.fromOffset(12,8),
+        Size=UDim2.new(1,-24,0,18),Font=Enum.Font.GothamBold,TextSize=12,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left},root)
+    local label=create("TextLabel",{Name="Status",Text="",BackgroundTransparency=1,Position=UDim2.fromOffset(12,28),
+        Size=UDim2.new(1,-24,0,34),TextWrapped=true,Font=Enum.Font.Gotham,TextSize=11,
+        TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},root)
+    state.MultiSpotHUD=make({State=state,Pulse=RunService.Heartbeat,Now=os.clock,
+        Visible=function(value)if root.Visible~=value then root.Visible=value end end,
+        Text=function(value)if label.Text~=value then label.Text=value end end,
+        Destroy=function()root:Destroy()end})
 end
