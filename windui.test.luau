@@ -90,15 +90,15 @@ return function(source)
     local visible=true
     local api=make({State=s,WindUI=wind,PlaceId=11,Visibility=function(value)visible=value end})
     local c=api.Controls
-    for _,key in ipairs({"SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
+    for _,key in ipairs({"PlayerInventory","PlayerStatus","AutoDismantleStatus","TradeStatus","TradeVelInfo","AntiAfkStatus","ModeratorStatus","SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
     assert(c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",
         "SkillAura","SelectedSkill","MiscSkillEnabled","SelectedMiscSkill","SafeMode","SafeFloor","SafeWhitelist",
         "MultiSpot","MultiSpotAreas","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
-        "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory","PlayerInventory",
-        "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression","AntiAfkStatus","ModeratorStatus"})do
+        "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
+        "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
     assert(#c.MultiSpotAreas.Values==2,"Arena dropdown contains only the current floor")
@@ -120,7 +120,6 @@ return function(source)
     c.SelectedSkill:Emit("Beam Rush");assert(s.SelectedSkill=="Beam Rush")
     c.SelectedPlayer:Emit("Friend (@Friend)");assert(s.SelectedPlayerId==123)
     c.ViewingPlayerInventory:Emit(true);api.Update(3);flush()
-    assert(c.PlayerInventory.Desc:find("Sword +3 x2",1,true))
     c.TeleportDestination:Emit("Boss · Arena (2)")
     local before=#calls;c.Teleport.Callback();assert(#calls==before+1 and calls[#calls].Args[1]=="B","Selecting a destination never teleports until the button is pressed")
     s.StopEverything=true;c.AtheonDodge:Emit(true)

@@ -178,17 +178,6 @@ return function(ctx)
     button("TeleportPlayer","Player","TP to player",function()s.PlayerTools.Teleport()end)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
-    local lastRows,lastInventoryText
-    paragraph("PlayerInventory","Player","Selected player's inventory",function()
-        if not s.ViewingPlayerInventory then return "Enable View player inventory to display items."end
-        if s.PlayerInventoryRows~=lastRows then
-            lastRows=s.PlayerInventoryRows;local lines={}
-            for _,item in ipairs(lastRows or {})do lines[#lines+1]=item.Name.." +"..item.Upgrade.." x"..item.Count end
-            lastInventoryText=table.concat(lines,"\n")
-        end
-        return s.PlayerInventoryMessage or lastInventoryText or "Inventory not loaded"
-    end)
-    paragraph("PlayerStatus","Player","Player status",function()return s.PlayerStatus end)
 
     local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Disable rendering","Limit FPS"}
     local function applyBoost(values)
@@ -207,7 +196,6 @@ return function(ctx)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
     end,true,"Equipped, locked and favorited items are preserved.")
-    paragraph("AutoDismantleStatus","Utility","Dismantle status",function()return status("AutoDismantleStatus")end)
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Accept requests only from whitelisted players; final acceptance is automatic.")
     dropdown("TradeMode","Utility","Trade offer mode",function()
         return {Options={"Selected items","Legendary+"},Value=s.TradeMode=="Legendary"and "Legendary+"or "Selected items"}
@@ -220,10 +208,6 @@ return function(ctx)
         local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
         invoke("SetTradeItems",picked)
     end,true,"All selected copies. Upgrade Protection Scroll and Resurrection Crystal are always included.")
-    paragraph("TradeStatus","Utility","Trade status",function()return status("TradeStatus")end)
-    paragraph("TradeVelInfo","Utility","Vel offer",function()return "Maximum affordable amount, including the 10% tax."end)
-    paragraph("AntiAfkStatus","Utility","Built-in Anti-AFK",function()return s.AntiAfkStatus end)
-    paragraph("ModeratorStatus","Utility","Moderator protection",function()return s.ModeratorStatus or "Enabled · confirms block before disconnecting"end)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression","Defeat each floor's main boss and advance through F12; skips F6.")
     paragraph("ProgressionStatus","Speacial","Account progress",function()return s.ProgressionStatus end)
     paragraph("ProgressionGear","Speacial","Equipment",function()return status("ProgressionGear")end)
