@@ -101,7 +101,7 @@ return function(source)
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",
         "SkillAura","SelectedSkill","MiscSkillEnabled","SelectedMiscSkill","SafeModeSection","SafeMode","SafeFloor","SafeWhitelist",
         "MultiSpotSection","MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
-        "TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
+        "TeleportSection","TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
         "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)

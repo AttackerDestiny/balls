@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.topbar-restart-v1.12.10"
-local VERSION="1.12.10"
+local BUILD="2026-11-03.teleport-section-v1.12.11"
+local VERSION="1.12.11"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24723,6 +24723,7 @@ return function(ctx)
         return item and item.Text or s[key]or fallback or ""
     end
 
+    api.Controls.TeleportSection=api.Tabs.Main:Section({Title="Teleport",TextSize=17})
     local destination
     dropdown("TeleportDestination","Main","Teleport destination",function()
         local list={};for _,area in pairs(s.FloorDestinations or {})do list[#list+1]=area end

@@ -90,6 +90,7 @@ return function(ctx)
         return item and item.Text or s[key]or fallback or ""
     end
 
+    api.Controls.TeleportSection=api.Tabs.Main:Section({Title="Teleport",TextSize=17})
     local destination
     dropdown("TeleportDestination","Main","Teleport destination",function()
         local list={};for _,area in pairs(s.FloorDestinations or {})do list[#list+1]=area end
