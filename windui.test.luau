@@ -97,6 +97,8 @@ return function(source)
     local c=api.Controls
     assert(c.RestartScript.Topbar,"Restart belongs in the window header")
     for _,key in ipairs({"MultiSpotStatus","TransparentMap","ProgressionStatus","ProgressionGear","PlayerInventory","PlayerStatus","AutoDismantleStatus","TradeStatus","TradeVelInfo","AntiAfkStatus","ModeratorStatus","SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
+    assert(c.SafeMode.Desc==nil and c.SafeFloor.Desc==nil)
+    assert(c.SafeWhitelist.Title=="Whitelist"and c.SafeWhitelist.Desc=="Input A List Of User")
     assert(c.AccountProgression.Desc==nil and c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge",
