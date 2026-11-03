@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.clear-whitelist-v1.12.37"
-local VERSION="1.12.37"
+local BUILD="2026-11-03.whitelist-editor-clear-v1.12.38"
+local VERSION="1.12.38"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -25149,21 +25149,18 @@ return function(ctx)
     end,function(label,map)local id=map[label];if id and id~=s.SafeFloorId then invoke("SetSafeFloor",id)end end,
         false)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
-        if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
+        if text:match("[%w_]")and text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
     local clearWhitelist=guard(function()
-        -- WindUI may omit its native empty-input callback; clear through the controller.
+        -- Clear the editor only; the active/saved list remains until a replacement is submitted.
         syncingInputs.SafeWhitelist=true
         local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
         syncingInputs.SafeWhitelist=nil
         if not ok then error(reason)end
-        invoke("SetSafeWhitelist","")
     end)
     api.ClearWhitelist=clearWhitelist
     if ctx.AddWhitelistClear then
-        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist,guard(function(text)
-            if text==""and s.SafeWhitelistText~=""then invoke("SetSafeWhitelist","")end
-        end))
+        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist)
     end
     paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
@@ -25411,7 +25408,7 @@ end
             end,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
-            AddWhitelistClear=function(control,clear,emptyInput)
+            AddWhitelistClear=function(control,clear)
                 local main=control.InputFrame.UIElements.Main
                 local title=main:FindFirstChild("TitleFrame",true)
                 if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
@@ -25422,8 +25419,6 @@ end
                     ThemeTag={TextColor3="Text"},ZIndex=main.ZIndex+2},nil)
                 button.Parent=main
                 bind(button.Activated,clear)
-                local box=main:FindFirstChildWhichIsA("TextBox",true)
-                if box then bind(box.FocusLost,function()emptyInput(box.Text)end)end
                 return button
             end,
             MarkAutoHide=function(button,on)

@@ -96,9 +96,7 @@ return function(source)
     local present=false
     local visible=true
     local yields=0
-    local emptyWhitelistInput
-    local api=make({AddWhitelistClear=function(control,clear,empty)
-        emptyWhitelistInput=empty
+    local api=make({AddWhitelistClear=function(control,clear)
         return {Callback=clear}
     end,Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
     assert(yields>=40,"UI construction must offer frame-budget yield points")
@@ -142,9 +140,11 @@ return function(source)
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")
     local beforeClear=#calls
     c.ClearWhitelist.Callback()
-    assert(s.SafeWhitelistText==""and c.SafeWhitelist.Value==""and #calls==beforeClear+1 and calls[#calls].Name=="SetSafeWhitelist","Clear must save empty text exactly once")
-    s.SafeWhitelistText="Other";emptyWhitelistInput("")
-    assert(s.SafeWhitelistText==""and calls[#calls].Name=="SetSafeWhitelist","Manually blank input must save without entering a replacement")
+    assert(s.SafeWhitelistText=="Other, 456"and c.SafeWhitelist.Value==""and #calls==beforeClear,"Clear must empty only the editor without changing or saving the active whitelist")
+    c.SafeWhitelist:Emit("");c.SafeWhitelist:Emit(" , ; ")
+    assert(s.SafeWhitelistText=="Other, 456"and #calls==beforeClear,"Leaving a blank editor must retain the previous whitelist")
+    c.SafeWhitelist:Emit("Replacement, 789")
+    assert(s.SafeWhitelistText=="Replacement, 789"and #calls==beforeClear+1 and calls[#calls].Name=="SetSafeWhitelist","Submitting a non-empty replacement must save through the whitelist controller")
     c.JoinFriendUsername:Emit("NewFriend");assert(s.JoinFriendUsername=="NewFriend")
     c.SelectedSkill:Emit("Beam Rush");assert(s.SelectedSkill=="Beam Rush")
     c.SelectedPlayer:Emit("Friend (@Friend)");assert(s.SelectedPlayerId==123)

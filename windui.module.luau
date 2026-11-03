@@ -151,21 +151,18 @@ return function(ctx)
     end,function(label,map)local id=map[label];if id and id~=s.SafeFloorId then invoke("SetSafeFloor",id)end end,
         false)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
-        if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
+        if text:match("[%w_]")and text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
     local clearWhitelist=guard(function()
-        -- WindUI may omit its native empty-input callback; clear through the controller.
+        -- Clear the editor only; the active/saved list remains until a replacement is submitted.
         syncingInputs.SafeWhitelist=true
         local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
         syncingInputs.SafeWhitelist=nil
         if not ok then error(reason)end
-        invoke("SetSafeWhitelist","")
     end)
     api.ClearWhitelist=clearWhitelist
     if ctx.AddWhitelistClear then
-        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist,guard(function(text)
-            if text==""and s.SafeWhitelistText~=""then invoke("SetSafeWhitelist","")end
-        end))
+        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist)
     end
     paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
