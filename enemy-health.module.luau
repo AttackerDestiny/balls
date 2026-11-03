@@ -93,16 +93,16 @@ return function(ctx)
         rows[mob]=row
         healthRows[data.Health]=row
         layoutDirty,snapshotDirty=true,true
-        row.Frame=create("Frame",{Name="Target_"..serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(20,23,34),BackgroundTransparency=.12,BorderSizePixel=0},root)
+        row.Frame=create("Frame",{Name="Target_"..serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(42,42,44),BackgroundTransparency=0,BorderSizePixel=0},root)
         row.Frame:SetAttribute("TargetName",mob.Name)
-        corner(row.Frame,7)
-        create("UIStroke",{Color=Color3.fromRGB(72,78,104),Thickness=1,Transparency=.25},row.Frame)
-        row.Name=create("TextLabel",{Name="Name",Text=mob.Name,BackgroundTransparency=1,Position=UDim2.fromOffset(10,4),Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(226,229,243),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
-        row.Track=create("Frame",{Name="Track",BackgroundColor3=Color3.fromRGB(49,52,71),BorderSizePixel=0},row.Frame)
+        corner(row.Frame,14)
+        create("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=1,Transparency=.92},row.Frame)
+        row.Name=create("TextLabel",{Name="Name",Text=mob.Name,BackgroundTransparency=1,Position=UDim2.fromOffset(10,4),Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(255,255,255),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
+        row.Track=create("Frame",{Name="Track",BackgroundColor3=Color3.fromRGB(24,24,26),BorderSizePixel=0},row.Frame)
         corner(row.Track,3)
-        row.Fill=create("Frame",{Name="Fill",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.fromRGB(87,202,143),BorderSizePixel=0},row.Track)
+        row.Fill=create("Frame",{Name="Fill",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.fromRGB(51,199,89),BorderSizePixel=0},row.Track)
         corner(row.Fill,3)
-        row.Numbers=create("TextLabel",{Name="Values",BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(169,177,199),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
+        row.Numbers=create("TextLabel",{Name="Values",BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
         local maximum=data.Entity:FindFirstChild("MaxHealth")
         local constrained=data.Health:IsA("IntConstrainedValue") or data.Health:IsA("DoubleConstrainedValue")
         local initial=true
@@ -112,7 +112,7 @@ return function(ctx)
             row.ObservedMax=math.max(row.ObservedMax,hp)
             local maxHP=math.max(1,constrained and row.Health.MaxValue or maximum and maximum.Value or row.ObservedMax)
             local fraction=math.clamp(hp/maxHP,0,1)
-            local color=Color3.fromRGB(230*(1-fraction)+70*fraction,80*(1-fraction)+200*fraction,100)
+            local color=Color3.fromRGB(51,199,89)
             if row.Tween then row.Tween:Cancel() end
             if initial then row.Fill.Size=UDim2.fromScale(fraction,1); row.Fill.BackgroundColor3=color; initial=false
             else row.Tween=ctx.TweenService:Create(row.Fill,TweenInfo.new(.22,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.fromScale(fraction,1),BackgroundColor3=color}); row.Tween:Play() end
