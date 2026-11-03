@@ -197,6 +197,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("multi-spot-hud.test.luau")) + "))()(" + quote(read("multi-spot-hud.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("inventory-view.test.luau")) + "))()(" + quote(read("inventory-view.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-craft.test.luau")) + "))()(" + quote(read("auto-craft.module.luau")) + ")\n"
+    release_start=script.index("stopMovement = function(message, keepPosition)")
+    release=script[release_start:script.index("\ndo\n",release_start)]
+    fixture += "assert(loadstring(" + quote(read("movement-release.test.luau")) + "))()(" + quote(release) + ")\n"
     lua = shutil.which("lua")
     if not lua:
         raise SystemExit("Lua 5.1+ is required for the automation/isolation fixtures")

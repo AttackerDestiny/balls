@@ -1,4 +1,4 @@
--- Counter gravity after a one-shot arena trip without pinning a position.
+-- Hold vertical velocity at zero; gravity cancellation alone preserves jump velocity.
 return function(ctx)
     local api={}
     local attachment,force,nextUpdate
@@ -12,9 +12,9 @@ return function(ctx)
         if api.Root==root and force and force.Parent then return end
         api.Release();api.Root=root
         attachment=ctx.Create("Attachment",{Name="SB2ArenaFloatAttachment"},root)
-        force=ctx.Create("VectorForce",{Name="SB2ArenaFloat",Attachment0=attachment,
-            ApplyAtCenterOfMass=true,RelativeTo=Enum.ActuatorRelativeTo.World,
-            Force=Vector3.new(0,root.AssemblyMass*ctx.Workspace.Gravity,0)},root)
+        force=ctx.Create("LinearVelocity",{Name="SB2ArenaFloat",Attachment0=attachment,
+            RelativeTo=Enum.ActuatorRelativeTo.World,VelocityConstraintMode=Enum.VelocityConstraintMode.Line,
+            LineDirection=Vector3.new(0,1,0),LineVelocity=0,ForceLimitsEnabled=false},root)
         nextUpdate=0
     end
     function api.Update(now)
@@ -22,7 +22,7 @@ return function(ctx)
         if not api.Root.Parent or api.Root.Anchored or ctx.Root()~=api.Root then api.Release();return end
         if now<(nextUpdate or 0) then return end
         nextUpdate=now+.5
-        force.Force=Vector3.new(0,api.Root.AssemblyMass*ctx.Workspace.Gravity,0)
+        force.LineVelocity=0
     end
     api.Destroy=api.Release
     return api

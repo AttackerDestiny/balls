@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.auto-craft-v1.12.26"
-local VERSION="1.12.26"
+local BUILD="2026-11-03.movement-recovery-v1.12.27"
+local VERSION="1.12.27"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2134,8 +2134,8 @@ stopMovement = function(message, keepPosition)
         if oldAttachment then oldAttachment:Destroy() end
         for part, value in pairs(oldCollisions) do if part.Parent then part.CanCollide = value end end
         if oldHumanoid and oldHumanoid.Parent then
-            oldHumanoid.AutoRotate = oldRotate
-            oldHumanoid.PlatformStand = oldPlatform
+            oldHumanoid.AutoRotate = oldRotate~=false
+            oldHumanoid.PlatformStand = oldPlatform==true
             if oldHumanoid.Health > 0 and not oldPlatform then oldHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
         end
         if oldRoot and oldRoot.Parent then oldRoot.AssemblyLinearVelocity = Vector3.zero end
@@ -2151,6 +2151,7 @@ stopMovement = function(message, keepPosition)
         local exitY = floor and floor.Position.Y + oldHumanoid.HipHeight + oldRoot.Size.Y / 2 + 1.5 or lastSurfaceY
         if exitY and math.abs(oldRoot.Position.Y - exitY) > 1 then surface = Vector3.new(oldRoot.Position.X, exitY, oldRoot.Position.Z) end
     end
+    if surface and not oldPosition then pivotRoot(oldRoot,surface);surface=nil end
     if surface then
         state.Recovering = true
         oldPosition.Enabled = true
@@ -4074,7 +4075,7 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED ARENA FLOAT
--- Counter gravity after a one-shot arena trip without pinning a position.
+-- Hold vertical velocity at zero; gravity cancellation alone preserves jump velocity.
 return function(ctx)
     local api={}
     local attachment,force,nextUpdate
@@ -4088,9 +4089,9 @@ return function(ctx)
         if api.Root==root and force and force.Parent then return end
         api.Release();api.Root=root
         attachment=ctx.Create("Attachment",{Name="SB2ArenaFloatAttachment"},root)
-        force=ctx.Create("VectorForce",{Name="SB2ArenaFloat",Attachment0=attachment,
-            ApplyAtCenterOfMass=true,RelativeTo=Enum.ActuatorRelativeTo.World,
-            Force=Vector3.new(0,root.AssemblyMass*ctx.Workspace.Gravity,0)},root)
+        force=ctx.Create("LinearVelocity",{Name="SB2ArenaFloat",Attachment0=attachment,
+            RelativeTo=Enum.ActuatorRelativeTo.World,VelocityConstraintMode=Enum.VelocityConstraintMode.Line,
+            LineDirection=Vector3.new(0,1,0),LineVelocity=0,ForceLimitsEnabled=false},root)
         nextUpdate=0
     end
     function api.Update(now)
@@ -4098,7 +4099,7 @@ return function(ctx)
         if not api.Root.Parent or api.Root.Anchored or ctx.Root()~=api.Root then api.Release();return end
         if now<(nextUpdate or 0) then return end
         nextUpdate=now+.5
-        force.Force=Vector3.new(0,api.Root.AssemblyMass*ctx.Workspace.Gravity,0)
+        force.LineVelocity=0
     end
     api.Destroy=api.Release
     return api
@@ -4113,7 +4114,7 @@ end
 end
 function state.FinishMultiSpotArrival()
     state.TravelHold=false;state.TravelHoldPosition=nil;state.MultiSpotLandingPosition=nil
-    if state.AutoFarm and state.Enabled then return true end
+    if state.AutoFarm then return true end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
@@ -4334,19 +4335,15 @@ local function updateMovement()
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
     if state.SafeModePanic or state.AutomationTeleporting or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or now<(state.FarmPauseUntil or 0) then return end
+    if not state.AutoFarm and not state.Enabled and not state.SkillAura and not state.TravelHold then
+        if state.Moving or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
+        return
+    end
     if state.MultiSpot and state.MultiSpotAnchor and not state.AutoFarm then
         if not state.HoldMultiSpotIdle() then state.FinishMultiSpotArrival() end
         return
     end
     if state.Recovering or not state.AutoFarm then return end
-    if not state.Enabled then
-        if state.MultiSpot and state.MultiSpotAnchor then
-            if not state.HoldMultiSpotIdle() then state.FinishMultiSpotArrival() end
-            return
-        end
-        if state.TravelHold then return end
-        stopMovement("Enable the aura to start auto farm"); return
-    end
     state.TravelHold=false; state.TravelHoldPosition=nil
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -5068,7 +5065,10 @@ function state.SetEnabled(enabled)
     state.Enabled = enabled == true
     if state.AuraTouch then state.AuraTouch.Update()end
     if state.Enabled then state.AutoSwing=true end
-    if not state.Enabled then finishAttackBurst("Paused"); stopSword(); stopMovement("Aura paused · movement stopped") end
+    if not state.Enabled then
+        finishAttackBurst("Paused");stopSword()
+        if not state.AutoFarm then stopMovement("Aura paused · movement stopped")end
+    end
     state.LastError = nil
     consecutiveErrors = 0
     nextAttack = 0
@@ -24926,6 +24926,7 @@ return function(ctx)
     end,function(label,map)
         destination=map[label]
         if destination then invoke("TeleportToDestination",destination)end
+        destination=nil
     end)
     button("RefreshDestinations","Main","Refresh List",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
     api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})

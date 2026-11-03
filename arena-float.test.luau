@@ -4,19 +4,19 @@ return function(source,arrivalSource)
     local root={Parent=true,Position=vec(1,2,3),AssemblyMass=10}
     local current=root
     local load=assert(loadstring(source))
-    setfenv(load,setmetatable({Vector3={new=vec},Enum={ActuatorRelativeTo={World="World"}}},{__index=getfenv()}))
+    setfenv(load,setmetatable({Vector3={new=vec},Enum={ActuatorRelativeTo={World="World"},VelocityConstraintMode={Line="Line"}}},{__index=getfenv()}))
     local api=load()({Workspace={Gravity=196.2},Root=function()return current end,
         Create=function(class,properties,parent)
             local item=properties;item.Class=class;item.Parent=parent
             function item:Destroy()self.Parent=nil end
             created[#created+1]=item;return item
         end})
-    api.Attach(root);assert(#created==2 and created[2].Class=="VectorForce")
-    assert(created[2].Force.X==0 and created[2].Force.Z==0 and math.abs(created[2].Force.Y-1962)<.001)
+    api.Attach(root);assert(#created==2 and created[2].Class=="LinearVelocity")
+    assert(created[2].LineDirection.Y==1 and created[2].LineVelocity==0 and created[2].ForceLimitsEnabled==false)
     local moved=vec(30,4,80);root.Position=moved;api.Update(1)
     assert(root.Position==moved and created[2].Position==nil,"Passive support must not pin or teleport any position")
     api.Attach(root);assert(#created==2,"No repeated arrival work")
-    root.AssemblyMass=20;api.Update(2);assert(math.abs(created[2].Force.Y-3924)<.001)
+    root.AssemblyMass=20;api.Update(2);assert(created[2].LineVelocity==0)
     current={};api.Update(3);assert(not api.Root and created[2].Parent==nil)
     print("PASS One-shot arrival passive support does not pin position and cleans up")
     local calls,stops=0,0

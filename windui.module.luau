@@ -108,6 +108,7 @@ return function(ctx)
     end,function(label,map)
         destination=map[label]
         if destination then invoke("TeleportToDestination",destination)end
+        destination=nil
     end)
     button("RefreshDestinations","Main","Refresh List",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
     api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})
