@@ -26,7 +26,7 @@ return function(source)
     function window:Tab(opts)
         tabCount+=1;local index=tabCount
         local tab={Title=opts.Title}
-        for _,kind in ipairs({"Button","Toggle","Input","Dropdown","Paragraph"})do
+        for _,kind in ipairs({"Button","Toggle","Input","Dropdown","Paragraph","Section"})do
             tab[kind]=function(_,opts)return element(kind,opts)end
         end
         function tab:Select()window.CurrentTab=index end
@@ -95,7 +95,7 @@ return function(source)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",
         "SkillAura","SelectedSkill","MiscSkillEnabled","SelectedMiscSkill","SafeMode","SafeFloor","SafeWhitelist",
-        "MultiSpot","MultiSpotAreas","AutoJoinFriend","JoinFriendUsername","RestartScript",
+        "MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
         "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression"})do

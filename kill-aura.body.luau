@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.farm-target-lock-v1.12.6"
-local VERSION="1.12.6"
+local BUILD="2026-11-03.friend-joiner-section-v1.12.7"
+local VERSION="1.12.7"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24773,6 +24773,7 @@ return function(ctx)
         invoke("SetMultiSpotSelections",chosen)
     end,true,"Current floor only. Clear every enemy before rotating.")
     paragraph("MultiSpotStatus","Main","Arena rotation",function()return s.MultiSpotStatus end)
+    api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
         if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
     end)
