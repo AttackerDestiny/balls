@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.manual-movement-v1.12.28"
-local VERSION="1.12.28"
+local BUILD="2026-11-03.damage-only-aura-v1.12.29"
+local VERSION="1.12.29"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2397,7 +2397,7 @@ return function(ctx)
 end
 -- END BUNDLED UPRIGHT
 end)()({State=state,Player=player,
-    Controlled=function() return state.Running and ((state.AutoFarm and state.Enabled) or state.TravelBusy or state.TravelHold or state.Dodging) end,
+    Controlled=function() return state.Running and (state.AutoFarm or state.TravelBusy or state.TravelHold or state.Dodging) end,
     Orientation=function() return orientationAlign end,
 })
 
@@ -3327,7 +3327,7 @@ end)()({
         correctionStrikes = 0
         nextMovementUpdate,nextAcquisition=0,0
         state.LastDodgeFinishedAt=os.clock()
-        state.DodgeReturnPending=state.AutoFarm and state.Enabled
+        state.DodgeReturnPending=state.AutoFarm
         if state.WakeSkillAura then state.WakeSkillAura() end
         state.OffsetGraceUntil = os.clock()+0.6
         if not state.AutoFarm then
@@ -4108,27 +4108,18 @@ end
 
 -- END BUNDLED ARENA FLOAT
     end)()
-    state.ArenaFloat=make({Create=create,Workspace=workspace,Active=function()return state.AutoFarm or state.Enabled end,Root=function()
+    state.ArenaFloat=make({Create=create,Workspace=workspace,Active=function()return state.AutoFarm end,Root=function()
         local character=player.Character
         return character and character:FindFirstChild("HumanoidRootPart")
     end})
 end
 function state.FinishMultiSpotArrival()
     state.TravelHold=false;state.TravelHoldPosition=nil;state.MultiSpotLandingPosition=nil
-    if state.AutoFarm then return true end
-    if not state.Enabled then stopMovement("Manual controls restored");return true end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-    if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-    if state.ArenaFloat.Root~=root then
-        stopMovement(nil,true)
-        state.ArenaFloat.Attach(root)
-    end
+    if not state.AutoFarm then stopMovement("Manual controls restored")end
     return true
 end
 function state.HoldMultiSpotIdle()
-    if (not state.AutoFarm and not state.Enabled)or not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
+    if not state.AutoFarm or not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
         or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
     local spot=state.MultiSpotController and state.MultiSpotController.Current
     if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
@@ -4337,7 +4328,7 @@ local function updateMovement()
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
     if state.SafeModePanic or state.AutomationTeleporting or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or now<(state.FarmPauseUntil or 0) then return end
-    if not state.AutoFarm and not state.Enabled then
+    if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
     end
@@ -5069,7 +5060,6 @@ function state.SetEnabled(enabled)
     if state.Enabled then state.AutoSwing=true end
     if not state.Enabled then
         finishAttackBurst("Paused");stopSword()
-        if not state.AutoFarm then stopMovement("Aura paused · movement stopped")end
     end
     state.LastError = nil
     consecutiveErrors = 0
@@ -7609,7 +7599,7 @@ end
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if (not state.AutoFarm and not state.Enabled)or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
+            if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")

@@ -35,11 +35,11 @@ return function(source,arrivalSource)
         stopMovement=function()stops+=1 end},{__index=getfenv()}));chunk()
     assert(state.FinishMultiSpotArrival() and not state.TravelHold and not state.TravelHoldPosition and calls==0)
     state.AutoFarm=false
-    assert(state.FinishMultiSpotArrival() and calls==1 and stops==1)
+    assert(state.FinishMultiSpotArrival() and calls==0 and stops==1)
     root.Position=vec(999,4,999)
-    assert(state.FinishMultiSpotArrival() and calls==1 and stops==1 and root.Position.X==999)
-    state.Enabled=false;assert(state.FinishMultiSpotArrival()and calls==1,"Manual mode cannot reattach after arrival")
-    state.Enabled=true
+    assert(state.FinishMultiSpotArrival() and calls==0 and stops==2 and root.Position.X==999)
+    state.Enabled=false;assert(state.FinishMultiSpotArrival()and calls==0,"Manual mode cannot reattach after arrival")
+    state.Enabled=true;state.AutoFarm=true
     print("PASS Multi Spot releases the destination once and hands movement to Auto Farm")
     local alive=1
     state.MultiSpot=true;state.MultiSpotAnchor=vec(840,798,336);state.MultiSpotController={Current={}}

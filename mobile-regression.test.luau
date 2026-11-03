@@ -200,7 +200,7 @@ return function(sources)
         assert(third.Alive() and #f.Parent:GetChildren()==1)
     end)
     test("mobile worker and toggle save survive unavailable privileged input",function()
-        local state={Running=true,Enabled=true,SafeMode=false,MultiSpot=true,MultiSpotSelected={},UI={},FloorDestinations={},
+        local state={Running=true,Enabled=true,AutoFarm=true,SafeMode=false,MultiSpot=true,MultiSpotSelected={},UI={},FloorDestinations={},
             ConfigPath="settings.json",SavedScriptPath="script.luau",Build="fixture"}
         local saved,updates,queued={},0,{}
         function state.SaveNow()saved[#saved+1]=state.MultiSpot;return true end
@@ -242,6 +242,9 @@ return function(sources)
         assert(not multiContext.CanMove())
         root.Anchored=false;humanoid.Health=0;assert(not multiContext.CanMove())
         humanoid.Health=100;assert(multiContext.CanMove())
+        state.AutoFarm=false;state.Enabled=true
+        assert(not multiContext.CanMove(),"Kill Aura alone cannot authorize Multi Spot movement")
+        state.AutoFarm=true
         local progressionUpdates=0
         state.AccountProgression=true;assert(not multiContext.CanMove(),"Progression owns travel without changing the Multi Spot toggle")
         state.ProgressionController={Update=function()progressionUpdates+=1 end}
