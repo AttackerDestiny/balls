@@ -44,6 +44,10 @@ return function(ctx)
     ctx.Bind(username.FocusLost,function()s.SetJoinFriendUsername(username.Text)end)
     local api={}
     local lastView
+    local floorButtons={}
+    local function floorLabel(item)
+        return (item.Id==s.SafeFloorId and "[x] " or "")..item.Label..(item.Unlocked and "" or " · locked")
+    end
     function s.CloseAutomationMenus(except)
         for _,item in ipairs(lists) do if item~=except then item.Visible=false end end
     end
@@ -58,7 +62,8 @@ return function(ctx)
     function api.Refresh()
         local count=0;for id,on in pairs(s.MultiSpotSelected) do if on and catalog.SpotById[id] and catalog.SpotById[id].PlaceId==game.PlaceId then count=count+1 end end
         local view=table.concat({tostring(s.SafeMode),tostring(s.MultiSpot),tostring(s.SafeFloorId),
-            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
+            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count),
+            tostring(s.AutomationFloorUnlockVersion)},"|")
         if view==lastView then return end
         lastView=view
         join.Text=s.AutoJoinFriend and "Auto Join Friend · ON" or "Auto Join Friend · OFF"
@@ -73,11 +78,21 @@ return function(ctx)
         safeStatus.Text=s.SafeModeStatus or (s.SafeMode and "Checking server..." or "Safe Mode is off")
         multiStatus.Text=s.MultiSpotStatus or (s.MultiSpot and "Starting arena rotation..." or "Multi Spot is off")
         spots.Text=count>0 and ("Arenas · "..count.." selected") or "Select boss / mini-boss arenas"
+        for _,item in ipairs(catalog.Floors)do
+            local button=floorButtons[item.Id]
+            if button then
+                local text=floorLabel(item)
+                if button.Text~=text then button.Text=text end
+            end
+        end
     end
     local function refreshFloors()
         for _,child in ipairs(floors:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
+        floorButtons={}
         for i,item in ipairs(catalog.Floors) do
-            local button=ctx.Button("SafeFloor"..i,(item.Id==s.SafeFloorId and "[x] " or "")..item.Label..(item.Unlocked and "" or " · locked"),i,30,floors)
+            s.IsAutomationFloorUnlocked(item.Id)
+            local button=ctx.Button("SafeFloor"..i,floorLabel(item),i,30,floors)
+            floorButtons[item.Id]=button
             button.Font=Enum.Font.Gotham;button.TextSize=11
             ctx.Bind(button.Activated,function() s.SetSafeFloor(item.Id);floors.Visible=false;api.Refresh() end)
         end

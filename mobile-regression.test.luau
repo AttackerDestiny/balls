@@ -210,7 +210,7 @@ return function(sources)
         local services={HttpService={GenerateGUID=function()return "token"end},StarterGui={},
             GuiService={},TeleportService={TeleportInitFailed=signal()}}
         local game={PlaceId=11,JobId="fixture",GameId=1,ReplicatedStorage={Profiles={FindFirstChild=function()
-            return {Locations={FindFirstChild=function()return true end}}
+            return {FindFirstChild=function()return {FindFirstChild=function()return true end}end}
         end},Database={Locations={}}}}
         function game:GetService(name)
             if name=="VirtualInputManager"then error("Not supported on this executor")end

@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-02.direct-safe-rejoin-v1.10.5"
-local VERSION="1.10.5"
+local BUILD="2026-11-03.live-floor-unlocks-v1.10.6"
+local VERSION="1.10.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -6936,6 +6936,10 @@ return function(ctx)
     ctx.Bind(username.FocusLost,function()s.SetJoinFriendUsername(username.Text)end)
     local api={}
     local lastView
+    local floorButtons={}
+    local function floorLabel(item)
+        return (item.Id==s.SafeFloorId and "[x] " or "")..item.Label..(item.Unlocked and "" or " · locked")
+    end
     function s.CloseAutomationMenus(except)
         for _,item in ipairs(lists) do if item~=except then item.Visible=false end end
     end
@@ -6950,7 +6954,8 @@ return function(ctx)
     function api.Refresh()
         local count=0;for id,on in pairs(s.MultiSpotSelected) do if on and catalog.SpotById[id] and catalog.SpotById[id].PlaceId==game.PlaceId then count=count+1 end end
         local view=table.concat({tostring(s.SafeMode),tostring(s.MultiSpot),tostring(s.SafeFloorId),
-            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count)},"|")
+            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count),
+            tostring(s.AutomationFloorUnlockVersion)},"|")
         if view==lastView then return end
         lastView=view
         join.Text=s.AutoJoinFriend and "Auto Join Friend · ON" or "Auto Join Friend · OFF"
@@ -6965,11 +6970,21 @@ return function(ctx)
         safeStatus.Text=s.SafeModeStatus or (s.SafeMode and "Checking server..." or "Safe Mode is off")
         multiStatus.Text=s.MultiSpotStatus or (s.MultiSpot and "Starting arena rotation..." or "Multi Spot is off")
         spots.Text=count>0 and ("Arenas · "..count.." selected") or "Select boss / mini-boss arenas"
+        for _,item in ipairs(catalog.Floors)do
+            local button=floorButtons[item.Id]
+            if button then
+                local text=floorLabel(item)
+                if button.Text~=text then button.Text=text end
+            end
+        end
     end
     local function refreshFloors()
         for _,child in ipairs(floors:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
+        floorButtons={}
         for i,item in ipairs(catalog.Floors) do
-            local button=ctx.Button("SafeFloor"..i,(item.Id==s.SafeFloorId and "[x] " or "")..item.Label..(item.Unlocked and "" or " · locked"),i,30,floors)
+            s.IsAutomationFloorUnlocked(item.Id)
+            local button=ctx.Button("SafeFloor"..i,floorLabel(item),i,30,floors)
+            floorButtons[item.Id]=button
             button.Font=Enum.Font.Gotham;button.TextSize=11
             ctx.Bind(button.Activated,function() s.SetSafeFloor(item.Id);floors.Visible=false;api.Refresh() end)
         end
@@ -7027,22 +7042,44 @@ return function(ctx)
         if type(setthreadidentity)=="function" then pcall(setthreadidentity,8) end
     end
     local ui
-    local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
-    local catalog=ctx.MakeCatalog({Floors=require(game.ReplicatedStorage.Database.Locations).floors,
-        Unlocked=function(floor)return floor.Unlocked==true or (profile and profile.Locations:FindFirstChild(tostring(floor.PlaceId)))~=nil end})
+    local definitions=require(game.ReplicatedStorage.Database.Locations).floors
+    local nativeFloors={}
+    for _,floor in ipairs(definitions)do nativeFloors[floor.PlaceId]=floor end
+    local function floorUnlocked(floor)
+        local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
+        local locations=profile and profile:FindFirstChild("Locations")
+        return floor.PlaceId==game.PlaceId or floor.Unlocked==true
+            or (locations and locations:FindFirstChild(tostring(floor.PlaceId)))~=nil
+    end
+    local catalog=ctx.MakeCatalog({Floors=definitions,Unlocked=floorUnlocked})
     catalog.AddCurrent(state.FloorDestinations,game.PlaceId);catalog.Sort()
     state.MultiSpotSelected=catalog.NormalizeSelection(state.MultiSpotSelected)
     state.MultiSpotCursor=catalog.Aliases[state.MultiSpotCursor] or state.MultiSpotCursor
     state.MultiSpotPending=catalog.Aliases[state.MultiSpotPending] or state.MultiSpotPending
     state.AutomationCatalog=catalog
     function state.IsAutomationFloorUnlocked(id)
+        id=tonumber(id)
         local floor=catalog.FloorById[id]
-        if not floor then return false end
-        floor.Unlocked=floor.Unlocked==true or (profile and profile.Locations:FindFirstChild(tostring(id)))~=nil
+        if not floor or not nativeFloors[id] then return false end
+        local unlocked=floorUnlocked(nativeFloors[id])
+        if floor.Unlocked~=unlocked then
+            floor.Unlocked=unlocked
+            state.AutomationFloorUnlockVersion=(state.AutomationFloorUnlockVersion or 0)+1
+        end
         return floor.Unlocked
     end
     local function refresh() if ui then ui.Refresh() end end
     state.RefreshAutomationUI=refresh
+    local function refreshUnlocks()
+        for _,floor in ipairs(catalog.Floors)do state.IsAutomationFloorUnlocked(floor.Id)end
+        refresh()
+    end
+    local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
+    local locations=profile and profile:FindFirstChild("Locations")
+    if locations then
+        ctx.Bind(locations.ChildAdded,refreshUnlocks)
+        ctx.Bind(locations.ChildRemoved,refreshUnlocks)
+    end
     local function snapshot()return {Enabled=state.Enabled,AutoFarm=state.AutoFarm,SkillAura=state.SkillAura}end
     local function restoreFeatures(features)
         if type(features)~="table" or not state.Running then return end
@@ -7396,7 +7433,7 @@ end
             state.SaveNow();refresh();return false
         end
         local floor=catalog.FloorById[tonumber(id)]
-        if not floor or not floor.Unlocked then state.SafeModeStatus="That floor is locked";refresh();return false end
+        if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SaveNow();refresh()
         if state.SafeMode then
             state.PanicToSpawn()
@@ -7450,7 +7487,7 @@ end
     function state.SetMultiSpotSelection(id,on)
         id=catalog.Aliases[id] or id
         local spot=catalog.SpotById[id]
-        if not spot or not spot.Floor.Unlocked then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
+        if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId) then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
         state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
     end
     local function joinFriendAtPad(id,active)

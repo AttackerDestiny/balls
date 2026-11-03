@@ -118,6 +118,11 @@ def main():
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    unlock_start = adapter.index("    local ui\n")
+    unlock = adapter[unlock_start:adapter.index("    local function snapshot()", unlock_start)]
+    selection_start = adapter.index("    function state.SetSafeFloor(id)")
+    selection = adapter[selection_start:adapter.index("    local whitelistGeneration", selection_start)]
+    fixture += "assert(loadstring(" + quote(read("floor-unlocks.test.luau")) + "))()(" + ",".join(quote(value) for value in (unlock, selection, read("automation-ui.module.luau"))) + ")\n"
     floor_start = adapter.index("    function state.ChangeAutomationFloor(placeId)")
     floor = adapter[floor_start:adapter.index("    local api=ctx.Make({", floor_start)]
     fixture += "assert(loadstring(" + quote(read("floor-transition.test.luau")) + "))()(" + quote(floor) + ")\n"
