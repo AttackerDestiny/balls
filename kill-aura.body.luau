@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.multi-spot-section-v1.12.8"
-local VERSION="1.12.8"
+local BUILD="2026-11-03.safe-mode-section-v1.12.9"
+local VERSION="1.12.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24740,6 +24740,7 @@ return function(ctx)
     end,function(label,map)destination=map[label]end)
     button("Teleport","Main","Teleport",function()if destination then invoke("TeleportToDestination",destination)end end)
     button("RefreshDestinations","Main","Refresh teleport destinations",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
+    api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})
     stateToggle("SafeMode","Main","Safe Mode","SetSafeMode","Find a protected server; only whitelisted players may stay.")
     dropdown("SafeFloor","Main","Safe floor",function()
         local options,map,value={},{},nil
