@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.safe-mode-section-v1.12.9"
-local VERSION="1.12.9"
+local BUILD="2026-11-03.topbar-restart-v1.12.10"
+local VERSION="1.12.10"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24782,7 +24782,8 @@ return function(ctx)
     end)
     stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
     paragraph("AutoJoinFriendStatus","Main","Friend join status",function()return s.AutoJoinFriendStatus end)
-    button("RestartScript","Main","Restart script",function()invoke("RestartScript")end)
+    local restart=guard(function()invoke("RestartScript")end)
+    api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
 
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")

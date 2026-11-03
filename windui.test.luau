@@ -32,6 +32,10 @@ return function(source)
         function tab:Select()window.CurrentTab=index end
         return tab
     end
+    function window:CreateTopbarButton(name,icon,callback,order)
+        assert(name=="Restart script"and icon=="rotate-cw"and order==996)
+        return {Callback=callback,Topbar=true}
+    end
     function window:OnOpen(fn)self.Opened=fn end
     function window:OnClose(fn)self.ClosedCallback=fn end
     function window:OnDestroy(fn)self.DestroyedCallback=fn end
@@ -90,6 +94,7 @@ return function(source)
     local visible=true
     local api=make({State=s,WindUI=wind,PlaceId=11,Visibility=function(value)visible=value end})
     local c=api.Controls
+    assert(c.RestartScript.Topbar,"Restart belongs in the window header")
     for _,key in ipairs({"ProgressionStatus","ProgressionGear","PlayerInventory","PlayerStatus","AutoDismantleStatus","TradeStatus","TradeVelInfo","AntiAfkStatus","ModeratorStatus","SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
     assert(c.AccountProgression.Desc==nil and c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
