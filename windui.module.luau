@@ -158,7 +158,6 @@ return function(ctx)
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
-    stateToggle("TransparentMap","Challenge Floors","Transparent map","SetTransparentMap")
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
     dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}

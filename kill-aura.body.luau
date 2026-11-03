@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.teleport-section-v1.12.11"
-local VERSION="1.12.11"
+local BUILD="2026-11-03.default-transparent-map-v1.12.12"
+local VERSION="1.12.12"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -343,7 +343,7 @@ local restore = {
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
-    TransparentMap=preference("TransparentMap",false)==true,
+    TransparentMap=true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
     SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
@@ -24791,7 +24791,6 @@ return function(ctx)
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
-    stateToggle("TransparentMap","Challenge Floors","Transparent map","SetTransparentMap")
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
     dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
