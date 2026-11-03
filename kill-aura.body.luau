@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.shared-safe-floor-v1.12.30"
-local VERSION="1.12.30"
+local BUILD="2026-11-03.auto-quest-v1.12.31"
+local VERSION="1.12.31"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -25293,6 +25293,67 @@ if sharedSettings then
                 end
             end
             task.wait(1)
+        end
+    end)
+end
+
+-- Built-in quest reward collection, independent of farming and menu visibility.
+do
+    local make=(function()
+-- BEGIN BUNDLED AUTO QUEST
+-- Native completion list only. No progress writes or incomplete-quest requests.
+return function(ctx)
+    local api={Claims=0}
+    local sent=setmetatable({}, {__mode="k"})
+    local nextUpdate=0
+    function api.Update(now)
+        if not ctx.Active()or now<nextUpdate then return end
+        nextUpdate=now+.5
+        local ready=ctx.Ready()
+        local present={}
+        for _,quest in ipairs(ready)do present[quest]=true end
+        for quest in pairs(sent)do if not present[quest]then sent[quest]=nil end end
+        if ctx.Busy()then return end
+        for _,quest in ipairs(ready)do
+            local record=sent[quest]
+            if (not record or record.Attempts<3 and now>=record.Next)and ctx.Valid(quest)then
+                record=record or {Attempts=0}
+                record.Attempts+=1;record.Next=now+10*record.Attempts;sent[quest]=record
+                local ok,reason=pcall(ctx.Claim,quest)
+                if ok then api.Claims+=1 else api.Error=tostring(reason)end
+                return -- At most one native request per half-second update.
+            end
+        end
+    end
+    return api
+end
+
+-- END BUNDLED AUTO QUEST
+    end)()
+    local quests=require(services.UI.Quests)
+    local own=ReplicatedStorage.Profiles[player.Name]:FindFirstChild("Quests")
+    local worker=make({Active=function()return state.Running end,
+        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
+            or state.AutomationTeleporting or state.AutoTradeBusy end,
+        Ready=function()
+            local result={}
+            for object,entry in pairs(quests.Active or {})do
+                if own and object.Parent==own and quests.ToClaim and quests.ToClaim[entry.Entry]==true then result[#result+1]=object end
+            end
+            table.sort(result,function(a,b)return a.Name<b.Name end)
+            return result
+        end,
+        Valid=function(object)
+            local entry=quests.Active and quests.Active[object]
+            return own and object.Parent==own and entry and quests.ToClaim and quests.ToClaim[entry.Entry]==true
+        end,
+        Claim=function(object)ReplicatedStorage.Event:FireServer("SystemQuests",{"ClaimQuest",object})end})
+    state.AutoQuest=worker
+    task.spawn(function()
+        while state.Running do
+            local ok,reason=pcall(worker.Update,os.clock())
+            if not ok then state.AutoQuestError=tostring(reason)end
+            task.wait(.5)
         end
     end)
 end
