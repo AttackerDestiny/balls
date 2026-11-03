@@ -18,6 +18,8 @@ Kill Aura and Skill Aura use the supplied source's damage rules: one native dama
 
 Auto Farm checks native root/entity/health and remaining HitLives as in the supplied source; late HitLives replication is refreshed immediately rather than waiting for the geometry cache. Every 0.15 seconds, eligible enemies use one common order: boss, mini-boss, regular; then enemy name and world X/Z/Y. Character distance and each account's previous target do not break farming ties. Accounts seeing the same eligible enemies on the same floor/arena therefore choose the same target. Different streaming visibility, protection states or selected arenas can still produce different eligible sets; this does not transfer accounts between servers.
 
+Auto Farm priority is forced: main boss = 1, mini-boss = 2, regular enemy = 3. Model Rank, Entity Rank/Difficulty and tags are evaluated together; an unrelated Rank cannot mask a boss marker. Explicit MainBoss/FloorBoss markers take priority, while a generic BossBar does not turn a mini-boss into a main boss. A newly eligible higher-priority enemy replaces the current lower-priority target on the next acquisition check. Arena/progression restrictions and protection still apply.
+
 Account Progression skips F6 (Helmfirth), travelling directly from F5 to F7 when F7 is unlocked. It coordinates farming and floor travel, selects owned usable gear, and synchronizes Safe Mode's selected floor. Multi Spot waits while progression owns travel. The latest code has offline regression coverage; executor-specific behavior also requires live validation.
 
 ## Development

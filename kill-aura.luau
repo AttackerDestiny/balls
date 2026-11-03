@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.anti-afk-v1.11.1"
-local VERSION="1.11.1"
+local BUILD="2026-11-03.forced-boss-priority-v1.11.2"
+local VERSION="1.11.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -708,23 +708,32 @@ return function()
     local function clean(value) return string.lower((string.gsub(tostring(value or ""),"[^%w]",""))) end
     function api.Rank(mob)
         if not mob then return 3 end
-        local cached=cache[mob]
-        if cached and os.clock()<cached.Until then return cached.Rank end
         local entity=mob:FindFirstChild("Entity")
         local difficulty=entity and entity:FindFirstChild("Difficulty")
-        local rank=clean(mob:GetAttribute("Rank") or (entity and entity:GetAttribute("Rank")) or (difficulty and difficulty.Value))
-        local boss,mini=false,false
+        local modelRank=mob:GetAttribute("Rank")
+        local entityRank=entity and entity:GetAttribute("Rank")
+        local difficultyRank=difficulty and difficulty.Value
+        local cached=cache[mob]
+        if cached and os.clock()<cached.Until and cached.Entity==entity and cached.ModelRank==modelRank
+            and cached.EntityRank==entityRank and cached.Difficulty==difficultyRank then return cached.Rank end
+        local main,boss,mini=false,false,false
+        local function mark(value)
+            local key=clean(value)
+            if string.find(key,"mainboss",1,true)or string.find(key,"floorboss",1,true)then main=true
+            elseif string.find(key,"mini",1,true)and string.find(key,"boss",1,true)then mini=true
+            elseif string.find(key,"boss",1,true)then boss=true end
+        end
+        -- Read every native rank source: an unrelated model Rank must not
+        -- mask the boss Difficulty or rank stored on its Entity.
+        mark(modelRank);mark(entityRank);mark(difficultyRank)
         for _,instance in ipairs(entity and {mob,entity} or {mob}) do
-            for _,tag in ipairs(instance:GetTags()) do
-                local key=clean(tag)
-                if string.find(key,"mini",1,true) and string.find(key,"boss",1,true) then mini=true
-                elseif key=="boss" or key=="bossbar" or key=="mainboss" or key=="floorboss" then boss=true end
-            end
+            for _,tag in ipairs(instance:GetTags()) do mark(tag)end
         end
         local priority=3
-        if mini or string.find(rank,"mini",1,true) or clean(mob.Name)=="frogazoid" then priority=2
-        elseif boss or string.find(rank,"boss",1,true) then priority=1 end
-        cache[mob]={Rank=priority,Until=os.clock()+.2}
+        if main then priority=1
+        elseif mini or clean(mob.Name)=="frogazoid" then priority=2
+        elseif boss then priority=1 end
+        cache[mob]={Rank=priority,Until=os.clock()+.15,Entity=entity,ModelRank=modelRank,EntityRank=entityRank,Difficulty=difficultyRank}
         return priority
     end
     function api.Less(a,b,origin,preferred)
