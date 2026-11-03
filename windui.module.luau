@@ -124,6 +124,7 @@ return function(ctx)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Separate entries with commas or spaces. Auto Trade uses this whitelist too.")
     paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
+    api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     dropdown("MultiSpotAreas","Main","Boss / mini-boss arenas",function()
         local options,map={},{ }

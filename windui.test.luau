@@ -95,7 +95,7 @@ return function(source)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",
         "SkillAura","SelectedSkill","MiscSkillEnabled","SelectedMiscSkill","SafeMode","SafeFloor","SafeWhitelist",
-        "MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
+        "MultiSpotSection","MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
         "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression"})do

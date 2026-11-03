@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.friend-joiner-section-v1.12.7"
-local VERSION="1.12.7"
+local BUILD="2026-11-03.multi-spot-section-v1.12.8"
+local VERSION="1.12.8"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24758,6 +24758,7 @@ return function(ctx)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Separate entries with commas or spaces. Auto Trade uses this whitelist too.")
     paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
+    api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     dropdown("MultiSpotAreas","Main","Boss / mini-boss arenas",function()
         local options,map={},{ }
