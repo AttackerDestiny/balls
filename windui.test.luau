@@ -96,7 +96,11 @@ return function(source)
     local present=false
     local visible=true
     local yields=0
-    local api=make({Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
+    local emptyWhitelistInput
+    local api=make({AddWhitelistClear=function(control,clear,empty)
+        emptyWhitelistInput=empty
+        return {Callback=clear}
+    end,Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
     assert(yields>=40,"UI construction must offer frame-budget yield points")
     local c=api.Controls
     assert(c.AutoJoinFriendStatus.Title=="Status"and c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
@@ -136,6 +140,11 @@ return function(source)
     c.TradeItems:Emit({"Gem x64","Scroll x1"});assert(s.TradeItems.Gem and s.TradeItems.Scroll)
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")
+    local beforeClear=#calls
+    c.ClearWhitelist.Callback()
+    assert(s.SafeWhitelistText==""and c.SafeWhitelist.Value==""and #calls==beforeClear+1 and calls[#calls].Name=="SetSafeWhitelist","Clear must save empty text exactly once")
+    s.SafeWhitelistText="Other";emptyWhitelistInput("")
+    assert(s.SafeWhitelistText==""and calls[#calls].Name=="SetSafeWhitelist","Manually blank input must save without entering a replacement")
     c.JoinFriendUsername:Emit("NewFriend");assert(s.JoinFriendUsername=="NewFriend")
     c.SelectedSkill:Emit("Beam Rush");assert(s.SelectedSkill=="Beam Rush")
     c.SelectedPlayer:Emit("Friend (@Friend)");assert(s.SelectedPlayerId==123)

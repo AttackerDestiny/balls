@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.fast-safe-mode-v1.12.36"
-local VERSION="1.12.36"
+local BUILD="2026-11-03.clear-whitelist-v1.12.37"
+local VERSION="1.12.37"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -25004,6 +25004,7 @@ return function(ctx)
     local api={Controls={},Tabs={},Ready=false,Visible=true}
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
+    local syncingInputs={}
     local nextUpdate,nextChoices=0,0
     local buildSlice=os.clock()
     local lastTab
@@ -25095,7 +25096,7 @@ return function(ctx)
         yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
             Placeholder="Enter here...",Callback=guard(function(text)
-                if api.Ready then set(text)end
+                if api.Ready and not syncingInputs[key]then set(text)end
             end)})
     end
     local function selected(options,map,predicate)
@@ -25151,6 +25152,20 @@ return function(ctx)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
+    local clearWhitelist=guard(function()
+        -- WindUI may omit its native empty-input callback; clear through the controller.
+        syncingInputs.SafeWhitelist=true
+        local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
+        syncingInputs.SafeWhitelist=nil
+        if not ok then error(reason)end
+        invoke("SetSafeWhitelist","")
+    end)
+    api.ClearWhitelist=clearWhitelist
+    if ctx.AddWhitelistClear then
+        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist,guard(function(text)
+            if text==""and s.SafeWhitelistText~=""then invoke("SetSafeWhitelist","")end
+        end))
+    end
     paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
@@ -25397,6 +25412,21 @@ end
             end,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
+            AddWhitelistClear=function(control,clear,emptyInput)
+                local main=control.InputFrame.UIElements.Main
+                local title=main:FindFirstChild("TitleFrame",true)
+                if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
+                local button=library.Creator.New("TextButton",{
+                    Name="ClearWhitelist",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
+                    BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(28,36),
+                    Position=UDim2.new(1,-158,.5,0),AnchorPoint=Vector2.new(1,.5),
+                    ThemeTag={TextColor3="Text"},ZIndex=main.ZIndex+2},nil)
+                button.Parent=main
+                bind(button.Activated,clear)
+                local box=main:FindFirstChildWhichIsA("TextBox",true)
+                if box then bind(box.FocusLost,function()emptyInput(box.Text)end)end
+                return button
+            end,
             MarkAutoHide=function(button,on)
                 local dot=button:FindFirstChild("AutoHideIndicator")
                 if not dot then

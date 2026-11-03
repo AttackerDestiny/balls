@@ -5,6 +5,7 @@ return function(ctx)
     local api={Controls={},Tabs={},Ready=false,Visible=true}
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
+    local syncingInputs={}
     local nextUpdate,nextChoices=0,0
     local buildSlice=os.clock()
     local lastTab
@@ -96,7 +97,7 @@ return function(ctx)
         yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
             Placeholder="Enter here...",Callback=guard(function(text)
-                if api.Ready then set(text)end
+                if api.Ready and not syncingInputs[key]then set(text)end
             end)})
     end
     local function selected(options,map,predicate)
@@ -152,6 +153,20 @@ return function(ctx)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
+    local clearWhitelist=guard(function()
+        -- WindUI may omit its native empty-input callback; clear through the controller.
+        syncingInputs.SafeWhitelist=true
+        local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
+        syncingInputs.SafeWhitelist=nil
+        if not ok then error(reason)end
+        invoke("SetSafeWhitelist","")
+    end)
+    api.ClearWhitelist=clearWhitelist
+    if ctx.AddWhitelistClear then
+        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist,guard(function(text)
+            if text==""and s.SafeWhitelistText~=""then invoke("SetSafeWhitelist","")end
+        end))
+    end
     paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
