@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.damage-only-aura-v1.12.29"
-local VERSION="1.12.29"
+local BUILD="2026-11-03.shared-safe-floor-v1.12.30"
+local VERSION="1.12.30"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -246,7 +246,7 @@ return function(ctx)
     local path="SB2Codex/shared-settings.json"
     local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
         local result={Version=1}
@@ -280,6 +280,14 @@ return function(ctx)
             end
         end
         api.Values=select(seed);ctx.Write(path,ctx.Encode(api.Values))
+    end
+    if api.Values.SafeFloorId==nil and ctx.Current and type(ctx.Current.SafeFloorId)=="number"then
+        api.Values.SafeFloorId=ctx.Current.SafeFloorId
+        ctx.Write(path,ctx.Encode(api.Values))
+    end
+    function api.ReadSafeFloor()
+        if not ctx.IsFile(path)then return nil end
+        return tonumber(read(path).SafeFloorId)
     end
     local function signatures(value)
         local result={}
@@ -421,7 +429,7 @@ local state = {
     AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, TransparentMap = restore.TransparentMap, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
-    SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
+    SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
     MultiSpot=restore.MultiSpot,MultiSpotSelected=restore.MultiSpotSelected,MultiSpotCursor=restore.MultiSpotCursor,MultiSpotPending=restore.MultiSpotPending,
     AutomationRunId=restore.AutomationRunId,AutomationResumeFeatures=restore.AutomationResumeFeatures,
     AccountProgression=restore.AccountProgression,ProgressionFloor=restore.ProgressionFloor,
@@ -992,7 +1000,7 @@ local function settingsPayload()
     return {AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
-        SafeMode=state.SafeMode,SafeFloorId=state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
+        SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
         MultiSpot=state.MultiSpot,MultiSpotSelected=state.MultiSpotSelected,MultiSpotCursor=state.MultiSpotCursor,MultiSpotPending=state.MultiSpotPending,
         AccountProgression=state.AccountProgression,ProgressionFloor=state.ProgressionFloor,
         ProgressionBossCleared=state.ProgressionBossCleared,ProgressionComplete=state.ProgressionComplete,
@@ -7658,7 +7666,7 @@ end
         end
         local floor=catalog.FloorById[tonumber(id)]
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
-        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SaveNow();refresh()
+        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id;state.SaveNow();refresh()
         if state.SafeMode then
             state.PanicToSpawn()
             task.defer(function()workerIdentity();safe.Update();refresh()end)
@@ -8607,7 +8615,7 @@ return function(ctx)
         end
         state.AccountProgression=on==true
         if state.AccountProgression then syncFloor()
-        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then state.SafeFloorId=state.ProgressionRestore.SafeFloorId end
+        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then state.SafeFloorId=state.SharedSafeFloorId or state.ProgressionRestore.SafeFloorId end
         if state.MultiSpotController then state.MultiSpotController.Reset()end
         -- A queued startup may already be resuming an active block/rejoin ticket.
         -- Preserve its attempt budget and phase across progression-owned joins.
@@ -25265,4 +25273,26 @@ end
         Visible=function(value)if root.Visible~=value then root.Visible=value end end,
         Text=function(value)if label.Text~=value then label.Text=value end end,
         Destroy=function()root:Destroy()end})
+end
+
+-- Synchronize the user's selected Safe floor, separately from progression's floor.
+if sharedSettings then
+    task.spawn(function()
+        while state.Running do
+            local ok,id=pcall(sharedSettings.ReadSafeFloor)
+            if ok and id and id~=state.SharedSafeFloorId then
+                if state.AccountProgression then
+                    state.SharedSafeFloorId=id
+                    if state.ProgressionRestore then state.ProgressionRestore.SafeFloorId=id end
+                elseif state.AutomationCatalog and state.AutomationCatalog.FloorById[id]and state.IsAutomationFloorUnlocked(id)then
+                    state.SetSafeFloor(id)
+                else
+                    state.SharedSafeFloorId=id
+                    state.SafeModeStatus="Shared Safe floor is locked on this account"
+                    if state.RefreshAutomationUI then state.RefreshAutomationUI()end
+                end
+            end
+            task.wait(1)
+        end
+    end)
 end

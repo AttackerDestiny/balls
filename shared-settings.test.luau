@@ -54,4 +54,14 @@ return function(source)
     assert(files["SB2Codex/shared-settings.json"]and writes==before+1)
     print("PASS Explicit Safe Mode OFF saves, unchanged preferences skip writes, missing shared file recovers")
 
+    files["SB2Codex/shared-settings.json"]=encode({Version=1,SafeMode=true,SafeFloorId=11,AutoFarm=false})
+    local floorOne=make(context({Version=1}));local floorTwo=make(context({Version=1}))
+    floorOne.Save({SafeMode=true,SafeFloorId=22,AutoFarm=false})
+    assert(floorTwo.ReadSafeFloor()==22,"Other running accounts can read the latest Safe floor")
+    floorTwo.Save({SafeMode=true,SafeFloorId=11,AutoFarm=true})
+    assert(floorOne.ReadSafeFloor()==22,"An unrelated save cannot revert the shared floor")
+    local floorThree=make(context({Version=1,SafeFloorId=33}))
+    assert(floorThree.Values.SafeFloorId==22,"Shared floor overrides an account's old saved selection")
+    print("PASS Shared Safe floor: cross-account load, live read and stale unrelated saves")
+
 end

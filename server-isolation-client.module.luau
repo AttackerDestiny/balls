@@ -414,7 +414,7 @@ end
         end
         local floor=catalog.FloorById[tonumber(id)]
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
-        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SaveNow();refresh()
+        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id;state.SaveNow();refresh()
         if state.SafeMode then
             state.PanicToSpawn()
             task.defer(function()workerIdentity();safe.Update();refresh()end)

@@ -4,7 +4,7 @@ return function(ctx)
     local path="SB2Codex/shared-settings.json"
     local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
         "AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
         local result={Version=1}
@@ -38,6 +38,14 @@ return function(ctx)
             end
         end
         api.Values=select(seed);ctx.Write(path,ctx.Encode(api.Values))
+    end
+    if api.Values.SafeFloorId==nil and ctx.Current and type(ctx.Current.SafeFloorId)=="number"then
+        api.Values.SafeFloorId=ctx.Current.SafeFloorId
+        ctx.Write(path,ctx.Encode(api.Values))
+    end
+    function api.ReadSafeFloor()
+        if not ctx.IsFile(path)then return nil end
+        return tonumber(read(path).SafeFloorId)
     end
     local function signatures(value)
         local result={}

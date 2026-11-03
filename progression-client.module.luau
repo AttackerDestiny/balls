@@ -282,7 +282,7 @@ return function(ctx)
         end
         state.AccountProgression=on==true
         if state.AccountProgression then syncFloor()
-        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then state.SafeFloorId=state.ProgressionRestore.SafeFloorId end
+        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then state.SafeFloorId=state.SharedSafeFloorId or state.ProgressionRestore.SafeFloorId end
         if state.MultiSpotController then state.MultiSpotController.Reset()end
         -- A queued startup may already be resuming an active block/rejoin ticket.
         -- Preserve its attempt budget and phase across progression-owned joins.
