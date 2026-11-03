@@ -128,7 +128,7 @@ return function(ctx)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
-    paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
+    paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)

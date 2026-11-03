@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.source-multi-spots-v1.12.32"
-local VERSION="1.12.32"
+local BUILD="2026-11-03.safe-status-label-v1.12.33"
+local VERSION="1.12.33"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24982,7 +24982,7 @@ return function(ctx)
     input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
         if text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
     end,"Input A List Of User")
-    paragraph("SafeModeStatus","Main","Safe Mode status",function()return s.SafeModeStatus end)
+    paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
     api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
