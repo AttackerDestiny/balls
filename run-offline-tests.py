@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("STARTUP BELOW", "startup-below.module.luau"),
         ("AUTO QUEST", "auto-quest.module.luau"),
         ("AUTO CRAFT", "auto-craft.module.luau"),
         ("INVENTORY VIEW", "inventory-view.module.luau"),
@@ -126,6 +127,7 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("windui.test.luau")) + "))()(" + quote(read("windui.module.luau")) + ")\n"

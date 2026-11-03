@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.global-boss-priority-v1.12.39"
-local VERSION="1.12.39"
+local BUILD="2026-11-03.startup-below-v1.12.40"
+local VERSION="1.12.40"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -384,6 +384,58 @@ runtimeOwner.Retire()
 if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
     task.wait(math.min(3, env.SB2FarmRecoveryUntil - os.clock()))
 end
+
+do
+    local moveBelow=(function()
+-- BEGIN BUNDLED STARTUP BELOW
+-- One startup placement, then release movement entirely to the normal controllers.
+return function(ctx)
+    local deadline=ctx.Now()+8
+    repeat
+        if not ctx.Alive()then return false,"Startup cancelled"end
+        local root=ctx.Root()
+        if root then
+            local point=ctx.Position(root)
+            local floor=ctx.Surface(root,point)
+            assert(type(floor)=="number"and floor==floor and math.abs(floor)<1e8,"Startup ground height is unavailable")
+            if not ctx.Alive()or ctx.Root()~=root then return false,"Character changed during startup"end
+            ctx.Move(root,point.X,floor-20,point.Z)
+            return true
+        end
+        if ctx.Now()>=deadline then return false,"Waiting for a living character timed out"end
+        ctx.Sleep(.05)
+    until false
+end
+
+-- END BUNDLED STARTUP BELOW
+    end)()
+    local ok,moved,reason=pcall(moveBelow,{Now=os.clock,Sleep=task.wait,
+        Alive=function()return env.SB2LoadToken==loadToken and runtimeOwner.Alive()end,
+        Root=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            return humanoid and humanoid.Health>0 and character:FindFirstChild("HumanoidRootPart")or nil
+        end,
+        Position=function(root)return root.Position end,
+        Surface=function(root,point)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+            local excluded={root.Parent}
+            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","MobSpawnEffects"})do
+                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            end
+            params.FilterDescendantsInstances=excluded
+            local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
+            if hit then return hit.Position.Y end
+            local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
+            return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
+        end,
+        Move=function(root,x,y,z)
+            root.CFrame=CFrame.new(x,y,z)*root.CFrame.Rotation
+            root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+        end})
+    env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
+end
+if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive()then return end
 
 do
     local profile=ReplicatedStorage:WaitForChild("Profiles"):WaitForChild(player.Name)
