@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.windui-health-v1.12.5"
-local VERSION="1.12.5"
+local BUILD="2026-11-03.farm-target-lock-v1.12.6"
+local VERSION="1.12.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2236,6 +2236,7 @@ function state.SetAutoFarm(enabled, reason)
     state.LastAutoFarmChange={Enabled=enabled==true,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and enabled ~= true then state.ProtectionUntil = os.clock() + 8 end
     state.AutoFarm = enabled == true
+    state.FarmTargetLock=nil
     if state.AutoFarm then state.LastFarmStopReason = nil end
     state.LastMovementError = nil
     farmToggle.Text = state.AutoFarm and "Auto farm  ·  ON" or "Auto farm  ·  OFF"
@@ -4366,6 +4367,28 @@ local function updateMovement()
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
     if now>=nextAcquisition then
         nextAcquisition=now+0.15
+        local locked=state.FarmTargetLock
+        if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
+        if locked and locked.Parent==mobs then
+            local data=getMobData(locked)
+            -- Missing streamed data, invulnerability or a rejected offset is
+            -- not a confirmed kill. Wait for this enemy instead of retargeting.
+            if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
+        else locked=nil end
+        if locked then
+            local rank=targetPriority.Rank(locked)
+            local promoted
+            if rank>1 then
+                for mob in pairs(trackedMobs)do
+                    if targetPriority.Rank(mob)<rank and validMob(mob,mobs)
+                        and (not promoted or targetPriority.FarmLess(mob,promoted))then promoted=mob end
+                end
+            end
+            if promoted then locked=promoted;state.FarmTargetLock=promoted end
+            state.FollowTarget=locked
+            targetRoot=validMob(locked,mobs)
+            state.TargetPriority=targetPriority.Rank(locked)
+        else
         local preferred=targetRoot and state.FollowTarget or nil
         local best=preferred
         state.TargetScans+=1
@@ -4378,6 +4401,10 @@ local function updateMovement()
         state.FollowTarget=best
         targetRoot=best and validMob(best,mobs)
         state.TargetPriority=best and targetPriority.Rank(best) or nil
+        state.FarmTargetLock=best
+        state.FarmLockArena=state.MultiSpotAnchor
+        state.FarmLockProgression=state.ProgressionBossMob
+        end
     end
     if not targetRoot then
         if state.AccountProgression and state.ProgressionAnchor then

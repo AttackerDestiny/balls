@@ -42,7 +42,7 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     local origins={vec(-10000),vec(10000),vec(500)}
     local previous={other,boss,regular}
     for i,a in ipairs(accounts)do
-        assert(a.Select(origins[i],previous[i],0)==peer,"Different positions, previous targets and insertion order must pick the same boss")
+        assert(a.Select(origins[i],nil,0)==peer,"Different positions, previous targets and insertion order must pick the same boss")
         assert(not a.Priority.FarmLess(peer,peer),"Identical targets do not sort before themselves")
     end
     -- Replication adds HitLives after the health/root cache was already filled.
@@ -53,22 +53,33 @@ return function(prioritySource,dataSource,validSource,selectionSource)
         assert(a.Select(origins[i],peer,0)==boss,"An exhausted enemy must not keep any account's previous-target preference")
     end
     entity.Children.HitLives=nil
-    for i,a in ipairs(accounts)do assert(a.Select(origins[i],boss,0)==peer,"Removed HitLives cannot remain in the enemy cache")end
+    for i,a in ipairs(accounts)do assert(not a.GetData(peer).HitLives);assert(a.Select(origins[i],boss,0)==boss,"A living target remains locked after another enemy becomes eligible")end
     peer.Children.Entity.Children.Health.Value=0;boss.Children.Entity.Children.Health.Value=0
     for i,a in ipairs(accounts)do assert(a.Select(origins[i],peer,0)==other,"All accounts advance to the same next living boss")end
     other.Children.Entity.Children.Immortal={}
-    for i,a in ipairs(accounts)do assert(a.Select(origins[i],other,0)==mini,"Immortal bosses remain excluded; mini-bosses precede regular mobs")end
+    for i,a in ipairs(accounts)do assert(a.Select(origins[i],other,0)==other,"Temporary invulnerability cannot authorize switching targets")end
+    other.Children.Entity.Children.Health.Value=0
+    for i,a in ipairs(accounts)do assert(a.Select(origins[i],other,0)==mini)end
     accounts[1].State.AutoTradeBusy=true
-    assert(accounts[1].Select(origins[1],mini,0)==nil,"Trade protection still prevents selecting a farm target")
+    assert(accounts[1].Select(origins[1],mini,0)==mini,"Trade pauses preserve the current target lock")
+    local equal=mob("Same rank",-500,"MiniBoss")
+    local stable=account({mini})
+    assert(stable.Select(vec(0),nil,0)==mini)
+    stable.Add(equal)
+    assert(stable.Select(vec(0),mini,1)==mini,"Same-rank arrivals do not interrupt the current enemy")
+    mini.Children.HumanoidRootPart.Position=vec(5000)
+    assert(stable.Select(vec(0),mini,2)==mini,"Movement cannot reorder a locked same-rank fight")
     local force=account({regular})
     assert(force.Select(vec(0),nil,0)==regular)
     force.Add(mini)
-    assert(force.Select(vec(0),regular,1)==mini,"A mini-boss must replace an ongoing regular-mob fight")
+    assert(force.Select(vec(0),regular,1)==mini,"A new mini-boss interrupts a normal mob")
     local main=mob("ZZ distant main boss",20000,"Elite")
     assert(force.Priority.Rank(main)==3)
     main.Children.Entity.Children.Difficulty={Value="Main Boss"}
     force.Add(main)
-    assert(force.Select(vec(0),mini,2)==main,"A newly replicated main boss must force priority 1 despite distance, name and a model's Elite rank")
+    assert(force.Select(vec(0),mini,2)==main,"A new main boss interrupts a mini-boss")
+    regular.Children.Entity.Children.Health.Value=0
+    assert(force.Select(vec(0),regular,3)==main,"After the current kill, choose the main boss first")
     assert(force.State.TargetPriority==1)
     main.Tags={"MiniBoss","BossBar","FloorBoss"}
     main.Children.Entity.Children.Difficulty.Value="FloorBoss"
@@ -82,7 +93,7 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     assert(force.Select(vec(0),main,3)==mini,"After the main boss dies, return to priority 2")
     assert(force.State.TargetPriority==2)
     mini.Children.Entity.Children.Health.Value=0
-    assert(force.Select(vec(0),mini,4)==regular,"Regular mobs are a fallback only after both boss ranks are unavailable")
+    assert(force.Select(vec(0),mini,4)==nil,"No target remains after every eligible mob dies")
     print("PASS Shared farm targets: three account origins, previous targets, iteration order, boss/name/position ordering, death, late HitLives, invulnerability and trade priority")
     print("PASS Forced farm priority: main=1, mini=2, regular=3, mid-fight replacement, native metadata updates and mixed rank markers")
 end
