@@ -90,7 +90,7 @@ return function(source)
     local visible=true
     local api=make({State=s,WindUI=wind,PlaceId=11,Visibility=function(value)visible=value end})
     local c=api.Controls
-    for _,key in ipairs({"CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
+    for _,key in ipairs({"SkillStatus","MiscSkillStatus","CombatStatus","TravelStatus","AutoSaveStatus","DodgeStatus","SaveMiniBossArea","HideUI","Unload"})do assert(not c[key],"Removed control: "..key)end
     assert(c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
     flush();assert(tabCount==8 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge","TransparentMap",

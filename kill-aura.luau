@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.ui-cleanup-v1.12.1"
-local VERSION="1.12.1"
+local BUILD="2026-11-03.skill-ui-cleanup-v1.12.2"
+local VERSION="1.12.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24765,13 +24765,11 @@ return function(ctx)
     dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
     end,function(name)if name and name~=s.SelectedSkill then invoke("SetSelectedSkill",name)end end)
-    paragraph("SkillStatus","Auto Skill","Skill status",function()return s.SkillStatus end)
     stateToggle("MiscSkillEnabled","Auto Skill","Misc Skill","SetMiscSkillEnabled")
     dropdown("SelectedMiscSkill","Auto Skill","Support skill",function()
         local options={};for _,item in ipairs(s.MiscSkillChoices or {})do if item.Usable then options[#options+1]=item.Name end end
         return {Options=options,Value=s.SelectedMiscSkill}
     end,function(name)if name and name~=s.SelectedMiscSkill then invoke("SetMiscSkill",name)end end)
-    paragraph("MiscSkillStatus","Auto Skill","Support skill status",function()return s.MiscSkillStatus end)
     for _,name in ipairs({"Dismantle","Upgrade","The Forge"})do
         button("Open"..name,"Misc",name,function()invoke("OpenGameMenu",name)end)
     end
