@@ -103,7 +103,7 @@ return function(source)
         "MultiSpotSection","MultiSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportSection","TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
-        "PerformanceBoosters","AutoDismantle","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
+        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
     assert(#c.MultiSpotAreas.Values==2,"Arena dropdown contains only the current floor")

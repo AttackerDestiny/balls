@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.skill-sections-v1.12.13"
-local VERSION="1.12.13"
+local BUILD="2026-11-03.utility-sections-v1.12.14"
+local VERSION="1.12.14"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24824,11 +24824,13 @@ return function(ctx)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
     end
+    api.Controls.PerformanceBoosterSection=api.Tabs.Utility:Section({Title="Perfromance Booster",TextSize=17})
     dropdown("PerformanceBoosters","Utility","Performance boosters",function()
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
     end,applyBoost,true)
     local rarities={"Common","Uncommon","Rare"}
+    api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle rarities",function()
         local value={};for _,name in ipairs(rarities)do if s.AutoDismantle[name]then value[#value+1]=name end end
         return {Options=rarities,Value=value}
@@ -24836,6 +24838,7 @@ return function(ctx)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
     end,true,"Equipped, locked and favorited items are preserved.")
+    api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
     stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Accept requests only from whitelisted players; final acceptance is automatic.")
     dropdown("TradeMode","Utility","Trade offer mode",function()
         return {Options={"Selected items","Legendary+"},Value=s.TradeMode=="Legendary"and "Legendary+"or "Selected items"}
