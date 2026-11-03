@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.safe-status-label-v1.12.33"
-local VERSION="1.12.33"
+local BUILD="2026-11-03.startup-budget-v1.12.34"
+local VERSION="1.12.34"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -466,11 +466,9 @@ env.SB2KillAura = state
 local connections = {}
 local lastHit = setmetatable({}, { __mode = "k" })
 local consecutiveErrors = 0
-local nextAttack = 0
 local nextTargetRefresh = 0
 local nextPingCheck = 0
 local candidates = {}
-local targetCursor = 0
 local normalScheduler=(function()
 -- BEGIN BUNDLED ATTACK SCHEDULER
 -- Supplied-source rule: one damage call per target, then a 0.3s cooldown.
@@ -775,15 +773,11 @@ end
 -- END BUNDLED TARGET PRIORITY
 end)()()
 local pendingDamage = setmetatable({}, { __mode = "k" })
-local noDamageChecks = 0
 local stopMovement = function() end
-local nextWeaponDraw = 0
-local weaponDrawThread
 local trackedMobs = {}
 local indexedMobFolder, mobAddedConnection, mobRemovedConnection
 local nextMobReconcile = 0
 local mobCache = setmetatable({}, { __mode = "k" })
-local requestTokens, lastTokenRefill = 3, os.clock()
 local combatStatus = "Paused"
 local candidatePrimary
 local configReady = false
@@ -847,7 +841,16 @@ local function getMobRoot(mob)
     return data and data.Root
 end
 
+-- Yield only while initializing; gameplay object creation stays synchronous.
+state.StartupSliceAt=os.clock()
+function state.YieldStartup()
+    if not state.StartupComplete and os.clock()-state.StartupSliceAt>=.002 then
+        task.wait()
+        state.StartupSliceAt=os.clock()
+    end
+end
 local function create(className, properties, parent)
+    state.YieldStartup()
     local object = Instance.new(className)
     for key, value in pairs(properties) do object[key] = value end
     object.Parent = parent
@@ -3396,10 +3399,22 @@ do
             part.LocalTransparencyModifier=0.7
         elseif original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
     end
+    local scanGeneration=0
     function state.SetTransparentMap(enabled)
     if state.StopEverything and enabled==true then return false end
         state.TransparentMap=enabled==true
-        for _,part in ipairs(workspace:QueryDescendants("BasePart")) do applyPart(part) end
+        scanGeneration+=1
+        local generation=scanGeneration
+        if state.TransparentMap then
+            task.defer(function()
+                local slice=os.clock()
+                for _,part in ipairs(workspace:QueryDescendants("BasePart")) do
+                    if generation~=scanGeneration or not state.Running then return end
+                    if part.Parent then applyPart(part)end
+                    if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
+                end
+            end)
+        end
         if not state.TransparentMap then
             for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end; original[part]=nil end
         end
@@ -3410,6 +3425,7 @@ do
         if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
     end)
     state.RestoreWorldVisuals=function()
+        scanGeneration+=1
         restoringZoom=true
         player.CameraMaxZoomDistance=oldZoom
         for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
@@ -3445,13 +3461,15 @@ return function(ctx)
     local locomotion={idle=true,walk=true,run=true,jump=true,fall=true,climb=true,swim=true,swimidle=true,sit=true,toolnone=true}
     for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren()) do names[normalize(definition.Name)]=true end
     for _,root in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects}) do
-        for _,animation in ipairs(root:QueryDescendants("Animation")) do
-            local id=assetId(animation.AnimationId); if id then assets[id]=true end
-        end
-        for _,sound in ipairs(root:QueryDescendants("Sound")) do local id=assetId(sound.SoundId); if id then sounds[id]=true end end
-        for _,instance in ipairs(root:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
-            local key=normalize(instance.Name)
-            if #key>=5 and not generic[key] then effectNames[key]=true end
+        for _,instance in ipairs(root:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
+            if instance:IsA("Animation")then
+                local id=assetId(instance.AnimationId);if id then assets[id]=true end
+            else
+                if instance:IsA("Sound")then local id=assetId(instance.SoundId);if id then sounds[id]=true end end
+                local key=normalize(instance.Name)
+                if #key>=5 and not generic[key]then effectNames[key]=true end
+            end
+            if state.YieldStartup then state.YieldStartup()end
         end
     end
     for _,style in pairs(ctx.Actions.animations) do
@@ -3639,7 +3657,10 @@ return function(ctx)
         local record=managed[instance]
         if record then restore(instance,record); managed[instance]=nil end
     end)
-    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do enqueue(instance,false) end
+    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do
+        enqueue(instance,false)
+        if state.YieldStartup then state.YieldStartup()end
+    end
     for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
     function api.IsEffect(instance) return effect(instance) end
     function api.ProcessManaged()
@@ -5076,10 +5097,8 @@ function state.SetEnabled(enabled)
     end
     state.LastError = nil
     consecutiveErrors = 0
-    nextAttack = 0
     nextTargetRefresh = 0
     state.Backoff = 1
-    noDamageChecks = 0
     table.clear(lastHit)
     table.clear(pendingDamage)
     toggle.Text = state.Enabled and "Kill aura · ON" or "Kill aura · OFF"
@@ -5400,7 +5419,7 @@ local function scan()
         table.sort(candidates,function(a,b)
             return targetPriority.Less(a,b,root.Position,primary)
         end)
-        if candidatePrimary ~= primary then candidatePrimary = primary; targetCursor = 0 end
+        if candidatePrimary ~= primary then candidatePrimary = primary end
     end
     state.Nearby = #candidates
     for mob, sample in pairs(pendingDamage) do
@@ -5602,7 +5621,6 @@ local function runFrame()
         else
             consecutiveErrors += 1
             state.Backoff = math.min(8, state.Backoff * 2)
-            nextAttack = os.clock() + 0.5
             stopSword()
             if consecutiveErrors >= 3 then
                 state.FarmPauseUntil = os.clock()+1
@@ -24859,6 +24877,14 @@ return function(ctx)
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
     local nextUpdate,nextChoices=0,0
+    local buildSlice=os.clock()
+    local lastTab
+    local function yieldBuild()
+        if disposed or s.Running==false then error("UI initialization cancelled")end
+        if ctx.Yield then ctx.Yield()end
+        if ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
+        if disposed or s.Running==false then error("UI initialization cancelled")end
+    end
     local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"}
     local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up"}
     local function report(reason)s.WindUIError=tostring(reason)end
@@ -24888,16 +24914,19 @@ return function(ctx)
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    for i,name in ipairs(tabs)do api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
+    for i,name in ipairs(tabs)do yieldBuild();api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
     local function button(key,tab,title,fn,desc)
+        yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
     end
     local function paragraph(key,tab,title,get)
+        yieldBuild()
         local text=tostring(get()or "")
         local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
         api.Controls[key]=control;paragraphs[#paragraphs+1]={Control=control,Get=get,Text=text}
     end
     local function toggle(key,tab,title,get,set,desc)
+        yieldBuild()
         local entry={Get=get,Value=get()}
         local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
             if api.Ready and value~=get()then
@@ -24910,7 +24939,8 @@ return function(ctx)
         toggle(key,tab,title,bool(key),function(value)invoke(setter,value)end,desc)
     end
     local function dropdown(key,tab,title,build,choose,multi,desc)
-        local entry={Build=build,Choose=choose,Multi=multi,Syncing=true}
+        yieldBuild()
+        local entry={Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
         local view=build();entry.Map=view.Map or {};entry.Current=signature(view.Value);entry.Value=entry.Current
         entry.Options=signature(view.Options)
         entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
@@ -24924,6 +24954,7 @@ return function(ctx)
         api.Controls[key]=entry.Control;dropdowns[#dropdowns+1]=entry
     end
     local function input(key,tab,title,value,set,desc)
+        yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
             Placeholder="Enter here...",Callback=guard(function(text)
                 if api.Ready then set(text)end
@@ -25018,6 +25049,7 @@ return function(ctx)
     if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
 
 
+    local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
@@ -25094,6 +25126,8 @@ return function(ctx)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
 
+    end
+
     function api.SetVisible(value)
         if disposed then return end
         api.Visible=value==true;s.UIHidden=not api.Visible
@@ -25108,6 +25142,7 @@ return function(ctx)
         nextUpdate=now+.25
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
+        if tab~=lastTab then lastTab=tab;nextChoices=0 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
             local value=entry.Get()
@@ -25120,6 +25155,7 @@ return function(ctx)
         if now>=nextChoices then
             nextChoices=now+1
             for _,entry in ipairs(dropdowns)do
+                if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
                 local options=signature(view.Options);local value=signature(view.Value)
                 local changed=options~=entry.Options
@@ -25127,6 +25163,7 @@ return function(ctx)
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
                 if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
                 entry.Syncing=false
+                end
             end
         end
     end
@@ -25137,6 +25174,13 @@ return function(ctx)
         window:Destroy()
     end
     -- Restore values after all controls exist; initialization never runs actions.
+    if ctx.Defer then
+        ctx.Defer(function()
+            if disposed or s.Running==false then return end
+            local ok,reason=pcall(buildOtherTabs)
+            if not ok and not disposed then report(reason)end
+        end)
+    else buildOtherTabs()end
     api.Ready=true
     local activeTab=api.Tabs[s.UI.ActiveTab or "Main"]or api.Tabs.Main
     activeTab:Select()
@@ -25184,7 +25228,7 @@ end
         local size=camera and camera.ViewportSize or Vector2.new(1280,720)
         state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,
+        local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,Yield=state.YieldStartup,Defer=task.defer,
             FriendPresent=function(name)
                 if name==""then return false end
                 for _,person in ipairs(Players:GetPlayers())do
@@ -25393,5 +25437,7 @@ end
         end
     end)
 end
+
+state.StartupComplete=true
 ]============]
 return assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)

@@ -5,6 +5,14 @@ return function(ctx)
     local disposed=false
     local toggles,dropdowns,paragraphs={},{},{}
     local nextUpdate,nextChoices=0,0
+    local buildSlice=os.clock()
+    local lastTab
+    local function yieldBuild()
+        if disposed or s.Running==false then error("UI initialization cancelled")end
+        if ctx.Yield then ctx.Yield()end
+        if ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
+        if disposed or s.Running==false then error("UI initialization cancelled")end
+    end
     local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"}
     local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up"}
     local function report(reason)s.WindUIError=tostring(reason)end
@@ -34,16 +42,19 @@ return function(ctx)
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    for i,name in ipairs(tabs)do api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
+    for i,name in ipairs(tabs)do yieldBuild();api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})end
     local function button(key,tab,title,fn,desc)
+        yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
     end
     local function paragraph(key,tab,title,get)
+        yieldBuild()
         local text=tostring(get()or "")
         local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
         api.Controls[key]=control;paragraphs[#paragraphs+1]={Control=control,Get=get,Text=text}
     end
     local function toggle(key,tab,title,get,set,desc)
+        yieldBuild()
         local entry={Get=get,Value=get()}
         local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
             if api.Ready and value~=get()then
@@ -56,7 +67,8 @@ return function(ctx)
         toggle(key,tab,title,bool(key),function(value)invoke(setter,value)end,desc)
     end
     local function dropdown(key,tab,title,build,choose,multi,desc)
-        local entry={Build=build,Choose=choose,Multi=multi,Syncing=true}
+        yieldBuild()
+        local entry={Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
         local view=build();entry.Map=view.Map or {};entry.Current=signature(view.Value);entry.Value=entry.Current
         entry.Options=signature(view.Options)
         entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
@@ -70,6 +82,7 @@ return function(ctx)
         api.Controls[key]=entry.Control;dropdowns[#dropdowns+1]=entry
     end
     local function input(key,tab,title,value,set,desc)
+        yieldBuild()
         api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
             Placeholder="Enter here...",Callback=guard(function(text)
                 if api.Ready then set(text)end
@@ -164,6 +177,7 @@ return function(ctx)
     if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
 
 
+    local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
@@ -240,6 +254,8 @@ return function(ctx)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
 
+    end
+
     function api.SetVisible(value)
         if disposed then return end
         api.Visible=value==true;s.UIHidden=not api.Visible
@@ -254,6 +270,7 @@ return function(ctx)
         nextUpdate=now+.25
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
+        if tab~=lastTab then lastTab=tab;nextChoices=0 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
             local value=entry.Get()
@@ -266,6 +283,7 @@ return function(ctx)
         if now>=nextChoices then
             nextChoices=now+1
             for _,entry in ipairs(dropdowns)do
+                if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
                 local options=signature(view.Options);local value=signature(view.Value)
                 local changed=options~=entry.Options
@@ -273,6 +291,7 @@ return function(ctx)
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
                 if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
                 entry.Syncing=false
+                end
             end
         end
     end
@@ -283,6 +302,13 @@ return function(ctx)
         window:Destroy()
     end
     -- Restore values after all controls exist; initialization never runs actions.
+    if ctx.Defer then
+        ctx.Defer(function()
+            if disposed or s.Running==false then return end
+            local ok,reason=pcall(buildOtherTabs)
+            if not ok and not disposed then report(reason)end
+        end)
+    else buildOtherTabs()end
     api.Ready=true
     local activeTab=api.Tabs[s.UI.ActiveTab or "Main"]or api.Tabs.Main
     activeTab:Select()

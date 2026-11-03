@@ -23,13 +23,15 @@ return function(ctx)
     local locomotion={idle=true,walk=true,run=true,jump=true,fall=true,climb=true,swim=true,swimidle=true,sit=true,toolnone=true}
     for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren()) do names[normalize(definition.Name)]=true end
     for _,root in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects}) do
-        for _,animation in ipairs(root:QueryDescendants("Animation")) do
-            local id=assetId(animation.AnimationId); if id then assets[id]=true end
-        end
-        for _,sound in ipairs(root:QueryDescendants("Sound")) do local id=assetId(sound.SoundId); if id then sounds[id]=true end end
-        for _,instance in ipairs(root:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
-            local key=normalize(instance.Name)
-            if #key>=5 and not generic[key] then effectNames[key]=true end
+        for _,instance in ipairs(root:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
+            if instance:IsA("Animation")then
+                local id=assetId(instance.AnimationId);if id then assets[id]=true end
+            else
+                if instance:IsA("Sound")then local id=assetId(instance.SoundId);if id then sounds[id]=true end end
+                local key=normalize(instance.Name)
+                if #key>=5 and not generic[key]then effectNames[key]=true end
+            end
+            if state.YieldStartup then state.YieldStartup()end
         end
     end
     for _,style in pairs(ctx.Actions.animations) do
@@ -217,7 +219,10 @@ return function(ctx)
         local record=managed[instance]
         if record then restore(instance,record); managed[instance]=nil end
     end)
-    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do enqueue(instance,false) end
+    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do
+        enqueue(instance,false)
+        if state.YieldStartup then state.YieldStartup()end
+    end
     for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
     function api.IsEffect(instance) return effect(instance) end
     function api.ProcessManaged()

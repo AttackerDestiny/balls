@@ -95,7 +95,9 @@ return function(source)
         SetInventoryVisible=function(on)record("SetInventoryVisible",on);s.ViewingPlayerInventory=on end}
     local present=false
     local visible=true
-    local api=make({State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
+    local yields=0
+    local api=make({Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
+    assert(yields>=40,"UI construction must offer frame-budget yield points")
     local c=api.Controls
     assert(c.AutoJoinFriendStatus.Title=="Status"and c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
     present=true;api.Update(.3);assert(c.AutoJoinFriendStatus.Desc=="Friend Appeared")
@@ -148,11 +150,13 @@ return function(source)
     s.StopEverything=true;c.AtheonDodge:Emit(true)
     assert(c.AtheonDodge.Value==false,"Rejected toggles must return to their actual value")
     s.StopEverything=false
-    api.Update(4);flush();before=#calls
-    gemCount=80;api.Update(5);flush()
+    local idleReads=inventoryReads
+    api.Update(4);flush();assert(inventoryReads==idleReads,"Main tab must not rebuild inventory dropdowns")
+    api.Tabs.Utility:Select();api.Update(4.3);flush();before=#calls
+    gemCount=80;api.Update(5.4);flush()
     assert(#calls==before,"Inventory quantity refreshes cannot change trade selections or invoke actions")
     assert(c.TradeItems.Value[1]=="Gem x80"and s.TradeItems.Gem)
-    for i=1,20 do api.Update(5+i*.01)end
+    for i=1,20 do api.Update(5.4+i*.01)end
     local reads=inventoryReads;api.SetVisible(false)
     assert(not visible and s.UIHidden and s.HealthVisible,"Hiding WindUI must leave the health HUD visible")
     api.Update(10);flush();assert(inventoryReads==reads,"A hidden UI must not scan inventory choices")
@@ -160,5 +164,15 @@ return function(source)
     api.Destroy();api.Destroy();before=#calls
     c.AutoTrade:Emit(false);c.RestartScript.Callback();flush()
     assert(#calls==before and window.Destroyed,"Old callbacks are inert after runtime cleanup")
+    s.Running=true;window.Destroyed=false;tabCount=0;s.UI.ActiveTab="Main"
+    local deferred
+    local staged=make({State=s,WindUI=wind,PlaceId=11,Defer=function(fn)deferred=fn end,Visibility=function()end})
+    assert(staged.Controls.SafeMode and not staged.Controls.Enabled,"Main controls become available before background tabs")
+    deferred();flush()
+    assert(staged.Controls.Enabled and staged.Controls.AutoTrade,"Background build must finish every feature")
+    staged.Destroy();s.Running=true;tabCount=0
+    local cancelled=make({State=s,WindUI=wind,PlaceId=11,Defer=function(fn)deferred=fn end,Visibility=function()end})
+    cancelled.Destroy();deferred()
+    assert(not cancelled.Controls.Enabled,"Destroyed runtimes must not build more controls")
     print("PASS WindUI: all features, saved defaults without side effects, native callbacks, locked floors, current-floor arenas, batch save, inventory refresh, pause rejection, HUD-safe hide, bounded refresh and cleanup")
 end
