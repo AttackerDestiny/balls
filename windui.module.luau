@@ -208,9 +208,7 @@ return function(ctx)
         local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
         invoke("SetTradeItems",picked)
     end,true,"All selected copies. Upgrade Protection Scroll and Resurrection Crystal are always included.")
-    stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression","Defeat each floor's main boss and advance through F12; skips F6.")
-    paragraph("ProgressionStatus","Speacial","Account progress",function()return s.ProgressionStatus end)
-    paragraph("ProgressionGear","Speacial","Equipment",function()return status("ProgressionGear")end)
+    stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
 
     function api.SetVisible(value)
         if disposed then return end
