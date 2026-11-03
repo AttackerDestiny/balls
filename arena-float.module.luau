@@ -8,6 +8,7 @@ return function(ctx)
         api.Root=nil
     end
     function api.Attach(root)
+        if ctx.Active and not ctx.Active()then api.Release();return end
         if root.Anchored then return end
         if api.Root==root and force and force.Parent then return end
         api.Release();api.Root=root
@@ -18,6 +19,7 @@ return function(ctx)
         nextUpdate=0
     end
     function api.Update(now)
+        if ctx.Active and not ctx.Active()then api.Release();return end
         if not api.Root then return end
         if not api.Root.Parent or api.Root.Anchored or ctx.Root()~=api.Root then api.Release();return end
         if now<(nextUpdate or 0) then return end

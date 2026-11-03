@@ -2,10 +2,11 @@ return function(source,arrivalSource)
     local function vec(x,y,z)return {X=x,Y=y,Z=z}end
     local created={}
     local root={Parent=true,Position=vec(1,2,3),AssemblyMass=10}
+    local active=true
     local current=root
     local load=assert(loadstring(source))
     setfenv(load,setmetatable({Vector3={new=vec},Enum={ActuatorRelativeTo={World="World"},VelocityConstraintMode={Line="Line"}}},{__index=getfenv()}))
-    local api=load()({Workspace={Gravity=196.2},Root=function()return current end,
+    local api=load()({Active=function()return active end,Workspace={Gravity=196.2},Root=function()return current end,
         Create=function(class,properties,parent)
             local item=properties;item.Class=class;item.Parent=parent
             function item:Destroy()self.Parent=nil end
@@ -17,6 +18,8 @@ return function(source,arrivalSource)
     assert(root.Position==moved and created[2].Position==nil,"Passive support must not pin or teleport any position")
     api.Attach(root);assert(#created==2,"No repeated arrival work")
     root.AssemblyMass=20;api.Update(2);assert(created[2].LineVelocity==0)
+    active=false;api.Update(3);assert(not api.Root and created[2].Parent==nil,"Both toggles OFF releases vertical support")
+    api.Attach(root);assert(not api.Root,"Late arrival cannot recreate a hold in manual mode")
     current={};api.Update(3);assert(not api.Root and created[2].Parent==nil)
     print("PASS One-shot arrival passive support does not pin position and cleans up")
     local calls,stops=0,0
@@ -35,6 +38,8 @@ return function(source,arrivalSource)
     assert(state.FinishMultiSpotArrival() and calls==1 and stops==1)
     root.Position=vec(999,4,999)
     assert(state.FinishMultiSpotArrival() and calls==1 and stops==1 and root.Position.X==999)
+    state.Enabled=false;assert(state.FinishMultiSpotArrival()and calls==1,"Manual mode cannot reattach after arrival")
+    state.Enabled=true
     print("PASS Multi Spot releases the destination once and hands movement to Auto Farm")
     local alive=1
     state.MultiSpot=true;state.MultiSpotAnchor=vec(840,798,336);state.MultiSpotController={Current={}}

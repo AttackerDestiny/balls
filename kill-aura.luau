@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.movement-recovery-v1.12.27"
-local VERSION="1.12.27"
+local BUILD="2026-11-03.manual-movement-v1.12.28"
+local VERSION="1.12.28"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -4085,6 +4085,7 @@ return function(ctx)
         api.Root=nil
     end
     function api.Attach(root)
+        if ctx.Active and not ctx.Active()then api.Release();return end
         if root.Anchored then return end
         if api.Root==root and force and force.Parent then return end
         api.Release();api.Root=root
@@ -4095,6 +4096,7 @@ return function(ctx)
         nextUpdate=0
     end
     function api.Update(now)
+        if ctx.Active and not ctx.Active()then api.Release();return end
         if not api.Root then return end
         if not api.Root.Parent or api.Root.Anchored or ctx.Root()~=api.Root then api.Release();return end
         if now<(nextUpdate or 0) then return end
@@ -4107,7 +4109,7 @@ end
 
 -- END BUNDLED ARENA FLOAT
     end)()
-    state.ArenaFloat=make({Create=create,Workspace=workspace,Root=function()
+    state.ArenaFloat=make({Create=create,Workspace=workspace,Active=function()return state.AutoFarm or state.Enabled end,Root=function()
         local character=player.Character
         return character and character:FindFirstChild("HumanoidRootPart")
     end})
@@ -4115,6 +4117,7 @@ end
 function state.FinishMultiSpotArrival()
     state.TravelHold=false;state.TravelHoldPosition=nil;state.MultiSpotLandingPosition=nil
     if state.AutoFarm then return true end
+    if not state.Enabled then stopMovement("Manual controls restored");return true end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
@@ -4126,7 +4129,7 @@ function state.FinishMultiSpotArrival()
     return true
 end
 function state.HoldMultiSpotIdle()
-    if not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
+    if (not state.AutoFarm and not state.Enabled)or not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
         or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
     local spot=state.MultiSpotController and state.MultiSpotController.Current
     if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
@@ -4335,8 +4338,8 @@ local function updateMovement()
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
     if state.SafeModePanic or state.AutomationTeleporting or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or now<(state.FarmPauseUntil or 0) then return end
-    if not state.AutoFarm and not state.Enabled and not state.SkillAura and not state.TravelHold then
-        if state.Moving or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
+    if not state.AutoFarm and not state.Enabled then
+        if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
     end
     if state.MultiSpot and state.MultiSpotAnchor and not state.AutoFarm then
@@ -7607,7 +7610,7 @@ end
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
+            if (not state.AutoFarm and not state.Enabled)or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")

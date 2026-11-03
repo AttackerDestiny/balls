@@ -200,7 +200,7 @@ return function(sources)
         assert(third.Alive() and #f.Parent:GetChildren()==1)
     end)
     test("mobile worker and toggle save survive unavailable privileged input",function()
-        local state={Running=true,SafeMode=false,MultiSpot=true,MultiSpotSelected={},UI={},FloorDestinations={},
+        local state={Running=true,Enabled=true,SafeMode=false,MultiSpot=true,MultiSpotSelected={},UI={},FloorDestinations={},
             ConfigPath="settings.json",SavedScriptPath="script.luau",Build="fixture"}
         local saved,updates,queued={},0,{}
         function state.SaveNow()saved[#saved+1]=state.MultiSpot;return true end
