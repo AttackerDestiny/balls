@@ -92,7 +92,7 @@ return function(ctx)
 
     api.Controls.TeleportSection=api.Tabs.Main:Section({Title="Teleport",TextSize=17})
     local destination
-    dropdown("TeleportDestination","Main","Teleport destination",function()
+    dropdown("TeleportDestination","Main","Spot",function()
         local list={};for _,area in pairs(s.FloorDestinations or {})do list[#list+1]=area end
         table.sort(list,function(a,b)
             if a.Kind~=b.Kind then return a.Kind<b.Kind end
@@ -105,9 +105,11 @@ return function(ctx)
             if destination==area.Id then value=label end
         end
         return {Options=options,Map=map,Value=value}
-    end,function(label,map)destination=map[label]end)
-    button("Teleport","Main","Teleport",function()if destination then invoke("TeleportToDestination",destination)end end)
-    button("RefreshDestinations","Main","Refresh teleport destinations",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
+    end,function(label,map)
+        destination=map[label]
+        if destination then invoke("TeleportToDestination",destination)end
+    end)
+    button("RefreshDestinations","Main","Refresh List",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
     api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})
     stateToggle("SafeMode","Main","Safe Mode","SetSafeMode")
     dropdown("SafeFloor","Main","Safe floor",function()

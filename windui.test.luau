@@ -108,7 +108,7 @@ return function(source)
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge",
         "SkillAuraSection","SkillAura","SelectedSkill","MiscSkillSection","MiscSkillEnabled","SelectedMiscSkill","SafeModeSection","SafeMode","SafeFloor","SafeWhitelist",
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
-        "TeleportSection","TeleportDestination","Teleport","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
+        "TeleportSection","TeleportDestination","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
         "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
@@ -134,8 +134,10 @@ return function(source)
     c.SelectedSkill:Emit("Beam Rush");assert(s.SelectedSkill=="Beam Rush")
     c.SelectedPlayer:Emit("Friend (@Friend)");assert(s.SelectedPlayerId==123)
     c.ViewingPlayerInventory:Emit(true);api.Update(3);flush()
+    local before=#calls
+    assert(not c.Teleport and c.TeleportDestination.Title=="Spot"and c.RefreshDestinations.Title=="Refresh List")
     c.TeleportDestination:Emit("Boss · Arena (2)")
-    local before=#calls;c.Teleport.Callback();assert(#calls==before+1 and calls[#calls].Args[1]=="B","Selecting a destination never teleports until the button is pressed")
+    assert(#calls==before+1 and calls[#calls].Name=="TeleportToDestination"and calls[#calls].Args[1]=="B","Selecting a destination teleports exactly once")
     s.StopEverything=true;c.AtheonDodge:Emit(true)
     assert(c.AtheonDodge.Value==false,"Rejected toggles must return to their actual value")
     s.StopEverything=false
