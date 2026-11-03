@@ -171,12 +171,12 @@ return function(ctx)
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
     api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
-    dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
+    dropdown("SelectedSkill","Auto Skill","Skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
     end,function(name)if name and name~=s.SelectedSkill then invoke("SetSelectedSkill",name)end end)
     api.Controls.MiscSkillSection=api.Tabs["Auto Skill"]:Section({Title="Misc Skill",TextSize=17})
     stateToggle("MiscSkillEnabled","Auto Skill","Misc Skill","SetMiscSkillEnabled")
-    dropdown("SelectedMiscSkill","Auto Skill","Support skill",function()
+    dropdown("SelectedMiscSkill","Auto Skill","Skill",function()
         local options={};for _,item in ipairs(s.MiscSkillChoices or {})do if item.Usable then options[#options+1]=item.Name end end
         return {Options=options,Value=s.SelectedMiscSkill}
     end,function(name)if name and name~=s.SelectedMiscSkill then invoke("SetMiscSkill",name)end end)

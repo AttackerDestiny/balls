@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.direct-spot-teleport-v1.12.22"
-local VERSION="1.12.22"
+local BUILD="2026-11-03.skill-labels-v1.12.23"
+local VERSION="1.12.23"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -24837,12 +24837,12 @@ return function(ctx)
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
     api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
-    dropdown("SelectedSkill","Auto Skill","Offensive skill",function()
+    dropdown("SelectedSkill","Auto Skill","Skill",function()
         return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
     end,function(name)if name and name~=s.SelectedSkill then invoke("SetSelectedSkill",name)end end)
     api.Controls.MiscSkillSection=api.Tabs["Auto Skill"]:Section({Title="Misc Skill",TextSize=17})
     stateToggle("MiscSkillEnabled","Auto Skill","Misc Skill","SetMiscSkillEnabled")
-    dropdown("SelectedMiscSkill","Auto Skill","Support skill",function()
+    dropdown("SelectedMiscSkill","Auto Skill","Skill",function()
         local options={};for _,item in ipairs(s.MiscSkillChoices or {})do if item.Usable then options[#options+1]=item.Name end end
         return {Options=options,Value=s.SelectedMiscSkill}
     end,function(name)if name and name~=s.SelectedMiscSkill then invoke("SetMiscSkill",name)end end)
