@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.whitelist-editor-clear-v1.12.38"
-local VERSION="1.12.38"
+local BUILD="2026-11-03.global-boss-priority-v1.12.39"
+local VERSION="1.12.39"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2297,9 +2297,33 @@ local function validMob(mob, mobs)
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
         or mob~=state.ProgressionBossMob)then return nil end
     local data = getMobData(mob)
-    if state.MultiSpotAnchor and data and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
+    if state.MultiSpotAnchor and data and not (state.AutoFarm and targetPriority.Rank(mob)<=2) and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
     if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
     return nil
+end
+-- Share one paced, position-independent boss choice across movement and arena rotation.
+function state.GetFarmPriorityTarget(now)
+    if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
+    local mobs=refreshMobIndex()
+    if not mobs then return nil end
+    local cached=state.FarmPriorityTarget
+    if now<(state.FarmPriorityScanAt or 0)and cached and validMob(cached,mobs)then return cached end
+    if now<(state.FarmPriorityScanAt or 0)and not cached then return nil end
+    state.FarmPriorityScanAt=now+.15
+    local best
+    for mob in pairs(trackedMobs)do
+        if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
+            and (not best or targetPriority.FarmLess(mob,best))then best=mob end
+    end
+    -- A temporary invulnerability/streaming gap is not a kill and must not
+    -- downgrade an already observed main boss to a mini-boss or normal mob.
+    if cached and cached.Parent==mobs and targetPriority.Rank(cached)<=2 then
+        local data=getMobData(cached)
+        if (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)))
+            and (not best or targetPriority.Rank(cached)<targetPriority.Rank(best))then best=cached end
+    end
+    state.FarmPriorityTarget=best
+    return best
 end
 function state.IsAttackingEnemy()
     if not state.Running or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging
@@ -4166,7 +4190,7 @@ function state.FinishMultiSpotArrival()
     return true
 end
 function state.HoldMultiSpotIdle()
-    if not state.AutoFarm or not state.MultiSpot or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
+    if not state.AutoFarm or not state.MultiSpot or state.MultiSpotPriorityActive or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
         or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
     local spot=state.MultiSpotController and state.MultiSpotController.Current
     if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
@@ -4430,6 +4454,8 @@ local function updateMovement()
         nextAcquisition=now+0.15
         local locked=state.FarmTargetLock
         if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
+        local canonical=state.GetFarmPriorityTarget(now)
+        if canonical and (not locked or targetPriority.Rank(canonical)<=targetPriority.Rank(locked))then locked=canonical end
         if locked and locked.Parent==mobs then
             local data=getMobData(locked)
             -- Missing streamed data, invulnerability or a rejected offset is
@@ -4446,6 +4472,8 @@ local function updateMovement()
                 end
             end
             if promoted then locked=promoted;state.FarmTargetLock=promoted end
+            state.FarmTargetLock=locked
+            state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
             state.FollowTarget=locked
             targetRoot=validMob(locked,mobs)
             state.TargetPriority=targetPriority.Rank(locked)
@@ -4914,7 +4942,7 @@ local function updateSkillAura()
                 CanRun=function() return current() and os.clock()<lease.ExpiresAt end,
                 Send=function(mob,entry)
                     if not current() then return false end
-                    if state.MultiSpotEncounter then state.MultiSpotEncounter[mob]=true end
+                    if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
                     Combat.DealDamage(mob,name)
                     state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob
                     state.LastEnemyAttackKind="Skill";state.LastEnemyAttackSkill=name
@@ -5368,7 +5396,7 @@ normalScheduler.Bind({
                 Distance=attackDeltaFor(data,player.Character.HumanoidRootPart).Magnitude,
                 Contribution=contribution,Counter=counter,SkillRequests=state.SkillHitRequests}
         end
-        if state.MultiSpotEncounter then state.MultiSpotEncounter[mob]=true end
+        if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
         Combat.DealDamage(mob,nil)
         state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind="Normal"
     end,
@@ -6873,11 +6901,40 @@ return function(ctx)
     end
     function api.Reset()
         api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false
-        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;ctx.Release()
+        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;ctx.Release()
     end
     function api.Update(now)
         if not state.MultiSpot or not state.Running then return end
         if api.Phase=="Paused" then return end
+        local priority=ctx.PriorityTarget and ctx.PriorityTarget(now)
+        if priority then
+            if not api.PrioritySuspended then
+                if api.Current then
+                    local alive,seen=ctx.Encounter(api.Current)
+                    api.EncounterSeen=api.EncounterSeen or seen or alive>0
+                end
+                if ctx.Suspend then ctx.Suspend()end
+                api.PrioritySuspended=true;clearedSince=nil
+            end
+            ctx.Status("Priority enemy · "..priority.Name.." · selected arenas will resume")
+            return
+        end
+        if api.PrioritySuspended then
+            if not ctx.CanMove()then return end
+            api.PrioritySuspended=false
+            if ctx.Resume then ctx.Resume()end
+            local selected=choices()
+            local resume
+            for _,spot in ipairs(selected)do if api.Current and spot.Id==api.Current.Id then resume=spot;break end end
+            if resume then
+                api.Phase="Moving";api.MoveDeadline=now+15
+                local ok,message=ctx.Go(resume,true)
+                if not ok then travelFailed(now,message or "Arena is unavailable");return end
+                ctx.Status("Returning to selected arena · "..resume.Name)
+                return
+            end
+            api.Phase="Idle";api.Current=nil
+        end
         if api.Phase=="Retrying travel" then
             if now<retryAt then return end
             api.Phase="Idle";api.Current=nil
@@ -7676,6 +7733,18 @@ end
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
+        PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
+        Suspend=function()
+            state.MultiSpotPriorityActive=true
+            if state.MultiSpotOwnsTravel and state.TravelBusy then
+                state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
+            end
+            state.MultiSpotOwnsTravel=false;state.MultiSpotTravelPending=false
+            state.MultiSpotLandingPosition=nil;state.MultiSpotEmptySince=nil
+            state.TravelHold=false;state.TravelHoldPosition=nil
+            if state.ArenaFloat then state.ArenaFloat.Release()end
+        end,
+        Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
@@ -7697,10 +7766,10 @@ end
             if arrived and state.FinishMultiSpotArrival then state.FinishMultiSpotArrival() end
             return arrived
         end,
-        Go=function(spot)
+        Go=function(spot,resume)
             if state.TravelBusy then return false end
             state.RegisterAutomationDestination(spot)
-            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
+            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter=resume and state.MultiSpotEncounter or {};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
             state.MultiSpotOwnsTravel=true
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
@@ -7709,6 +7778,7 @@ end
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release() end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
+            state.MultiSpotPriorityActive=false
             state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false
             state.MultiSpotLandingPosition=nil

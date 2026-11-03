@@ -26,12 +26,12 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     local dead=mob("A dead boss",-1000,"Boss",0)
     local function account(list)
         local tracked={};for _,m in ipairs(list)do tracked[m]=true end
-        local state={FarmRange=math.huge,TargetScans=0}
+        local state={AutoFarm=true,FarmRange=math.huge,TargetScans=0}
         local api=load(prioritySource)()
         local source=dataSource.."\n"..validSource.."\nreturn {GetData=getMobData,Select=function(origin,previous,now)\n"
             .."local root={Position=origin}\nlocal mobs=folder\nlocal targetRoot=previous and validMob(previous,mobs)\n"
             .."local nextAcquisition=0\nstate.FollowTarget=previous\n"..selectionSource.."\nreturn state.FollowTarget\nend}"
-        local result=load(source,{state=state,targetPriority=api,folder=folder,trackedMobs=tracked,
+        local result=load(source,{state=state,targetPriority=api,folder=folder,trackedMobs=tracked,refreshMobIndex=function()return folder end,
             mobCache=setmetatable({}, {__mode="k"}),os={clock=function()return 0 end}})
         result.State=state;result.Priority=api
         function result.Add(mob)tracked[mob]=true end
@@ -66,7 +66,7 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     local stable=account({mini})
     assert(stable.Select(vec(0),nil,0)==mini)
     stable.Add(equal)
-    assert(stable.Select(vec(0),mini,1)==mini,"Same-rank arrivals do not interrupt the current enemy")
+    assert(stable.Select(vec(0),mini,1)==mini,"The canonical same-rank enemy stays selected")
     mini.Children.HumanoidRootPart.Position=vec(5000)
     assert(stable.Select(vec(0),mini,2)==mini,"Movement cannot reorder a locked same-rank fight")
     local force=account({regular})
@@ -94,6 +94,26 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     assert(force.State.TargetPriority==2)
     mini.Children.Entity.Children.Health.Value=0
     assert(force.Select(vec(0),mini,4)==nil,"No target remains after every eligible mob dies")
+    local mainA=mob("A global main",20000,"MainBoss")
+    local mainB=mob("Z global main",-20000,"MainBoss")
+    local globalMini=mob("Global mini",30000,"MiniBoss")
+    local localAdd=mob("Local add",0)
+    local synchronized={}
+    for i=1,3 do
+        local a=account({globalMini,mainB,localAdd,mainA})
+        a.State.MultiSpot=true;a.State.MultiSpotAnchor=vec(i*1000);a.State.MultiSpotEncounter={}
+        a.State.FarmLockArena=a.State.MultiSpotAnchor
+        a.State.FarmTargetLock=i==1 and mainB or globalMini
+        assert(a.Select(vec(i*10000),a.State.FarmTargetLock,0)==mainA,"Different arena anchors and prior locks must converge on the same global main boss")
+        synchronized[i]=a
+    end
+    mainA.Children.Entity.Children.Health.Value=0
+    for _,a in ipairs(synchronized)do assert(a.Select(vec(0),mainA,1)==mainB)end
+    mainB.Children.Entity.Children.Health.Value=0
+    for _,a in ipairs(synchronized)do assert(a.Select(vec(0),mainB,2)==globalMini,"After main bosses, all accounts choose the same out-of-arena mini-boss")end
+    globalMini.Children.Entity.Children.Health.Value=0
+    for _,a in ipairs(synchronized)do assert(a.Select(vec(0),globalMini,3)==nil,"Regular mobs outside the selected arena remain excluded")end
+    print("PASS Global boss override: main=1, mini=2, cross-arena priority, different account locks converge, all priority kills and regular arena scope")
     print("PASS Shared farm targets: three account origins, previous targets, iteration order, boss/name/position ordering, death, late HitLives, invulnerability and trade priority")
     print("PASS Forced farm priority: main=1, mini=2, regular=3, mid-fight replacement, native metadata updates and mixed rank markers")
 end

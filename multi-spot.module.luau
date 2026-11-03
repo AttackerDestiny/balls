@@ -26,11 +26,40 @@ return function(ctx)
     end
     function api.Reset()
         api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false
-        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;ctx.Release()
+        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;ctx.Release()
     end
     function api.Update(now)
         if not state.MultiSpot or not state.Running then return end
         if api.Phase=="Paused" then return end
+        local priority=ctx.PriorityTarget and ctx.PriorityTarget(now)
+        if priority then
+            if not api.PrioritySuspended then
+                if api.Current then
+                    local alive,seen=ctx.Encounter(api.Current)
+                    api.EncounterSeen=api.EncounterSeen or seen or alive>0
+                end
+                if ctx.Suspend then ctx.Suspend()end
+                api.PrioritySuspended=true;clearedSince=nil
+            end
+            ctx.Status("Priority enemy · "..priority.Name.." · selected arenas will resume")
+            return
+        end
+        if api.PrioritySuspended then
+            if not ctx.CanMove()then return end
+            api.PrioritySuspended=false
+            if ctx.Resume then ctx.Resume()end
+            local selected=choices()
+            local resume
+            for _,spot in ipairs(selected)do if api.Current and spot.Id==api.Current.Id then resume=spot;break end end
+            if resume then
+                api.Phase="Moving";api.MoveDeadline=now+15
+                local ok,message=ctx.Go(resume,true)
+                if not ok then travelFailed(now,message or "Arena is unavailable");return end
+                ctx.Status("Returning to selected arena · "..resume.Name)
+                return
+            end
+            api.Phase="Idle";api.Current=nil
+        end
         if api.Phase=="Retrying travel" then
             if now<retryAt then return end
             api.Phase="Idle";api.Current=nil

@@ -357,6 +357,18 @@ end
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
     local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
+        PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
+        Suspend=function()
+            state.MultiSpotPriorityActive=true
+            if state.MultiSpotOwnsTravel and state.TravelBusy then
+                state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
+            end
+            state.MultiSpotOwnsTravel=false;state.MultiSpotTravelPending=false
+            state.MultiSpotLandingPosition=nil;state.MultiSpotEmptySince=nil
+            state.TravelHold=false;state.TravelHoldPosition=nil
+            if state.ArenaFloat then state.ArenaFloat.Release()end
+        end,
+        Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
@@ -378,10 +390,10 @@ end
             if arrived and state.FinishMultiSpotArrival then state.FinishMultiSpotArrival() end
             return arrived
         end,
-        Go=function(spot)
+        Go=function(spot,resume)
             if state.TravelBusy then return false end
             state.RegisterAutomationDestination(spot)
-            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter={};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
+            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter=resume and state.MultiSpotEncounter or {};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
             state.MultiSpotOwnsTravel=true
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
@@ -390,6 +402,7 @@ end
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release() end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
+            state.MultiSpotPriorityActive=false
             state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false
             state.MultiSpotLandingPosition=nil

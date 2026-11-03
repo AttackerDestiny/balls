@@ -104,11 +104,29 @@ local function multiFixture()
     local f={State=s,Spots={a,b},Floor=11,Allowed=true,Moving=false,Arrived=true,Goes={},Changes={},Alive=2,Seen=true}
     f.Api=multiFactory({State=s,Spots=function()return f.Spots end,CanMove=function()return f.Allowed end,
         CurrentFloor=function()return f.Floor end,Moving=function()return f.Moving end,Arrived=function()return f.Arrived end,
-        Go=function(spot)f.Goes[#f.Goes+1]=spot.Id;return true end,ChangeFloor=function(id)f.Changes[#f.Changes+1]=id end,
+        Go=function(spot,resume)f.Goes[#f.Goes+1]=spot.Id;f.Resuming=resume;return true end,ChangeFloor=function(id)f.Changes[#f.Changes+1]=id end,
         Encounter=function()return f.Alive,f.Seen end,ClearEncounter=function()f.Seen=false end,
+        PriorityTarget=function()return f.Priority end,
+        Suspend=function()f.Suspends=(f.Suspends or 0)+1;f.Moving=false end,
+        Resume=function()f.Resumes=(f.Resumes or 0)+1 end,
         Release=function()end,Status=function(t)f.Status=t end,Save=function()end})
     return f
 end
+test("Global priority interrupts an arena trip and returns to the same unfinished arena",function()
+    local f=multiFixture();f.Api.Update(0);assert(f.Goes[1]=="a")
+    f.Moving=true;f.Priority={Name="Main boss"};f.Api.Update(.1)
+    assert(f.Suspends==1 and f.Api.PrioritySuspended and not f.Moving)
+    f.Priority={Name="Mini boss"};f.Api.Update(.2)
+    assert(f.Suspends==1 and #f.Goes==1,"Do not resume while another priority enemy remains")
+    f.Priority=nil;f.Allowed=false;f.Api.Update(.3)
+    assert(#f.Goes==1,"Protection/movement pauses must prevent the return trip")
+    f.Allowed=true;f.Api.Update(.4)
+    assert(f.Goes[2]=="a"and f.Resuming and f.Resumes==1 and f.Api.EncounterSeen)
+    f.Alive=3;f.Api.Update(.5);assert(f.Api.Remaining==3 and #f.Goes==2)
+    f.Alive=0;f.Api.Update(1);f.Api.Update(1.7)
+    assert(f.Goes[3]=="b","Resume all-mob clearing before rotating to the next spot")
+end)
+
 test("multi spot waits for every boss to clear then rotates on this floor",function()
     local f=multiFixture();f.Api.Update(0);assert(f.Goes[1]=="a")
     f.Api.Update(1);f.Api.Update(20);f.Alive=1;f.Api.Update(100);assert(#f.Goes==1 and #f.Changes==0)
