@@ -108,6 +108,7 @@ return function(ctx)
         local initial=true
         local function render()
             if disposed or not root.Parent or not state.Running or rows[mob]~=row then return end
+            row.Dirty=false
             local hp=math.max(0,row.Health.Value)
             row.ObservedMax=math.max(row.ObservedMax,hp)
             local maxHP=math.max(1,constrained and row.Health.MaxValue or maximum and maximum.Value or row.ObservedMax)
@@ -123,9 +124,11 @@ return function(ctx)
             if mob==primary or api.Count<=1 then state.ObservedHealth,state.ObservedMaxHealth=hp,maxHP end
             state.HealthUpdates=(state.HealthUpdates or 0)+1
         end
-        row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(render)
-        if constrained then row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("MaxValue"):Connect(render)
-        elseif maximum and maximum:IsA("ValueBase") then row.Connections[#row.Connections+1]=maximum.Changed:Connect(render) end
+        row.Render=render
+        local function dirty()row.Dirty=true end
+        row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(dirty)
+        if constrained then row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("MaxValue"):Connect(dirty)
+        elseif maximum and maximum:IsA("ValueBase") then row.Connections[#row.Connections+1]=maximum.Changed:Connect(dirty) end
         render(); layout()
     end
     function api.Focus(mob) primary=mob end
@@ -138,6 +141,7 @@ return function(ctx)
         if refreshRanks then nextRankCheck=time+.5 end
         for mob,row in pairs(rows) do
             local present=mob.Parent and row.Health.Parent and (not ctx.Present or ctx.Present(mob))
+            if present and row.Dirty then row.Render()end
             if row.DeadAt then if time-row.DeadAt>.45 then remove(mob) end
             elseif not present or (time-row.LastAttack>1.4 and not (mob==primary and (state.SkillPreparing or state.SkillCastRunning))) then remove(mob) end
             if rows[mob] and refreshRanks and ctx.Priority then

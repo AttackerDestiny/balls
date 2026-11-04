@@ -100,10 +100,22 @@ return function(sources)
         local b=f.Factory(f.Ctx);b.Touch(mob)
         assert(a.Count==0 and b.Count==1 and a.Root.Parent==nil)
         a.Touch(mob);a.Update();assert(a.Count==0)
-        local before=f.State.HealthUpdates;h.Value=80
+        local before=f.State.HealthUpdates;h.Value=80;b.Update()
         assert(f.State.HealthUpdates-before==1,"Only the current controller responds")
         local count=0;for _,c in ipairs(f.Parent:GetChildren())do if c.Name=="EnemyHealth"then count+=1 end end
         assert(count==1);b.Root:Destroy();assert(b.Count==0)
+    end)
+    test("health bursts coalesce into one bounded HUD update",function()
+        local f=hudFixture();local mob,h=f.Mob("Boss",10000)
+        local api=f.Factory(f.Ctx);api.Touch(mob)
+        local before=f.State.HealthUpdates
+        for hp=9999,9500,-1 do h.Value=hp end
+        assert(f.State.HealthUpdates==before,"Health signals must not allocate a tween for every player hit")
+        api.Update();assert(f.State.HealthUpdates==before+1 and f.State.ObservedHealth==9500)
+        for hp=9499,9000,-1 do h.Value=hp end
+        api.Update();assert(f.State.HealthUpdates==before+1,"Repeated calls in one refresh interval must coalesce")
+        f.Time=.13;api.Update();assert(f.State.HealthUpdates==before+2 and f.State.ObservedHealth==9000)
+        api.Destroy()
     end)
     local function travelFixture()
         local f={Time=0,Probes=0,Streams=0,Active=true,Character={},Root={Parent=true,Position=vec(0,5,0),Size=vec(2,2,1)},Humanoid={Health=100,HipHeight=2}}

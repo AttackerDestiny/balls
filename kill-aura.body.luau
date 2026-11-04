@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.credit-roster-diagnostics-v1.12.46"
-local VERSION="1.12.46"
+local BUILD="2026-11-04.cloudphone-load-v1.12.48"
+local VERSION="1.12.48"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -940,6 +940,14 @@ return function(ctx)
     local state=ctx.State
     local function status(text)state.CreditCheckStatus=text end
     function api.Reset()table.clear(pending)end
+    function api.Observe(mob,data)
+        local flight=pending[mob]
+        local own=ctx.Damage(data,ctx.Self())
+        if flight and own and own>flight.Before then
+            if ctx.Planner and flight.Key then ctx.Planner.Learn(flight.Key,own-flight.Before)end
+            pending[mob]=nil
+        end
+    end
     function api.Allow(mob,data)
         if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
         local maximum=ctx.MaxHealth(data)
@@ -948,6 +956,7 @@ return function(ctx)
         end
         local required=maximum*.05
         local members=ctx.Members()
+        api.Observe(mob,data)
         local own=ctx.Damage(data,ctx.Self())or 0
         local waiting,total,missing,noCounter,below=0,0,{},{},{}
         for _,person in ipairs(members)do
@@ -983,12 +992,45 @@ return function(ctx)
         status("Credit Check · "..math.floor(own).." / "..math.ceil(required).." · "..detail)
         return true
     end
-    function api.Sent(mob,data)
+    function api.AllowAction(mob,data,kind)
+        api.ActionReason=nil
+        if not api.Allow(mob,data)then
+            local maximum=ctx.MaxHealth(data)
+            api.ActionReason=type(maximum)=="number"and (ctx.Damage(data,ctx.Self())or 0)>=maximum*.05 and "Qualified"or "Waiting"
+            return false
+        end
+        if not state.CreditCheck or ctx.Rank(mob)>2 or not ctx.Planner or not ctx.Options then return true end
+        local own=ctx.Damage(data,ctx.Self())
+        if own==nil and kind=="Normal"then return true end -- Native skill registration.
+        local remaining=ctx.MaxHealth(data)*.05-(own or 0)
+        if remaining<=0 then return true end -- Everyone qualifies; unrestricted damage.
+        local options=ctx.Options(mob,data,kind)
+        local normal=ctx.Planner.Estimate(options.NormalKey)
+        local skill=ctx.Planner.Estimate(options.CastKey or options.SkillKey)
+        if normal<=0 then normal=options.NormalEstimate or 0 end
+        if skill<=0 then skill=options.SkillEstimate or 0 end
+        -- During a running skill, allow its individual hits until one normal
+        -- hit is enough. Activation planning uses the observed whole-cast total.
+        if kind=="Skill"and options.ActiveSkill then
+            if options.CanNormal and normal>0 and remaining<=normal then api.ActionReason="Normal";return false end
+            api.ActionReason="Skill";return true
+        end
+        local chosen,plan=ctx.Planner.Choose(remaining,normal,skill,options.CanNormal,options.CanSkill)
+        state.CreditDamagePlan=plan
+        if chosen then
+            status(plan.Calibrating and ("Credit Check · learning "..chosen.." damage")
+                or ("Credit Check · remaining "..math.ceil(remaining).." · plan "..plan.Skill.." skill hit(s) + "..plan.Normal.." normal hit(s)"))
+        end
+        api.ActionReason=chosen
+        return chosen==(kind=="SkillStart"and "Skill"or kind)
+    end
+    function api.Sent(mob,data,kind)
         if not state.CreditCheck or ctx.Rank(mob)>2 then return end
         local maximum=ctx.MaxHealth(data)
         local own=ctx.Damage(data,ctx.Self())or 0
         if type(maximum)=="number"and maximum>0 and own<maximum*.05 then
-            pending[mob]={Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
+            local options=ctx.Options and ctx.Options(mob,data,kind or "Normal")
+            pending[mob]={Key=options and ((kind=="Skill")and options.SkillKey or options.NormalKey),Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
         end
     end
     return api
@@ -1025,7 +1067,70 @@ end
         members=makeRoster(player,Players:GetPlayers(),text)
         return members
     end
-    state.CreditController=make({State=state,Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,
+    local makePlan=(function()
+-- BEGIN BUNDLED CREDIT DAMAGE PLAN
+-- Choose a small-hit combination from confirmed, weapon-specific damage estimates.
+return function()
+    local api={}
+    local samples,keys={},{}
+    function api.Learn(key,amount)
+        if type(key)~="string"or type(amount)~="number"or amount<=0 or amount~=amount or amount==math.huge then return end
+        if not samples[key]then
+            if #keys>=128 then samples[table.remove(keys,1)]=nil end
+            keys[#keys+1]=key
+        end
+        -- Use the lower observed damage so a critical hit cannot under-budget credit.
+        samples[key]=samples[key]and math.min(samples[key],amount)or amount
+    end
+    function api.Estimate(key)return samples[key]or 0 end
+    function api.Choose(remaining,normal,skill,canNormal,canSkill)
+        if remaining<=0 then return nil end
+        normal,skill=normal or 0,skill or 0
+        if canNormal and normal<=0 then return "Normal",{Calibrating=true}end
+        if canSkill and skill<=0 then return "Skill",{Calibrating=true}end
+        if not canNormal and not canSkill then return nil end
+        local best
+        local function consider(n,s)
+            local amount=n*normal+s*skill
+            if amount<remaining then return end
+            local option={Normal=n,Skill=s,Damage=amount,Excess=amount-remaining,Actions=n+s}
+            if not best or option.Excess<best.Excess or (option.Excess==best.Excess and option.Actions<best.Actions)
+                or (option.Excess==best.Excess and option.Actions==best.Actions and s<best.Skill)then best=option end
+        end
+        if canNormal and normal>0 then consider(math.ceil(remaining/normal),0)end
+        if canSkill and skill>0 then
+            local count=math.ceil(remaining/skill)
+            consider(0,count)
+            if canNormal and normal>0 then
+                for s=1,math.min(64,count)do consider(math.max(0,math.ceil((remaining-s*skill)/normal)),s)end
+            end
+        end
+        if not best then return nil end
+        return best.Skill>0 and "Skill"or "Normal",best
+    end
+    return api
+end
+
+-- END BUNDLED CREDIT DAMAGE PLAN
+    end)()
+    state.CreditDamagePlanner=makePlan()
+    state.CreditController=make({Planner=state.CreditDamagePlanner,Options=function(mob,data,kind)
+        local weapons=state.WeaponSkills
+        local version=weapons and weapons.Version or 0
+        local key=tostring(version)..":"..mob.Name
+        local skillKey=tostring(state.SelectedSkill)..":"..version
+        local estimate=state.SkillDamageBudget and state.SkillDamageBudget.Estimate(skillKey..":"..mob.Name)or 0
+        local ready=state.SkillAura and weapons and weapons.Ready and weapons.IsCompatible(state.SelectedSkill)
+        if ready and kind~="Skill"then
+            ready=Skills.usingSkill=="none"and Skills.GetCooldown(state.SelectedSkill)>=0
+            local definition=ReplicatedStorage.Database.Skills:FindFirstChild(state.SelectedSkill)
+            ready=ready and definition and Skills.HasStamina(definition.Cost.Value)and state.SkillActivation and state.SkillActivation.CanHandle(state.SelectedSkill)
+        end
+        return {NormalKey="Normal:"..key,SkillKey="Skill:"..state.SelectedSkill..":"..key,
+            CastKey="Cast:"..state.SelectedSkill..":"..key,ActiveSkill=kind=="Skill"and state.SkillCastRunning,
+            NormalEstimate=data.NormalDamagePerHit,SkillEstimate=estimate,
+            CanNormal=state.Enabled==true,CanSkill=ready==true}
+    end,State=state,Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,
         Members=roster,MaxHealth=function(data)
             local health=data.Health
             if health:IsA("DoubleConstrainedValue")or health:IsA("IntConstrainedValue")then return health.MaxValue end
@@ -1431,6 +1536,7 @@ return function(ctx)
         local initial=true
         local function render()
             if disposed or not root.Parent or not state.Running or rows[mob]~=row then return end
+            row.Dirty=false
             local hp=math.max(0,row.Health.Value)
             row.ObservedMax=math.max(row.ObservedMax,hp)
             local maxHP=math.max(1,constrained and row.Health.MaxValue or maximum and maximum.Value or row.ObservedMax)
@@ -1446,9 +1552,11 @@ return function(ctx)
             if mob==primary or api.Count<=1 then state.ObservedHealth,state.ObservedMaxHealth=hp,maxHP end
             state.HealthUpdates=(state.HealthUpdates or 0)+1
         end
-        row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(render)
-        if constrained then row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("MaxValue"):Connect(render)
-        elseif maximum and maximum:IsA("ValueBase") then row.Connections[#row.Connections+1]=maximum.Changed:Connect(render) end
+        row.Render=render
+        local function dirty()row.Dirty=true end
+        row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(dirty)
+        if constrained then row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("MaxValue"):Connect(dirty)
+        elseif maximum and maximum:IsA("ValueBase") then row.Connections[#row.Connections+1]=maximum.Changed:Connect(dirty) end
         render(); layout()
     end
     function api.Focus(mob) primary=mob end
@@ -1461,6 +1569,7 @@ return function(ctx)
         if refreshRanks then nextRankCheck=time+.5 end
         for mob,row in pairs(rows) do
             local present=mob.Parent and row.Health.Parent and (not ctx.Present or ctx.Present(mob))
+            if present and row.Dirty then row.Render()end
             if row.DeadAt then if time-row.DeadAt>.45 then remove(mob) end
             elseif not present or (time-row.LastAttack>1.4 and not (mob==primary and (state.SkillPreparing or state.SkillCastRunning))) then remove(mob) end
             if rows[mob] and refreshRanks and ctx.Priority then
@@ -3763,6 +3872,7 @@ return function(ctx)
     local managed,tracks={},{}
     local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
     local maintenanceHead,maintenanceTail=1,0
+    local maintenanceNext,maintenanceNextTail={},0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
@@ -4020,12 +4130,16 @@ return function(ctx)
                     end
                 end)
                 if managed[instance]then
-                    maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+                    maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=instance;maintenanceQueued[instance]=true
                 end
             end
             count+=1
         end
-        if maintenanceHead>maintenanceTail then table.clear(maintenance);maintenanceHead,maintenanceTail=1,0 end
+        if maintenanceHead>maintenanceTail then
+            table.clear(maintenance)
+            maintenance,maintenanceNext=maintenanceNext,maintenance
+            maintenanceHead,maintenanceTail=1,maintenanceNextTail;maintenanceNextTail=0
+        end
         return count
     end
     function api.Update()
@@ -4062,7 +4176,7 @@ return function(ctx)
         for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
-        table.clear(maintenance);table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
+        table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
         table.clear(urgent); table.clear(background); table.clear(queued)
         table.clear(gunModels)
         urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
@@ -5217,7 +5331,7 @@ local function updateSkillAura()
         local mobRoot=validMob(mob,mobs)
         if not mobRoot then return end
         local data=getMobData(mob)
-        if state.CreditController and not state.CreditController.Allow(mob,data)then return end
+        if state.CreditController and not state.CreditController.AllowAction(mob,data,"SkillStart")then return end
         local reach=state.AutoRanges.Range("Skill",data,name)
         if attackDeltaFor(data,root).Magnitude<=reach and (not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)) then target,targetRoot=mob,mobRoot end
     end
@@ -5253,7 +5367,7 @@ local function updateSkillAura()
         if orientationAlign then orientationAlign.CFrame=root.CFrame.Rotation end
     end
     local function current()
-        return not cast.Cancelled and state.ActiveSkillCast==cast and state.Running and not state.StopEverything
+        return not cast.Cancelled and not cast.CreditFinished and state.ActiveSkillCast==cast and state.Running and not state.StopEverything
             and state.SkillAura and weapons.Version==cast.Version and weapons.Ready and state.SelectedSkill==name
             and player.Character==character and root.Parent~=nil and health.Value>0
             and not state.TravelBusy and not state.Dodging and os.clock()>=state.LagPauseUntil
@@ -5265,12 +5379,18 @@ local function updateSkillAura()
         local function observe()
             if not cast.Multi or burst.ObservationFinished then return end
             cast.Multi.Finish()
+            if state.CreditController then for _,item in ipairs(burst.Targets)do
+                local entry=getMobData(item.Target);if entry then state.CreditController.Observe(item.Target,entry)end
+            end end
             state.SkillActivation.Result(name,burst.Damage,burst.TotalRequests)
             if not cast.Cancelled then for _,item in ipairs(burst.Targets) do
                 local entry=getMobData(item.Target)
                 local settled=not burst.ObservationReadyAt or os.clock()>=burst.ObservationReadyAt
                 if entry and state.ReadOwnDamage(item.Health,item.Counter)~=nil and (item.Damage>0 or (settled and entry.Health.Value>0)) then
                     if item.Damage>0 and item.Requested>0 then
+                        if state.CreditDamagePlanner and not cast.CreditFinished then
+                            state.CreditDamagePlanner.Learn("Cast:"..name..":"..cast.Version..":"..item.TargetName,item.Damage)
+                        end
                         local key=name..":"..cast.Version
                         state.SkillDamageBudget.Learn(key..":"..item.TargetName,item.Damage,item.Requested,item.MinimumHealthDrop)
                         state.SkillDamageBudget.Learn(key,item.Damage,item.Requested,item.MinimumHealthDrop)
@@ -5316,9 +5436,14 @@ local function updateSkillAura()
                 CanRun=function() return current() and os.clock()<lease.ExpiresAt end,
                 Send=function(mob,entry)
                     if not current() then return false end
-                    if state.CreditController and not state.CreditController.Allow(mob,entry)then return false end
+                    if state.CreditController and not state.CreditController.AllowAction(mob,entry,"Skill")then
+                        -- End this scripted skill window when a small normal hit
+                        -- is preferred, or credit is reached; leave native damage alone.
+                        if mob==target and (state.CreditController.ActionReason=="Normal"or state.CreditController.ActionReason=="Qualified")then cast.CreditFinished=true end
+                        return false
+                    end
                     if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
-                    if state.CreditController then state.CreditController.Sent(mob,entry)end
+                    if state.CreditController then state.CreditController.Sent(mob,entry,"Skill")end
                     Combat.DealDamage(mob,name)
                     state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob
                     state.LastEnemyAttackKind="Skill";state.LastEnemyAttackSkill=name
@@ -5340,7 +5465,7 @@ local function updateSkillAura()
             if not cast.Multi then startDamage(lease) end
             if cast.Multi and cast.Multi.Started then
                 while current() and not burst.FinishedAt and os.clock()<cast.Multi.Deadline do task.wait(.03) end
-                if not current() and not burst.FinishedAt then cast.Multi.Cancel("Equipment or game state changed") end
+                if not current() and not burst.FinishedAt then cast.Multi.Cancel(cast.CreditFinished and "Credit plan · ending skill hits"or "Equipment or game state changed") end
             end
             if lease.HoldWindow then
                 while current() and os.clock()<lease.ExpiresAt do task.wait(.03) end
@@ -5765,7 +5890,7 @@ normalScheduler.Bind({
     Delta=attackDeltaFor,
     Damage=function(mob)
         local creditData=getMobData(mob)
-        if state.CreditController and not state.CreditController.Allow(mob,creditData)then return false end
+        if state.CreditController and not state.CreditController.AllowAction(mob,creditData,"Normal")then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation() end
         if not pendingDamage[mob] then
             local data=getMobData(mob)
@@ -5775,7 +5900,7 @@ normalScheduler.Bind({
                 Contribution=contribution,Counter=counter,SkillRequests=state.SkillHitRequests}
         end
         if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
-        if state.CreditController then state.CreditController.Sent(mob,creditData)end
+        if state.CreditController then state.CreditController.Sent(mob,creditData,"Normal")end
         Combat.DealDamage(mob,nil)
         state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind="Normal"
     end,
@@ -9056,19 +9181,27 @@ return function(ctx)
     end
 
     local function invalidate()if not disposed then gear.Invalidate()end end
+    local gearValueConnections={}
+    local function watchGearValue(value)
+        if not gearValueConnections[value]then gearValueConnections[value]=value.Changed:Connect(invalidate)end
+    end
+    local function forgetGearValue(value)
+        local connection=gearValueConnections[value]
+        if connection then connection:Disconnect();gearValueConnections[value]=nil end
+    end
     ctx.Bind(inventory.DescendantAdded,function(child)
         invalidate()
-        if child.Name=="Upgrade" and child:IsA("ValueBase")then ctx.Bind(child.Changed,invalidate)end
+        if child.Name=="Upgrade" and child:IsA("ValueBase")then watchGearValue(child)end
     end)
-    ctx.Bind(inventory.DescendantRemoving,invalidate)
+    ctx.Bind(inventory.DescendantRemoving,function(child)forgetGearValue(child);invalidate()end)
     for _,upgrade in ipairs(inventory:QueryDescendants("#Upgrade"))do
-        if upgrade:IsA("ValueBase")then ctx.Bind(upgrade.Changed,invalidate)end
+        if upgrade:IsA("ValueBase")then watchGearValue(upgrade)end
     end
     ctx.Bind(equip.DescendantAdded,function(slot)
-        invalidate();if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end
+        invalidate();if slot:IsA("ValueBase")then watchGearValue(slot)end
     end)
-    ctx.Bind(equip.DescendantRemoving,invalidate)
-    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end end
+    ctx.Bind(equip.DescendantRemoving,function(slot)forgetGearValue(slot);invalidate()end)
+    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then watchGearValue(slot)end end
     ctx.Bind(profile.Stats.Exp.Changed,invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDamage"),invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDefense"),invalidate)
@@ -9251,6 +9384,7 @@ return function(ctx)
     ctx.Bind(ui.ProgressionToggle.Activated,function()state.SetAccountProgression(not state.AccountProgression)end)
     function state.ProgressionDestroy()
         disposed=true
+        for value in pairs(gearValueConnections)do forgetGearValue(value)end
         if gearThread then pcall(task.cancel,gearThread);gearThread=nil end
         state.ProgressionEquipping=false;controller.Destroy()
     end

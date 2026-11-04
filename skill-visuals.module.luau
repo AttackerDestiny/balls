@@ -6,6 +6,7 @@ return function(ctx)
     local managed,tracks={},{}
     local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
     local maintenanceHead,maintenanceTail=1,0
+    local maintenanceNext,maintenanceNextTail={},0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
@@ -263,12 +264,16 @@ return function(ctx)
                     end
                 end)
                 if managed[instance]then
-                    maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
+                    maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=instance;maintenanceQueued[instance]=true
                 end
             end
             count+=1
         end
-        if maintenanceHead>maintenanceTail then table.clear(maintenance);maintenanceHead,maintenanceTail=1,0 end
+        if maintenanceHead>maintenanceTail then
+            table.clear(maintenance)
+            maintenance,maintenanceNext=maintenanceNext,maintenance
+            maintenanceHead,maintenanceTail=1,maintenanceNextTail;maintenanceNextTail=0
+        end
         return count
     end
     function api.Update()
@@ -305,7 +310,7 @@ return function(ctx)
         for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
-        table.clear(maintenance);table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
+        table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
         table.clear(urgent); table.clear(background); table.clear(queued)
         table.clear(gunModels)
         urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0

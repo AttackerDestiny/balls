@@ -1,5 +1,5 @@
 return function(source)
-    local e={api={},ctx={},managed={},maintenance={},maintenanceQueued={},maintenanceHead=1,maintenanceTail=1000}
+    local e={api={},ctx={},managed={},maintenance={},maintenanceQueued={},maintenanceHead=1,maintenanceTail=1000,maintenanceNext={},maintenanceNextTail=0}
     e.keep=function(obj)return obj.Protected end
     e.restore=function(obj,record)obj.Restored=true end
     e.write=function(obj,k,v)obj[k]=v end
@@ -18,6 +18,8 @@ return function(source)
     first.Parent=nil
     for i=1,16 do e.api.ProcessManaged()end
     assert(not e.managed[first],"Detached instances retire without a full-table sweep")
+    for i=1,20000 do e.api.ProcessManaged()end
+    assert(e.maintenanceTail<=1000 and e.maintenanceHead<=1001 and e.maintenanceNextTail<=1000,"Continuous effects must reuse bounded queue indexes over long runs")
     e.os.clock=function()now+=.001;return now end
     assert(e.api.ProcessManaged()==1,"Slow devices obey the time budget and still make progress")
     print("PASS Visual maintenance: 1000 effects, bounded batches, fair progress, protection, removal, elapsed-time limit")

@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("CREDIT DAMAGE PLAN", "credit-damage-plan.module.luau"),
         ("CREDIT ROSTER", "credit-roster.module.luau"),
         ("CREDIT CHECK", "credit-check.module.luau"),
         ("FARM COORDINATION", "farm-coordination.module.luau"),
@@ -147,6 +148,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("credit-roster.test.luau")) + "))()(" + quote(read("credit-roster.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("credit-damage-plan.test.luau")) + "))()(" + quote(read("credit-damage-plan.module.luau")) + "," + quote(read("credit-check.module.luau")) + ")\n"
     credit_send_start=script.index("                Send=function(mob,entry)")+len("                Send=")
     credit_send=script[credit_send_start:script.index("\n                end,",credit_send_start)]+"\nend"
     fixture += "assert(loadstring(" + quote(read("credit-check.test.luau")) + "))()(" + quote(read("credit-check.module.luau")) + "," + quote(read("attack-scheduler.module.luau")) + "," + quote(credit_send) + ")\n"

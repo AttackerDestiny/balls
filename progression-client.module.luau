@@ -108,19 +108,27 @@ return function(ctx)
     end
 
     local function invalidate()if not disposed then gear.Invalidate()end end
+    local gearValueConnections={}
+    local function watchGearValue(value)
+        if not gearValueConnections[value]then gearValueConnections[value]=value.Changed:Connect(invalidate)end
+    end
+    local function forgetGearValue(value)
+        local connection=gearValueConnections[value]
+        if connection then connection:Disconnect();gearValueConnections[value]=nil end
+    end
     ctx.Bind(inventory.DescendantAdded,function(child)
         invalidate()
-        if child.Name=="Upgrade" and child:IsA("ValueBase")then ctx.Bind(child.Changed,invalidate)end
+        if child.Name=="Upgrade" and child:IsA("ValueBase")then watchGearValue(child)end
     end)
-    ctx.Bind(inventory.DescendantRemoving,invalidate)
+    ctx.Bind(inventory.DescendantRemoving,function(child)forgetGearValue(child);invalidate()end)
     for _,upgrade in ipairs(inventory:QueryDescendants("#Upgrade"))do
-        if upgrade:IsA("ValueBase")then ctx.Bind(upgrade.Changed,invalidate)end
+        if upgrade:IsA("ValueBase")then watchGearValue(upgrade)end
     end
     ctx.Bind(equip.DescendantAdded,function(slot)
-        invalidate();if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end
+        invalidate();if slot:IsA("ValueBase")then watchGearValue(slot)end
     end)
-    ctx.Bind(equip.DescendantRemoving,invalidate)
-    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then ctx.Bind(slot.Changed,invalidate)end end
+    ctx.Bind(equip.DescendantRemoving,function(slot)forgetGearValue(slot);invalidate()end)
+    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then watchGearValue(slot)end end
     ctx.Bind(profile.Stats.Exp.Changed,invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDamage"),invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDefense"),invalidate)
@@ -303,6 +311,7 @@ return function(ctx)
     ctx.Bind(ui.ProgressionToggle.Activated,function()state.SetAccountProgression(not state.AccountProgression)end)
     function state.ProgressionDestroy()
         disposed=true
+        for value in pairs(gearValueConnections)do forgetGearValue(value)end
         if gearThread then pcall(task.cancel,gearThread);gearThread=nil end
         state.ProgressionEquipping=false;controller.Destroy()
     end
