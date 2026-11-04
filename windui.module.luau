@@ -80,13 +80,17 @@ return function(ctx)
     end
     local function dropdown(key,tab,title,build,choose,multi,desc)
         yieldBuild()
-        local entry={Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
-        local view=build();entry.Map=view.Map or {};entry.Current=signature(view.Value);entry.Value=entry.Current
+        local function valueSignature(value)
+            if key=="MultiSpotAreas"and type(value)=="table"then return table.concat(value,"\0")end
+            return signature(value)
+        end
+        local entry={Signature=valueSignature,Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
+        local view=build();entry.Map=view.Map or {};entry.Current=valueSignature(view.Value);entry.Value=entry.Current
         entry.Options=signature(view.Options)
         entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
             Multi=multi==true,AllowNone=multi==true,SearchBarEnabled=true,Callback=guard(function(value)
-                if not api.Ready or entry.Syncing or signature(value)==entry.Current then return end
-                entry.Current=signature(value)
+                if not api.Ready or entry.Syncing or valueSignature(value)==entry.Current then return end
+                entry.Current=valueSignature(value)
                 entry.Value=nil;entry.Choose(value,entry.Map)
                 nextChoices=0
             end)})
@@ -169,18 +173,29 @@ return function(ctx)
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
     dropdown("MultiSpotAreas","Main","Saved Spot",function()
-        local options,map={},{ }
+        local options,map,byId,labels={},{},{},{}
         local catalog=s.AutomationCatalog
         if catalog then catalog.AddCurrent(s.FloorDestinations,ctx.PlaceId);catalog.Sort()end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then byId[spot.Id]=spot end end
+        local order,rank={},{}
+        local function add(id)
+            if byId[id]and s.MultiSpotSelected[id]and not rank[id]then order[#order+1]=id;rank[id]=#order end
+        end
+        for _,id in ipairs(s.MultiSpotOrder or {})do add(id)end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do add(spot.Id)end
         for _,spot in ipairs(catalog and catalog.Spots or {})do
             if spot.PlaceId==ctx.PlaceId then
-                option(options,map,spot.Kind.." · "..spot.Name,spot.Id)
+                labels[spot.Id]=option(options,map,(rank[spot.Id]and (rank[spot.Id].." · ")or "")..spot.Kind.." · "..spot.Name,spot.Id)
             end
         end
-        return {Options=options,Map=map,Value=selected(options,map,function(id)return s.MultiSpotSelected[id]==true end)}
+        local value={};for _,id in ipairs(order)do value[#value+1]=labels[id]end
+        return {Options=options,Map=map,Value=value}
     end,function(values,map)
-        local chosen={};for _,label in ipairs(values or {})do if map[label]then chosen[map[label]]=true end end
-        invoke("SetMultiSpotSelections",chosen)
+        local chosen,order={},{}
+        for _,label in ipairs(values or {})do
+            local id=map[label];if id and not chosen[id]then chosen[id]=true;order[#order+1]=id end
+        end
+        invoke("SetMultiSpotSelections",chosen,order)
     end,true)
     api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
@@ -203,6 +218,7 @@ return function(ctx)
     local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
+    stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
@@ -324,7 +340,7 @@ return function(ctx)
             for _,entry in ipairs(dropdowns)do
                 if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
-                local options=signature(view.Options);local value=signature(view.Value)
+                local options=signature(view.Options);local value=entry.Signature(view.Value)
                 local changed=options~=entry.Options
                 entry.Current=value
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end

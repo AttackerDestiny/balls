@@ -2,7 +2,7 @@ return function(source)
     local make=assert(loadstring(source))()
     local clipboard,applied,encoded
     local settings={Version=1,Enabled=true,SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
-        AutoFarm=false,AutoCraft={["Rare Upgrade Crystal"]=true},TradeItems={Gem=true},MultiSpotSelected={arena=true},
+        AutoFarm=false,BossOnly=true,MultiSpotOrder={"b","a"},AutoCraft={["Rare Upgrade Crystal"]=true},TradeItems={Gem=true},MultiSpotSelected={arena=true},
         SkillPerWeapon={Sword="Summon Pistol"},OffsetProfiles={Boss=20},Theme="Light",AutoHideUI=true,ActiveTab="Settings",
         WindUIPosition={.5,0,.5,0},HealthHUDPosition={.5,0,.7,0},ViewingPlayerInventory=true,SelectedPlayerId=123}
     local spots={["11"]={{Id="saved:multispot:a",Name="Custom",Position={1,2,3}}},["22"]={{Id="saved:multispot:b",Name="Other floor",Position={4,5,6}}}}

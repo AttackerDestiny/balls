@@ -11,7 +11,7 @@ return function(encounterSource,validSource)
         local folder={}
         local state={MultiSpotAnchor=vector(0)}
         local mobs,data={},{}
-        local environment=setmetatable({state=state,trackedMobs=mobs,
+        local environment=setmetatable({state=state,targetPriority={Rank=function(mob)return mob.Name=="Boss"and 1 or mob.Name=="MiniBoss"and 2 or 3 end},trackedMobs=mobs,
             getMobData=function(mob)return data[mob]end,
             os={clock=function()return now end}}, {__index=getfenv()})
         local scan=assert(loadstring(encounterSource));setfenv(scan,environment);scan()
@@ -37,6 +37,13 @@ return function(encounterSource,validSource)
         assert(f.Read(.1)==1 and f.Valid(regular)==trash.Root)
         trash.Health.Value=0
         local alive,seen=f.Read(.2);assert(alive==0 and seen)
+    end)
+    test("Boss Only ignores normal targets and normal adds in arena completion",function()
+        local f=fixture();local boss,data=f.Add(10,100,"Boss");local regular=f.Add(20,50)
+        f.State.AutoFarm=true;f.State.BossOnly=true
+        assert(f.Read(0)==1 and f.Valid(boss)and not f.Valid(regular))
+        data.Health.Value=0;assert(f.Read(.1)==0,"Normal adds cannot stall Boss Only rotation")
+        f.State.AutoFarm=false;assert(f.Valid(regular),"Boss Only does not restrict manual damage-only Kill Aura")
     end)
     test("regular targets stay confined to the selected arena",function()
         local f=fixture();local near=f.Add(219,10);local far=f.Add(221,10)

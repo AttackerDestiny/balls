@@ -62,7 +62,7 @@ return function(source)
     s.AutomationCatalog=catalog
     local function record(name,...)calls[#calls+1]={Name=name,Args={...}}end
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
-        AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
+        BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
         AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
@@ -73,8 +73,8 @@ return function(source)
     end
     function s.IsAutomationFloorUnlocked(id)return id==11 or catalog.Floors[2].Unlocked end
     function s.SetSafeFloor(id)record("SetSafeFloor",id);if s.IsAutomationFloorUnlocked(id)then s.SafeFloorId=id end end
-    function s.SetMultiSpotSelections(value)
-        record("SetMultiSpotSelections",value)
+    function s.SetMultiSpotSelections(value,order)
+        record("SetMultiSpotSelections",value,order);s.MultiSpotOrder=order
         s.MultiSpotSelected={["22/Boss"]=true};for id,on in pairs(value)do s.MultiSpotSelected[id]=on end
     end
     function s.SetAutoDismantle(name,on)record("SetAutoDismantle",name,on);s.AutoDismantle[name]=on end
@@ -136,6 +136,7 @@ return function(source)
     c.AutoDismantle:Emit({"Rare"});assert(s.AutoDismantle.Rare and not s.AutoDismantle.Common)
     c.TradeMode:Emit("Selected items");assert(s.TradeMode=="Selected")
     c.TradeItems:Emit({"Gem x64","Scroll x1"});assert(s.TradeItems.Gem and s.TradeItems.Scroll)
+    c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")
     local beforeClear=#calls
@@ -166,6 +167,18 @@ return function(source)
     assert(#calls==before,"Inventory quantity refreshes cannot change trade selections or invoke actions")
     assert(c.TradeItems.Value[1]=="Gem x80"and s.TradeItems.Gem)
     for i=1,20 do api.Update(5.4+i*.01)end
+    api.Tabs.Main:Select();api.Update(6);flush()
+    local miniLabel,bossLabel
+    for _,label in ipairs(c.MultiSpotAreas.Values)do
+        if label:find("Mini arena",1,true)then miniLabel=label else bossLabel=label end
+    end
+    c.MultiSpotAreas:Emit({miniLabel,bossLabel})
+    assert(s.MultiSpotOrder[1]=="11/Mini"and s.MultiSpotOrder[2]=="11/Boss")
+    api.Update(6.3);flush()
+    c.MultiSpotAreas:Emit({c.MultiSpotAreas.Value[2],c.MultiSpotAreas.Value[1]})
+    assert(s.MultiSpotOrder[1]=="11/Boss"and s.MultiSpotOrder[2]=="11/Mini","Selection order changes must not be treated as an unordered set")
+    api.Update(6.6);flush()
+    assert(c.MultiSpotAreas.Value[1]:find("1 · Boss",1,true)==1,"Show each saved priority in the dropdown")
     local reads=inventoryReads;api.SetVisible(false)
     assert(not visible and s.UIHidden and s.HealthVisible,"Hiding WindUI must leave the health HUD visible")
     api.Update(10);flush();assert(inventoryReads==reads,"A hidden UI must not scan inventory choices")

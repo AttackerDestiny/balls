@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.unborn-fixed-position-v1.12.41"
-local VERSION="1.12.41"
+local BUILD="2026-11-04.respawn-rotation-v1.12.42"
+local VERSION="1.12.42"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -244,9 +244,9 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
         local result={Version=1}
@@ -347,7 +347,7 @@ local restore = {
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
-    AutoFarm=preference("AutoFarm",false)==true,
+    AutoFarm=preference("AutoFarm",false)==true,BossOnly=preference("BossOnly",false)==true,
     FarmRange=math.huge,
     Threat=3,
     SkillAura=preference("SkillAura",false)==true,
@@ -365,7 +365,7 @@ local restore = {
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
     SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
     SafeWhitelistText=preference("SafeWhitelistText",""),SafeWhitelistIds=preference("SafeWhitelistIds",{}),
-    MultiSpot=preference("MultiSpot",false)==true,MultiSpotSelected=preference("MultiSpotSelected",{}),
+    MultiSpot=preference("MultiSpot",false)==true,MultiSpotSelected=preference("MultiSpotSelected",{}),MultiSpotOrder=preference("MultiSpotOrder",{}),
     MultiSpotCursor=preference("MultiSpotCursor",nil),MultiSpotPending=preference("MultiSpotPending",nil),
     AccountProgression=preference("AccountProgression",false)==true,
     ProgressionFloor=math.floor(numericPreference("ProgressionFloor",1,1,12)),
@@ -456,7 +456,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
-    Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
+    BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
     AttackInterval = 0.30, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.30,
@@ -490,7 +490,7 @@ local state = {
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
-    MultiSpot=restore.MultiSpot,MultiSpotSelected=restore.MultiSpotSelected,MultiSpotCursor=restore.MultiSpotCursor,MultiSpotPending=restore.MultiSpotPending,
+    MultiSpot=restore.MultiSpot,MultiSpotSelected=restore.MultiSpotSelected,MultiSpotOrder=restore.MultiSpotOrder,MultiSpotCursor=restore.MultiSpotCursor,MultiSpotPending=restore.MultiSpotPending,
     AutomationRunId=restore.AutomationRunId,AutomationResumeFeatures=restore.AutomationResumeFeatures,
     AccountProgression=restore.AccountProgression,ProgressionFloor=restore.ProgressionFloor,
     ProgressionBossCleared=restore.ProgressionBossCleared,ProgressionComplete=restore.ProgressionComplete,
@@ -1064,13 +1064,13 @@ local function settingsPayload()
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
-        MultiSpot=state.MultiSpot,MultiSpotSelected=state.MultiSpotSelected,MultiSpotCursor=state.MultiSpotCursor,MultiSpotPending=state.MultiSpotPending,
+        MultiSpot=state.MultiSpot,MultiSpotSelected=state.MultiSpotSelected,MultiSpotOrder=state.MultiSpotOrder,MultiSpotCursor=state.MultiSpotCursor,MultiSpotPending=state.MultiSpotPending,
         AccountProgression=state.AccountProgression,ProgressionFloor=state.ProgressionFloor,
         ProgressionBossCleared=state.ProgressionBossCleared,ProgressionComplete=state.ProgressionComplete,
         ProgressionBossClearedName=state.ProgressionBossClearedName,
         ProgressionRestore=state.ProgressionRestore,
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
-        Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,
+        Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
         AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
@@ -2356,9 +2356,16 @@ end
 bind(farmToggle.Activated, function() state.SetAutoFarm(not state.AutoFarm,"UI toggle") end)
 state.SetAutoFarm(false)
 refreshMobIndex()
+function state.SetBossOnly(on)
+    state.BossOnly=on==true
+    state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityScanAt=0
+    nextAcquisition=0
+    requestSave()
+end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     if not mob or mob.Parent ~= mobs then return nil end
+    if state.AutoFarm and state.BossOnly and targetPriority.Rank(mob)>2 then return nil end
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
         or mob~=state.ProgressionBossMob)then return nil end
     local data = getMobData(mob)
@@ -4083,7 +4090,7 @@ function state.ReadAutomationEncounter(spot)
     local function scan()
         state.MultiSpotNextScan=now+1
         for mob in pairs(trackedMobs) do
-            if mob.Parent then
+            if mob.Parent and (not state.BossOnly or targetPriority.Rank(mob)<=2)then
                 local data=getMobData(mob)
                 local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChild("RootPart")
                 if root and ((spot.EncounterNames and spot.EncounterNames[mob.Name]) or (root.Position-spot.Position).Magnitude<=220)
@@ -4097,12 +4104,14 @@ function state.ReadAutomationEncounter(spot)
     local function count()
         local alive,seen=0,false
         for mob in pairs(tracked) do
+            if not state.BossOnly or targetPriority.Rank(mob)<=2 then
             if mob.Parent then
                 local data=getMobData(mob)
                 -- Missing streamed health is not proof that a previously seen mob died.
                 if not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)) then alive=alive+1 end
             end
             seen=true
+            end
         end
         return alive,seen
     end
@@ -4112,6 +4121,74 @@ function state.ReadAutomationEncounter(spot)
     -- A cached zero must never authorize travel without checking for new adds.
     if alive==0 and not scanned then scan();alive,seen=count() end
     return alive,seen
+end
+do
+    local make=(function()
+-- BEGIN BUNDLED RESPAWN SCHEDULE
+-- Respawn estimates are based only on observed living -> dead transitions in this runtime/job.
+return function(ctx)
+    local api={Records={}}
+    local nextScan=0
+    local function clean(text)return tostring(text or ""):lower():gsub("[^%w]","")end
+    local function slotName(spot,sample)
+        local name=clean(sample.Name)
+        local count,only=0,nil
+        for expected in pairs(spot.EncounterNames or {[spot.Name]=true})do
+            count+=1;only=clean(expected)
+            if name==clean(expected)then return only end
+        end
+        -- Native short names can differ from the catalog; match single-boss arenas by position.
+        if count==1 and spot.Position and sample.Position then
+            local a,b=spot.Position,sample.Position
+            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return only end
+        end
+    end
+    function api.Update(now,spots)
+        if now<nextScan then return end
+        nextScan=now+.1
+        local samples=ctx.Samples()
+        for _,spot in ipairs(spots)do
+            if spot.PlaceId==ctx.CurrentFloor()and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
+                local record=api.Records[spot.Id]
+                if not record then record={Slots={}};api.Records[spot.Id]=record end
+                for _,sample in ipairs(samples)do
+                    local key=slotName(spot,sample)
+                    if key then
+                        local slot=record.Slots[key]
+                        if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
+                        local living=sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)
+                        if living then slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
+                        elseif slot.WasAlive and not slot.Dead then
+                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=now+spot.RespawnSeconds
+                        end
+                    end
+                end
+                record.HasLive=false;record.DueAt=nil
+                for _,slot in pairs(record.Slots)do
+                    if slot.WasAlive and not slot.Dead then record.HasLive=true end
+                    if slot.DueAt then record.DueAt=math.min(record.DueAt or math.huge,slot.DueAt)end
+                    if slot.KilledAt then record.KilledAt=math.max(record.KilledAt or -math.huge,slot.KilledAt)end
+                end
+            end
+        end
+    end
+    function api.Get(spot)return api.Records[spot.Id]end
+    return api
+end
+
+-- END BUNDLED RESPAWN SCHEDULE
+    end)()
+    state.MultiSpotRespawns=make({CurrentFloor=function()return game.PlaceId end,Samples=function()
+        local result={}
+        for mob in pairs(trackedMobs)do
+            if mob.Parent and targetPriority.Rank(mob)<=2 then
+                local data=getMobData(mob)
+                if data then result[#result+1]={Model=mob,Name=mob.Name,Position=data.Root.Position,
+                    Health=data.Health.Value,HitLives=data.HitLives and data.HitLives.Value}end
+            end
+        end
+        return result
+    end})
 end
 function state.RegisterAutomationDestination(spot)
     if spot.PlaceId~=game.PlaceId then return false end
@@ -6940,7 +7017,7 @@ end
 -- BEGIN BUNDLED MULTI SPOT
 return function(ctx)
     local state=ctx.State
-    local api={Phase="Idle",Current=nil,Visits=0}
+    local api={Phase="Idle",Current=nil,Visits=0,LastVisits={}}
     local clearedSince
     local retryAt,retries=0,0
     local function travelFailed(now,message)
@@ -6962,15 +7039,79 @@ return function(ctx)
                 result[#result+1]=spot
             end
         end
+        local order={};for i,id in ipairs(state.MultiSpotOrder or {})do order[id]=i end
+        table.sort(result,function(a,b)
+            local ar,br=order[a.Id]or math.huge,order[b.Id]or math.huge
+            if ar~=br then return ar<br end
+            return a.Id<b.Id
+        end)
         return result
     end
+    local function timedChoice(selected,now,exclude)
+        local unknown,nextSpot,nextAt
+        for _,spot in ipairs(selected)do
+            local record=ctx.Respawns.Get(spot)
+            if spot~=exclude then
+                if record and (record.HasLive or (record.DueAt and record.DueAt<=now))then return spot end
+                if not record or not record.DueAt then
+                    if not unknown or (api.LastVisits[spot.Id]or -math.huge)<(api.LastVisits[unknown.Id]or -math.huge)then unknown=spot end
+                end
+            end
+            if record and record.DueAt and record.DueAt>now and (not nextAt or record.DueAt<nextAt)then nextSpot,nextAt=spot,record.DueAt end
+        end
+        return unknown,nextSpot,nextAt
+    end
+    function api.UpdateTimed(now,selected)
+        if api.Current then
+            local alive,seen=ctx.Encounter(api.Current)
+            api.Remaining=alive
+            if seen or alive>0 then api.EncounterSeen=true end
+            if alive>0 then
+                api.CurrentCleared=false;api.WaitingSince=nil;clearedSince=nil;api.Phase="Clearing arena"
+                ctx.Status(api.Current.Name.." · "..alive.." mobs remaining");return
+            end
+            if api.EncounterSeen and not api.CurrentCleared then
+                clearedSince=clearedSince or now
+                if now-clearedSince<.6 then return end
+                api.CurrentCleared=true;api.ClearedRounds=(api.ClearedRounds or 0)+1
+                state.MultiSpotPending=nil;api.EncounterSeen=false;clearedSince=nil
+                if ctx.ClearEncounter then ctx.ClearEncounter()end
+            end
+        end
+        local spot,nextSpot,nextAt=timedChoice(selected,now)
+        if spot and spot==api.Current then
+            api.WaitingSince=api.WaitingSince or now
+            if now-api.WaitingSince>=5 then
+                local alternative=timedChoice(selected,now,api.Current)
+                if alternative then spot=alternative end
+            end
+        end
+        if not spot then
+            api.Phase="Waiting for respawn"
+            ctx.Status(nextSpot and ("Next spawn · "..nextSpot.Name.." · "..math.max(0,math.ceil(nextAt-now)).."s")or "Waiting for selected arena spawns")
+            return
+        end
+        if spot==api.Current then
+            api.Phase="Waiting for spawn"
+            local record=ctx.Respawns.Get(spot)
+            ctx.Status((record and record.DueAt and "Spawn due · waiting for "or "Waiting for arena mobs to spawn · ")..spot.Name)
+            return
+        end
+        ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
+        api.LastVisits[spot.Id]=now
+        state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
+        api.Phase="Moving";api.MoveDeadline=now+15;ctx.Save()
+        local ok,message=ctx.Go(spot)
+        if not ok then travelFailed(now,message or "Arena is unavailable")end
+    end
     function api.Reset()
-        api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false
+        api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.LastVisits={}
         retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;ctx.Release()
     end
     function api.Update(now)
         if not state.MultiSpot or not state.Running then return end
         if api.Phase=="Paused" then return end
+        if ctx.Respawns then ctx.Respawns.Update(now,ctx.Spots())end
         local priority=ctx.PriorityTarget and ctx.PriorityTarget(now)
         if priority then
             if not api.PrioritySuspended then
@@ -6991,6 +7132,10 @@ return function(ctx)
             local selected=choices()
             local resume
             for _,spot in ipairs(selected)do if api.Current and spot.Id==api.Current.Id then resume=spot;break end end
+            if resume and ctx.Respawns then
+                local record=ctx.Respawns.Get(resume)
+                if record and record.DueAt and record.DueAt>now and ctx.Encounter(resume)==0 then resume=nil end
+            end
             if resume then
                 api.Phase="Moving";api.MoveDeadline=now+15
                 local ok,message=ctx.Go(resume,true)
@@ -7019,6 +7164,7 @@ return function(ctx)
         if not ctx.CanMove() then return end
         local selected=choices()
         if #selected==0 then ctx.Status(state.SafeMode and "Select arenas on the Safe Mode floor" or "Select at least one arena");return end
+        if ctx.Respawns then api.UpdateTimed(now,selected);return end
         if api.Current then
             local alive,seen=ctx.Encounter(api.Current)
             api.Remaining=alive
@@ -7445,6 +7591,7 @@ return function(ctx)
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
     if type(state.MultiSpotSelected)~="table" then state.MultiSpotSelected={} end
+    if type(state.MultiSpotOrder)~="table"then state.MultiSpotOrder={}end
     local HttpService, StarterGui = game:GetService("HttpService"), game:GetService("StarterGui")
     local TeleportService = game:GetService("TeleportService")
     local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
@@ -7797,7 +7944,7 @@ end
         Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
-    local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
+    local multi=ctx.MakeMulti({State=state,Respawns=state.MultiSpotRespawns,Spots=function()return catalog.Spots end,
         PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
         Suspend=function()
             state.MultiSpotPriorityActive=true
@@ -7929,13 +8076,28 @@ end
         state.SaveNow();refresh()
         if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(os.clock());refresh()end)end
     end
+    local function spotOrder(selected,requested)
+        local order,seen={},{}
+        local function append(id)
+            id=catalog.Aliases[id]or id
+            if selected[id]and not seen[id]then order[#order+1]=id;seen[id]=true end
+        end
+        for _,id in ipairs(state.MultiSpotOrder)do
+            local spot=catalog.SpotById[id]
+            if spot and spot.PlaceId~=game.PlaceId then append(id)end
+        end
+        for _,id in ipairs(requested or {})do append(id)end
+        for _,id in ipairs(state.MultiSpotOrder)do append(id)end
+        for _,spot in ipairs(catalog.Spots)do append(spot.Id)end
+        return order
+    end
     function state.SetMultiSpotSelection(id,on)
         id=catalog.Aliases[id] or id
         local spot=catalog.SpotById[id]
         if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId) then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
-        state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
+        state.MultiSpotSelected[id]=on==true or nil;state.MultiSpotOrder=spotOrder(state.MultiSpotSelected);multi.Reset();state.SaveNow();refresh();return true
     end
-    function state.SetMultiSpotSelections(selected)
+    function state.SetMultiSpotSelections(selected,order)
         local result=table.clone(state.MultiSpotSelected)
         for id in pairs(result)do
             local spot=catalog.SpotById[id]
@@ -7948,6 +8110,7 @@ end
                 result[spot.Id]=true
             end
         end
+        state.MultiSpotOrder=spotOrder(result,order)
         state.MultiSpotSelected=result;multi.Reset();state.SaveNow();refresh();return true
     end
     local function joinFriendAtPad(id,active)
@@ -9348,10 +9511,10 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"Enabled","AutoFarm","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
     for _,key in ipairs({"TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
-    for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
+    for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
     local function plain(value,depth)
         assert(depth<=12,"Config nesting is too deep")
         local kind=type(value)
@@ -9380,6 +9543,7 @@ return function(ctx)
         for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
             for name,on in pairs(value.Settings[key]or {})do assert(type(name)=="string"and type(on)=="boolean","Invalid selection: "..key)end
         end
+        for _,id in ipairs(value.Settings.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
         assert(type(value.CustomSpots)=="table","Missing custom spots")
         local floors=0
         for id,spots in pairs(value.CustomSpots)do
@@ -25214,13 +25378,17 @@ return function(ctx)
     end
     local function dropdown(key,tab,title,build,choose,multi,desc)
         yieldBuild()
-        local entry={Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
-        local view=build();entry.Map=view.Map or {};entry.Current=signature(view.Value);entry.Value=entry.Current
+        local function valueSignature(value)
+            if key=="MultiSpotAreas"and type(value)=="table"then return table.concat(value,"\0")end
+            return signature(value)
+        end
+        local entry={Signature=valueSignature,Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
+        local view=build();entry.Map=view.Map or {};entry.Current=valueSignature(view.Value);entry.Value=entry.Current
         entry.Options=signature(view.Options)
         entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
             Multi=multi==true,AllowNone=multi==true,SearchBarEnabled=true,Callback=guard(function(value)
-                if not api.Ready or entry.Syncing or signature(value)==entry.Current then return end
-                entry.Current=signature(value)
+                if not api.Ready or entry.Syncing or valueSignature(value)==entry.Current then return end
+                entry.Current=valueSignature(value)
                 entry.Value=nil;entry.Choose(value,entry.Map)
                 nextChoices=0
             end)})
@@ -25303,18 +25471,29 @@ return function(ctx)
     stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
     button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
     dropdown("MultiSpotAreas","Main","Saved Spot",function()
-        local options,map={},{ }
+        local options,map,byId,labels={},{},{},{}
         local catalog=s.AutomationCatalog
         if catalog then catalog.AddCurrent(s.FloorDestinations,ctx.PlaceId);catalog.Sort()end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then byId[spot.Id]=spot end end
+        local order,rank={},{}
+        local function add(id)
+            if byId[id]and s.MultiSpotSelected[id]and not rank[id]then order[#order+1]=id;rank[id]=#order end
+        end
+        for _,id in ipairs(s.MultiSpotOrder or {})do add(id)end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do add(spot.Id)end
         for _,spot in ipairs(catalog and catalog.Spots or {})do
             if spot.PlaceId==ctx.PlaceId then
-                option(options,map,spot.Kind.." · "..spot.Name,spot.Id)
+                labels[spot.Id]=option(options,map,(rank[spot.Id]and (rank[spot.Id].." · ")or "")..spot.Kind.." · "..spot.Name,spot.Id)
             end
         end
-        return {Options=options,Map=map,Value=selected(options,map,function(id)return s.MultiSpotSelected[id]==true end)}
+        local value={};for _,id in ipairs(order)do value[#value+1]=labels[id]end
+        return {Options=options,Map=map,Value=value}
     end,function(values,map)
-        local chosen={};for _,label in ipairs(values or {})do if map[label]then chosen[map[label]]=true end end
-        invoke("SetMultiSpotSelections",chosen)
+        local chosen,order={},{}
+        for _,label in ipairs(values or {})do
+            local id=map[label];if id and not chosen[id]then chosen[id]=true;order[#order+1]=id end
+        end
+        invoke("SetMultiSpotSelections",chosen,order)
     end,true)
     api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
     input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
@@ -25337,6 +25516,7 @@ return function(ctx)
     local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
+    stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
@@ -25458,7 +25638,7 @@ return function(ctx)
             for _,entry in ipairs(dropdowns)do
                 if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
-                local options=signature(view.Options);local value=signature(view.Value)
+                local options=signature(view.Options);local value=entry.Signature(view.Value)
                 local changed=options~=entry.Options
                 entry.Current=value
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end

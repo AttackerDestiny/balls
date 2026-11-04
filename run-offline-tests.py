@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("RESPAWN SCHEDULE", "respawn-schedule.module.luau"),
         ("STARTUP BELOW", "startup-below.module.luau"),
         ("AUTO QUEST", "auto-quest.module.luau"),
         ("AUTO CRAFT", "auto-craft.module.luau"),
@@ -130,6 +131,7 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
@@ -151,6 +153,8 @@ def main():
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    order_adapter = adapter[adapter.index("    local function spotOrder("):adapter.index("    local function joinFriendAtPad(")]
+    fixture += "assert(loadstring(" + quote(read("multi-order.test.luau")) + "))()(" + quote(order_adapter) + ")\n"
     preflight = adapter[adapter.index("    local function queuePreflight()"):adapter.index("    local function preflight()")]
     fixture += "assert(loadstring(" + quote(read("safe-preflight.test.luau")) + "))()(" + quote(preflight) + ")\n"
     unlock_start = adapter.index("    local ui\n")

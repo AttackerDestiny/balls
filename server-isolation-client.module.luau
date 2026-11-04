@@ -4,6 +4,7 @@ return function(ctx)
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
     if type(state.MultiSpotSelected)~="table" then state.MultiSpotSelected={} end
+    if type(state.MultiSpotOrder)~="table"then state.MultiSpotOrder={}end
     local HttpService, StarterGui = game:GetService("HttpService"), game:GetService("StarterGui")
     local TeleportService = game:GetService("TeleportService")
     local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
@@ -356,7 +357,7 @@ end
         Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
-    local multi=ctx.MakeMulti({State=state,Spots=function()return catalog.Spots end,
+    local multi=ctx.MakeMulti({State=state,Respawns=state.MultiSpotRespawns,Spots=function()return catalog.Spots end,
         PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
         Suspend=function()
             state.MultiSpotPriorityActive=true
@@ -488,13 +489,28 @@ end
         state.SaveNow();refresh()
         if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(os.clock());refresh()end)end
     end
+    local function spotOrder(selected,requested)
+        local order,seen={},{}
+        local function append(id)
+            id=catalog.Aliases[id]or id
+            if selected[id]and not seen[id]then order[#order+1]=id;seen[id]=true end
+        end
+        for _,id in ipairs(state.MultiSpotOrder)do
+            local spot=catalog.SpotById[id]
+            if spot and spot.PlaceId~=game.PlaceId then append(id)end
+        end
+        for _,id in ipairs(requested or {})do append(id)end
+        for _,id in ipairs(state.MultiSpotOrder)do append(id)end
+        for _,spot in ipairs(catalog.Spots)do append(spot.Id)end
+        return order
+    end
     function state.SetMultiSpotSelection(id,on)
         id=catalog.Aliases[id] or id
         local spot=catalog.SpotById[id]
         if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId) then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
-        state.MultiSpotSelected[id]=on==true or nil;multi.Reset();state.SaveNow();refresh();return true
+        state.MultiSpotSelected[id]=on==true or nil;state.MultiSpotOrder=spotOrder(state.MultiSpotSelected);multi.Reset();state.SaveNow();refresh();return true
     end
-    function state.SetMultiSpotSelections(selected)
+    function state.SetMultiSpotSelections(selected,order)
         local result=table.clone(state.MultiSpotSelected)
         for id in pairs(result)do
             local spot=catalog.SpotById[id]
@@ -507,6 +523,7 @@ end
                 result[spot.Id]=true
             end
         end
+        state.MultiSpotOrder=spotOrder(result,order)
         state.MultiSpotSelected=result;multi.Reset();state.SaveNow();refresh();return true
     end
     local function joinFriendAtPad(id,active)
