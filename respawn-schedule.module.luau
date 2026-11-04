@@ -32,7 +32,7 @@ return function(ctx)
                         local living=sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)
                         if living then slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
                         elseif slot.WasAlive and not slot.Dead then
-                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=now+spot.RespawnSeconds
+                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=ctx.Deadline and ctx.Deadline(now,spot.RespawnSeconds)or now+spot.RespawnSeconds
                         end
                     end
                 end

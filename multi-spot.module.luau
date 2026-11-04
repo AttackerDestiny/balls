@@ -80,6 +80,7 @@ return function(ctx)
             ctx.Status((record and record.DueAt and "Spawn due · waiting for "or "Waiting for arena mobs to spawn · ")..spot.Name)
             return
         end
+        if ctx.DepartureReady and not ctx.DepartureReady()then return end
         ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
         api.LastVisits[spot.Id]=now
         state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
@@ -109,7 +110,7 @@ return function(ctx)
             return
         end
         if api.PrioritySuspended then
-            if not ctx.CanMove()then return end
+            if not ctx.CanMove()or (ctx.DepartureReady and not ctx.DepartureReady())then return end
             api.PrioritySuspended=false
             if ctx.Resume then ctx.Resume()end
             local selected=choices()
@@ -189,6 +190,7 @@ return function(ctx)
             ctx.Status("Travelling to "..spot.Floor.Name)
             ctx.ChangeFloor(spot.PlaceId);return
         end
+        if ctx.DepartureReady and not ctx.DepartureReady()then return end
         ctx.Release()
         api.Current=spot
         api.EncounterSeen=false

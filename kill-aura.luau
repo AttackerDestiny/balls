@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.respawn-rotation-v1.12.42"
-local VERSION="1.12.42"
+local BUILD="2026-11-04.farm-coordination-v1.12.43"
+local VERSION="1.12.43"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -521,6 +521,40 @@ do
             end
         end
     end
+end
+function state.FarmClock()
+    local ok,value=pcall(workspace.GetServerTimeNow,workspace)
+    return ok and value or os.clock()
+end
+do
+    local make=(function()
+-- BEGIN BUNDLED FARM COORDINATION
+-- Lua-only coordination: shared server-time beats and common destination geometry.
+-- This does not exchange state between clients or promise a network barrier.
+return function(ctx)
+    local api={}
+    local last={}
+    local step=.25
+    function api.Ready(channel)
+        local epoch=math.floor(ctx.Now()/step)
+        local previous=last[channel]
+        if previous==nil then last[channel]=epoch;return false end
+        if epoch>previous then last[channel]=epoch;return true end
+        return false
+    end
+    function api.Position(point)
+        local function snap(value)return math.floor(value*2+.5)/2 end
+        return ctx.Vector(snap(point.X),snap(point.Y),snap(point.Z))
+    end
+    function api.Deadline(killedAt,seconds)
+        return math.ceil((killedAt+seconds)*2)/2
+    end
+    return api
+end
+
+-- END BUNDLED FARM COORDINATION
+    end)()
+    state.FarmCoordination=make({Now=state.FarmClock,Vector=Vector3.new})
 end
 env.SB2KillAura = state
 local connections = {}
@@ -2107,6 +2141,25 @@ function state.ResolveAutoOffset(mob)
         state.OffsetStatus="Waiting for enemy to land"
         return destination.Y-mobRoot.Position.Y
     end
+    if state.AutoFarm and state.FarmCoordination then
+        local sharedCenter=mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)
+        local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player={Size=Vector3.new(2,2,1)},Center=sharedCenter,
+            Mode="Below",Reach=state.AutoRanges.BodyRange(data),Margin=3,
+            BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=3,PlayerBelow=3,
+            DestroyHeight=workspace.FallenPartsDestroyHeight})
+        if not plan then
+            state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
+            state.OffsetStatus=reason
+            return nil
+        end
+        local destination=state.FarmCoordination.Position(plan.Destination)
+        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
+        data.LastGroundedFarmDestination=destination
+        activeOffsetMob,offsetSample=nil,nil
+        state.TeleportOffset=destination.Y-mobRoot.Position.Y
+        state.OffsetStatus="Shared farm position · server-clock pacing"
+        return state.TeleportOffset
+    end
     local center=root.Position+state.AutoRanges.Delta(data,root)
     local reach=state.FarmAbove and state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill) or state.AutoRanges.BodyRange(data)
     local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player=root,Center=center,
@@ -2373,11 +2426,22 @@ local function validMob(mob, mobs)
     if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
     return nil
 end
+function state.IsFarmEnemyAlive()
+    if not state.AutoFarm then return false end
+    local mob=state.FarmTargetLock or state.FollowTarget
+    if not mob or mob.Parent~=refreshMobIndex()then return false end
+    local data=getMobData(mob)
+    return not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))
+end
 -- Share one paced, position-independent boss choice across movement and arena rotation.
 function state.GetFarmPriorityTarget(now)
     if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     local mobs=refreshMobIndex()
     if not mobs then return nil end
+    if state.IsFarmEnemyAlive()then
+        local locked=state.FarmTargetLock or state.FollowTarget
+        return targetPriority.Rank(locked)<=2 and locked or nil
+    end
     local cached=state.FarmPriorityTarget
     if now<(state.FarmPriorityScanAt or 0)and cached and validMob(cached,mobs)then return cached end
     if now<(state.FarmPriorityScanAt or 0)and not cached then return nil end
@@ -4159,7 +4223,7 @@ return function(ctx)
                         local living=sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)
                         if living then slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
                         elseif slot.WasAlive and not slot.Dead then
-                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=now+spot.RespawnSeconds
+                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=ctx.Deadline and ctx.Deadline(now,spot.RespawnSeconds)or now+spot.RespawnSeconds
                         end
                     end
                 end
@@ -4178,7 +4242,7 @@ end
 
 -- END BUNDLED RESPAWN SCHEDULE
     end)()
-    state.MultiSpotRespawns=make({CurrentFloor=function()return game.PlaceId end,Samples=function()
+    state.MultiSpotRespawns=make({Deadline=state.FarmCoordination and state.FarmCoordination.Deadline,CurrentFloor=function()return game.PlaceId end,Samples=function()
         local result={}
         for mob in pairs(trackedMobs)do
             if mob.Parent and targetPriority.Rank(mob)<=2 then
@@ -4395,7 +4459,7 @@ function state.TeleportToDestination(id,urgent,automatic)
         if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(message);setTravelStatus(state.TravelError) end
         state.TravelBusy=false;state.MultiSpotTravelPending=false
         if ok and automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
-            local confirmed,reason=pcall(state.MultiSpotController.Update,os.clock())
+            local confirmed,reason=pcall(state.MultiSpotController.Update,state.FarmClock())
             if not confirmed then state.MultiSpotController.Pause(tostring(reason)) end
         end
     end)
@@ -4514,6 +4578,7 @@ local function exploreEmptyArea(character, root, humanoid, now)
     if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused · no safe destination found"); return end
     exploredCenters[#exploredCenters + 1] = root.Position
     if #exploredCenters > 8 then table.remove(exploredCenters, 1) end
+    if state.FarmCoordination and not state.FarmCoordination.Ready("move")then return end
     ensureMovementController(character, root, humanoid, destination)
     positionAlign.Position = destination
     positionAlign.Enabled, orientationAlign.Enabled = true, true
@@ -4592,12 +4657,10 @@ local function updateMovement()
     end
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
-    if now>=nextAcquisition then
+    if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
         nextAcquisition=now+0.15
         local locked=state.FarmTargetLock
         if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
-        local canonical=state.GetFarmPriorityTarget(now)
-        if canonical and (not locked or targetPriority.Rank(canonical)<=targetPriority.Rank(locked))then locked=canonical end
         if locked and locked.Parent==mobs then
             local data=getMobData(locked)
             -- Missing streamed data, invulnerability or a rejected offset is
@@ -4605,15 +4668,6 @@ local function updateMovement()
             if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
         else locked=nil end
         if locked then
-            local rank=targetPriority.Rank(locked)
-            local promoted
-            if rank>1 then
-                for mob in pairs(trackedMobs)do
-                    if targetPriority.Rank(mob)<rank and validMob(mob,mobs)
-                        and (not promoted or targetPriority.FarmLess(mob,promoted))then promoted=mob end
-                end
-            end
-            if promoted then locked=promoted;state.FarmTargetLock=promoted end
             state.FarmTargetLock=locked
             state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
             state.FollowTarget=locked
@@ -7097,6 +7151,7 @@ return function(ctx)
             ctx.Status((record and record.DueAt and "Spawn due · waiting for "or "Waiting for arena mobs to spawn · ")..spot.Name)
             return
         end
+        if ctx.DepartureReady and not ctx.DepartureReady()then return end
         ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
         api.LastVisits[spot.Id]=now
         state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
@@ -7126,7 +7181,7 @@ return function(ctx)
             return
         end
         if api.PrioritySuspended then
-            if not ctx.CanMove()then return end
+            if not ctx.CanMove()or (ctx.DepartureReady and not ctx.DepartureReady())then return end
             api.PrioritySuspended=false
             if ctx.Resume then ctx.Resume()end
             local selected=choices()
@@ -7206,6 +7261,7 @@ return function(ctx)
             ctx.Status("Travelling to "..spot.Floor.Name)
             ctx.ChangeFloor(spot.PlaceId);return
         end
+        if ctx.DepartureReady and not ctx.DepartureReady()then return end
         ctx.Release()
         api.Current=spot
         api.EncounterSeen=false
@@ -7588,6 +7644,7 @@ end
 -- Roblox/executor adapter. No credentials, web sessions, or block-list HTTP calls.
 return function(ctx)
     local state, player, Players = ctx.State, ctx.Player, ctx.Players
+    local farmClock=state.FarmClock or os.clock
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
     if type(state.MultiSpotSelected)~="table" then state.MultiSpotSelected={} end
@@ -7945,7 +8002,8 @@ end
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
     local multi=ctx.MakeMulti({State=state,Respawns=state.MultiSpotRespawns,Spots=function()return catalog.Spots end,
-        PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
+        PriorityTarget=function()return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(os.clock())end,
+        DepartureReady=function()return not state.FarmCoordination or state.FarmCoordination.Ready("spot")end,
         Suspend=function()
             state.MultiSpotPriorityActive=true
             if state.MultiSpotOwnsTravel and state.TravelBusy then
@@ -7959,6 +8017,7 @@ end
         Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
+            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
@@ -8074,7 +8133,7 @@ end
         ensureToken();multi.Reset();state.MultiSpot=on==true
         state.MultiSpotStatus=state.MultiSpot and "Starting selected arenas..." or "Multi Spot is off"
         state.SaveNow();refresh()
-        if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(os.clock());refresh()end)end
+        if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(farmClock());refresh()end)end
     end
     local function spotOrder(selected,requested)
         local order,seen={},{}
@@ -8237,7 +8296,7 @@ end
                 safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end
-                else multi.Update(os.clock())end
+                else multi.Update(farmClock())end
             end)
             if not updated then fail(message) end
             refresh()

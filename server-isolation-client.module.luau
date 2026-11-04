@@ -1,6 +1,7 @@
 -- Roblox/executor adapter. No credentials, web sessions, or block-list HTTP calls.
 return function(ctx)
     local state, player, Players = ctx.State, ctx.Player, ctx.Players
+    local farmClock=state.FarmClock or os.clock
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
     if type(state.MultiSpotSelected)~="table" then state.MultiSpotSelected={} end
@@ -358,7 +359,8 @@ end
         Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
     state.SafeController=safe
     local multi=ctx.MakeMulti({State=state,Respawns=state.MultiSpotRespawns,Spots=function()return catalog.Spots end,
-        PriorityTarget=function(now)return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(now)end,
+        PriorityTarget=function()return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(os.clock())end,
+        DepartureReady=function()return not state.FarmCoordination or state.FarmCoordination.Ready("spot")end,
         Suspend=function()
             state.MultiSpotPriorityActive=true
             if state.MultiSpotOwnsTravel and state.TravelBusy then
@@ -372,6 +374,7 @@ end
         Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
+            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
@@ -487,7 +490,7 @@ end
         ensureToken();multi.Reset();state.MultiSpot=on==true
         state.MultiSpotStatus=state.MultiSpot and "Starting selected arenas..." or "Multi Spot is off"
         state.SaveNow();refresh()
-        if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(os.clock());refresh()end)end
+        if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(farmClock());refresh()end)end
     end
     local function spotOrder(selected,requested)
         local order,seen={},{}
@@ -650,7 +653,7 @@ end
                 safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end
-                else multi.Update(os.clock())end
+                else multi.Update(farmClock())end
             end)
             if not updated then fail(message) end
             refresh()

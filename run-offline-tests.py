@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("FARM COORDINATION", "farm-coordination.module.luau"),
         ("RESPAWN SCHEDULE", "respawn-schedule.module.luau"),
         ("STARTUP BELOW", "startup-below.module.luau"),
         ("AUTO QUEST", "auto-quest.module.luau"),
@@ -115,7 +116,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + ")\n"
     data_start = script.index("local function getMobData(mob)")
     data = script[data_start:script.index("function state.ReadOwnDamage", data_start)]
-    farm_start = script.index("    if now>=nextAcquisition then")
+    farm_start = script.index("    if now>=nextAcquisition and")
     farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
     # The arena fixture needs validMob returned; the selection fixture embeds its definition.
     valid_definition = valid.removesuffix("\nreturn validMob")
@@ -131,6 +132,9 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    move_adapter = read("server-isolation-client.module.luau")
+    can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
+    fixture += "assert(loadstring(" + quote(read("farm-coordination.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(can_move) + ")\n"
     fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
