@@ -42,6 +42,13 @@ return function(source,schedulerSource,skillSendSource)
     assert(sends==0 and marked==0 and scheduler.Next(mob)==0,"Credit-paused sends cannot consume hit cooldowns or record damage")
     data.Damage[other]=50;scheduler.Update(now+.1,{mob},{},folder)
     assert(sends==1 and marked==1,"Qualified group resumes the normal scheduler")
+    data.Damage[me]=50;data.Damage[other]=50
+    local absent={Name="MissingFriend",CreditMissing=true}
+    members={me,other,absent};assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("not in this server: MissingFriend",1,true))
+    members={me,other,third};data.Damage[third]=nil
+    assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("no replicated damage counter: Third",1,true))
+    data.Damage[third]=49;assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("below required: Third 49/50",1,true))
+    data.Damage[third]=50;assert(api.Allow(mob,data));members={me,other}
     local calls=0
     local send=assert(loadstring("return "..skillSendSource))
     setfenv(send,setmetatable({state={CreditController=api},current=function()return true end,

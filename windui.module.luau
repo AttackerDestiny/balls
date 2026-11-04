@@ -223,6 +223,9 @@ return function(ctx)
     input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)
         if text~=s.CreditWhitelistText then invoke("SetCreditWhitelist",text)end
     end,"Input A List Of User")
+    paragraph("CreditCheckStatus","Combat","Credit Status",function()
+        return not s.CreditCheck and "Credit Check is off"or s.CreditCheckStatus or "Waiting for a boss or mini-boss"
+    end)
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")

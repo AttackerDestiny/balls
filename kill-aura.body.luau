@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.credit-and-best-gear-v1.12.45"
-local VERSION="1.12.45"
+local BUILD="2026-11-04.credit-roster-diagnostics-v1.12.46"
+local VERSION="1.12.46"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -949,16 +949,28 @@ return function(ctx)
         local required=maximum*.05
         local members=ctx.Members()
         local own=ctx.Damage(data,ctx.Self())or 0
-        local waiting,total=0,0
+        local waiting,total,missing,noCounter,below=0,0,{},{},{}
         for _,person in ipairs(members)do
             total+=1
-            if (ctx.Damage(data,person)or 0)<required then waiting+=1 end
+            local damage=ctx.Damage(data,person)
+            if type(person)=="table"and person.CreditMissing then missing[#missing+1]=person.Name
+            elseif damage==nil then noCounter[#noCounter+1]=person.Name end
+            if (type(person)=="table"and person.CreditMissing)or (damage or 0)<required then
+                waiting+=1
+                if damage~=nil and not(type(person)=="table"and person.CreditMissing)then
+                    below[#below+1]=person.Name.." "..math.floor(damage).."/"..math.ceil(required)
+                end
+            end
         end
         if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
         if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
+        local detail
+        if #missing>0 then detail="not in this server: "..table.concat(missing,", ")
+        elseif #noCounter>0 then detail="no replicated damage counter: "..table.concat(noCounter,", ")
+        else detail="below required: "..table.concat(below,", ")end
         if own>=required then
             pending[mob]=nil
-            status("Credit Check · qualified · waiting for "..waiting.." account(s)")
+            status("Credit Check · qualified · "..detail)
             return false
         end
         local flight=pending[mob]
@@ -968,7 +980,7 @@ return function(ctx)
             elseif ctx.Now()<flight.Deadline then status("Credit Check · waiting for damage acknowledgment");return false
             else pending[mob]=nil end
         end
-        status("Credit Check · "..math.floor(own).." / "..math.ceil(required))
+        status("Credit Check · "..math.floor(own).." / "..math.ceil(required).." · "..detail)
         return true
     end
     function api.Sent(mob,data)
@@ -984,19 +996,33 @@ end
 
 -- END BUNDLED CREDIT CHECK
     end)()
-    local parsedText,whitelist,members,rosterAt=nil,{},nil,0
+    local makeRoster=(function()
+-- BEGIN BUNDLED CREDIT ROSTER
+-- Every configured account remains required; an unmatched entry is never dropped.
+return function(self,players,text)
+    local byName,byId={},{}
+    for _,person in ipairs(players)do byName[person.Name:lower()]=person;byId[tostring(person.UserId)]=person end
+    local result,seen={self},{[tostring(self.UserId)]=true}
+    for word in tostring(text or ""):gmatch("[%w_]+")do
+        local person=byName[word:lower()]or byId[word]
+        local key=person and tostring(person.UserId)or ("missing:"..word:lower())
+        if not seen[key]then
+            seen[key]=true
+            result[#result+1]=person or {Name=word,UserId=tonumber(word),CreditMissing=true}
+        end
+    end
+    return result
+end
+
+-- END BUNDLED CREDIT ROSTER
+    end)()
+    local parsedText,members,rosterAt=nil,nil,0
     local function roster()
         local text=state.CreditWhitelistText or ""
-        if text~=parsedText then
-            parsedText=text;whitelist={};rosterAt=0
-            for word in text:gmatch("[%w_]+")do whitelist[word:lower()]=true end
-        end
         local now=os.clock()
-        if members and now<rosterAt then return members end
-        rosterAt=now+.25;members={player}
-        for _,person in ipairs(Players:GetPlayers())do
-            if person~=player and (whitelist[person.Name:lower()]or whitelist[tostring(person.UserId)])then members[#members+1]=person end
-        end
+        if members and text==parsedText and now<rosterAt then return members end
+        parsedText=text;rosterAt=now+.25
+        members=makeRoster(player,Players:GetPlayers(),text)
         return members
     end
     state.CreditController=make({State=state,Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,
@@ -1009,12 +1035,14 @@ end
             return value and value:IsA("ValueBase")and tonumber(value.Value)or nil
         end,
         Damage=function(data,person)
+            if type(person)=="table"and person.CreditMissing then return nil end
             local counter=data.Health:FindFirstChild(person.Name)or data.Health:FindFirstChild(tostring(person.UserId))
             local value=counter and counter:IsA("ValueBase")and counter.Value
             return type(value)=="number"and value==value and math.max(0,value)or nil
         end})
     function state.SetCreditCheck(on)
         state.CreditCheck=on==true;state.CreditController.Reset()
+        state.CreditCheckStatus=state.CreditCheck and "Credit Check · waiting for a boss or mini-boss"or "Credit Check is off"
         if state.WakeSkillAura then state.WakeSkillAura()end
         requestSave()
     end
@@ -25739,6 +25767,9 @@ return function(ctx)
     input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)
         if text~=s.CreditWhitelistText then invoke("SetCreditWhitelist",text)end
     end,"Input A List Of User")
+    paragraph("CreditCheckStatus","Combat","Credit Status",function()
+        return not s.CreditCheck and "Credit Check is off"or s.CreditCheckStatus or "Waiting for a boss or mini-boss"
+    end)
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")

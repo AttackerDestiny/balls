@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "CREDIT ROSTER": "credit-roster.module.luau",
     "CREDIT CHECK": "credit-check.module.luau",
     "FARM COORDINATION": "farm-coordination.module.luau",
     "RESPAWN SCHEDULE": "respawn-schedule.module.luau",
