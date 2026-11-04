@@ -132,6 +132,9 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    gate_start = script.index('    if state.FarmCoordination and not state.DodgeReturnPending')
+    movement_gate = script[gate_start:script.index('    local destination = state.AutoOffsetDestination or targetRoot.Position', gate_start)]
+    fixture += "assert(loadstring(" + quote(read("fps-budget.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(movement_gate) + ")\n"
     move_adapter = read("server-isolation-client.module.luau")
     can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
     fixture += "assert(loadstring(" + quote(read("farm-coordination.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(can_move) + ")\n"

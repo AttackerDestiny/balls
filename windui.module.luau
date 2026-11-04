@@ -63,11 +63,11 @@ return function(ctx)
         yieldBuild()
         local text=tostring(get()or "")
         local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
-        api.Controls[key]=control;paragraphs[#paragraphs+1]={Control=control,Get=get,Text=text}
+        api.Controls[key]=control;paragraphs[#paragraphs+1]={Tab=tab,Control=control,Get=get,Text=text}
     end
     local function toggle(key,tab,title,get,set,desc)
         yieldBuild()
-        local entry={Get=get,Value=get()}
+        local entry={Tab=tab,Get=get,Value=get()}
         local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
             if api.Ready and value~=get()then
                 set(value);entry.Value=get();entry.Control:Set(entry.Value,false)
@@ -328,12 +328,16 @@ return function(ctx)
         if tab~=lastTab then lastTab=tab;nextChoices=0 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
+            if entry.Tab==tab then
             local value=entry.Get()
             if value~=entry.Value then entry.Value=value;entry.Control:Set(value,false)end
+            end
         end
         for _,entry in ipairs(paragraphs)do
+            if entry.Tab==tab then
             local text=tostring(entry.Get()or "")
             if text~=entry.Text then entry.Text=text;entry.Control:SetDesc(text)end
+            end
         end
         if now>=nextChoices then
             nextChoices=now+1

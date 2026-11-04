@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.farm-coordination-v1.12.43"
-local VERSION="1.12.43"
+local BUILD="2026-11-04.fps-hotpaths-v1.12.44"
+local VERSION="1.12.44"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -3542,14 +3542,18 @@ do
     applyZoom()
     bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"), applyZoom)
     local original = {}
+    local excludedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
+    local excludedRoots={}
+    for name in pairs(excludedNames)do excludedRoots[name]=workspace:FindFirstChild(name)end
+    bind(workspace.ChildAdded,function(root)if excludedNames[root.Name]then excludedRoots[root.Name]=root end end)
+    bind(workspace.ChildRemoved,function(root)if excludedRoots[root.Name]==root then excludedRoots[root.Name]=nil end end)
     local function mapPart(part)
         if state.StopEverything then return false end
         if not part:IsA("BasePart") then return false end
         if state.SkillVisuals and state.SkillVisuals.IsEffect(part) then return false end
         if player.Character and part:IsDescendantOf(player.Character) then return false end
-        for _, name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff","MobSpawnEffects"}) do
-            local root=workspace:FindFirstChild(name)
-            if root and part:IsDescendantOf(root) then return false end
+        for _,root in pairs(excludedRoots)do
+            if part:IsDescendantOf(root)then return false end
         end
         return not waveDodge.IsHazardPart(part)
     end
@@ -4192,30 +4196,50 @@ do
 return function(ctx)
     local api={Records={}}
     local nextScan=0
-    local function clean(text)return tostring(text or ""):lower():gsub("[^%w]","")end
-    local function slotName(spot,sample)
-        local name=clean(sample.Name)
-        local count,only=0,nil
-        for expected in pairs(spot.EncounterNames or {[spot.Name]=true})do
-            count+=1;only=clean(expected)
-            if name==clean(expected)then return only end
+    local descriptors=setmetatable({}, {__mode="k"})
+    local names=setmetatable({}, {__mode="k"})
+    api.NameNormalizations=0
+    local function clean(text)
+        api.NameNormalizations+=1
+        return tostring(text or ""):lower():gsub("[^%w]","")
+    end
+    local function descriptor(spot)
+        local value=descriptors[spot]
+        if value and value.Name==spot.Name and value.Source==spot.EncounterNames then return value end
+        value={Name=spot.Name,Source=spot.EncounterNames,Expected={},Count=0}
+        if spot.EncounterNames then
+            for expected in pairs(spot.EncounterNames)do
+                local key=clean(expected);value.Expected[key]=true;value.Count+=1;value.Only=key
+            end
+        else local key=clean(spot.Name);value.Expected[key]=true;value.Count=1;value.Only=key end
+        descriptors[spot]=value
+        return value
+    end
+    local function slotName(spot,sample,definition)
+        local cached=sample.Model and names[sample.Model]
+        if not cached or cached.Name~=sample.Name then
+            cached={Name=sample.Name,Key=clean(sample.Name)}
+            if sample.Model then names[sample.Model]=cached end
         end
-        -- Native short names can differ from the catalog; match single-boss arenas by position.
-        if count==1 and spot.Position and sample.Position then
+        if definition.Expected[cached.Key]then return cached.Key end
+        if definition.Count==1 and spot.Position and sample.Position then
             local a,b=spot.Position,sample.Position
-            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return only end
+            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return definition.Only end
         end
     end
     function api.Update(now,spots)
         if now<nextScan then return end
         nextScan=now+.1
-        local samples=ctx.Samples()
+        local samples
+        local floor=ctx.CurrentFloor()
         for _,spot in ipairs(spots)do
-            if spot.PlaceId==ctx.CurrentFloor()and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
+            if spot.PlaceId==floor and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
+                samples=samples or ctx.Samples()
+                local definition=descriptor(spot)
                 local record=api.Records[spot.Id]
                 if not record then record={Slots={}};api.Records[spot.Id]=record end
                 for _,sample in ipairs(samples)do
-                    local key=slotName(spot,sample)
+                    local key=slotName(spot,sample,definition)
                     if key then
                         local slot=record.Slots[key]
                         if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
@@ -4577,7 +4601,6 @@ local function exploreEmptyArea(character, root, humanoid, now)
     if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused · no safe destination found"); return end
     exploredCenters[#exploredCenters + 1] = root.Position
     if #exploredCenters > 8 then table.remove(exploredCenters, 1) end
-    if state.FarmCoordination and not state.FarmCoordination.Ready("move")then return end
     ensureMovementController(character, root, humanoid, destination)
     positionAlign.Position = destination
     positionAlign.Enabled, orientationAlign.Enabled = true, true
@@ -4715,6 +4738,7 @@ local function updateMovement()
     state.Exploring = false
     state.LastExploreDestination = nil
     if correctionTarget ~= state.FollowTarget then correctionTarget = state.FollowTarget; correctionStrikes = 0 end
+    if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
     local autoOffset = state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
     local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)
@@ -25419,11 +25443,11 @@ return function(ctx)
         yieldBuild()
         local text=tostring(get()or "")
         local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
-        api.Controls[key]=control;paragraphs[#paragraphs+1]={Control=control,Get=get,Text=text}
+        api.Controls[key]=control;paragraphs[#paragraphs+1]={Tab=tab,Control=control,Get=get,Text=text}
     end
     local function toggle(key,tab,title,get,set,desc)
         yieldBuild()
-        local entry={Get=get,Value=get()}
+        local entry={Tab=tab,Get=get,Value=get()}
         local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
             if api.Ready and value~=get()then
                 set(value);entry.Value=get();entry.Control:Set(entry.Value,false)
@@ -25684,12 +25708,16 @@ return function(ctx)
         if tab~=lastTab then lastTab=tab;nextChoices=0 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
+            if entry.Tab==tab then
             local value=entry.Get()
             if value~=entry.Value then entry.Value=value;entry.Control:Set(value,false)end
+            end
         end
         for _,entry in ipairs(paragraphs)do
+            if entry.Tab==tab then
             local text=tostring(entry.Get()or "")
             if text~=entry.Text then entry.Text=text;entry.Control:SetDesc(text)end
+            end
         end
         if now>=nextChoices then
             nextChoices=now+1

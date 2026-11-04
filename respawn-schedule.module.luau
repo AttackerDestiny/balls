@@ -2,30 +2,50 @@
 return function(ctx)
     local api={Records={}}
     local nextScan=0
-    local function clean(text)return tostring(text or ""):lower():gsub("[^%w]","")end
-    local function slotName(spot,sample)
-        local name=clean(sample.Name)
-        local count,only=0,nil
-        for expected in pairs(spot.EncounterNames or {[spot.Name]=true})do
-            count+=1;only=clean(expected)
-            if name==clean(expected)then return only end
+    local descriptors=setmetatable({}, {__mode="k"})
+    local names=setmetatable({}, {__mode="k"})
+    api.NameNormalizations=0
+    local function clean(text)
+        api.NameNormalizations+=1
+        return tostring(text or ""):lower():gsub("[^%w]","")
+    end
+    local function descriptor(spot)
+        local value=descriptors[spot]
+        if value and value.Name==spot.Name and value.Source==spot.EncounterNames then return value end
+        value={Name=spot.Name,Source=spot.EncounterNames,Expected={},Count=0}
+        if spot.EncounterNames then
+            for expected in pairs(spot.EncounterNames)do
+                local key=clean(expected);value.Expected[key]=true;value.Count+=1;value.Only=key
+            end
+        else local key=clean(spot.Name);value.Expected[key]=true;value.Count=1;value.Only=key end
+        descriptors[spot]=value
+        return value
+    end
+    local function slotName(spot,sample,definition)
+        local cached=sample.Model and names[sample.Model]
+        if not cached or cached.Name~=sample.Name then
+            cached={Name=sample.Name,Key=clean(sample.Name)}
+            if sample.Model then names[sample.Model]=cached end
         end
-        -- Native short names can differ from the catalog; match single-boss arenas by position.
-        if count==1 and spot.Position and sample.Position then
+        if definition.Expected[cached.Key]then return cached.Key end
+        if definition.Count==1 and spot.Position and sample.Position then
             local a,b=spot.Position,sample.Position
-            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return only end
+            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return definition.Only end
         end
     end
     function api.Update(now,spots)
         if now<nextScan then return end
         nextScan=now+.1
-        local samples=ctx.Samples()
+        local samples
+        local floor=ctx.CurrentFloor()
         for _,spot in ipairs(spots)do
-            if spot.PlaceId==ctx.CurrentFloor()and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
+            if spot.PlaceId==floor and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
+                samples=samples or ctx.Samples()
+                local definition=descriptor(spot)
                 local record=api.Records[spot.Id]
                 if not record then record={Slots={}};api.Records[spot.Id]=record end
                 for _,sample in ipairs(samples)do
-                    local key=slotName(spot,sample)
+                    local key=slotName(spot,sample,definition)
                     if key then
                         local slot=record.Slots[key]
                         if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end

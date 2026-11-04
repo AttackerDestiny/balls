@@ -93,12 +93,13 @@ return function(source)
         Teleport=function()record("TeleportPlayer")end,
         SetViewing=function(on)record("SetViewing",on);s.ViewingPlayer=on end,
         SetInventoryVisible=function(on)record("SetInventoryVisible",on);s.ViewingPlayerInventory=on end}
+    local friendReads=0
     local present=false
     local visible=true
     local yields=0
     local api=make({AddWhitelistClear=function(control,clear)
         return {Callback=clear}
-    end,Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()return present end,Visibility=function(value)visible=value end})
+    end,Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()friendReads+=1;return present end,Visibility=function(value)visible=value end})
     assert(yields>=40,"UI construction must offer frame-budget yield points")
     local c=api.Controls
     assert(c.AutoJoinFriendStatus.Title=="Status"and c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
@@ -162,7 +163,7 @@ return function(source)
     s.StopEverything=false
     local idleReads=inventoryReads
     api.Update(4);flush();assert(inventoryReads==idleReads,"Main tab must not rebuild inventory dropdowns")
-    api.Tabs.Utility:Select();api.Update(4.3);flush();before=#calls
+    api.Tabs.Utility:Select();local beforeFriendReads=friendReads;api.Update(4.3);flush();assert(friendReads==beforeFriendReads,"Offscreen status cards must not scan players");before=#calls
     gemCount=80;api.Update(5.4);flush()
     assert(#calls==before,"Inventory quantity refreshes cannot change trade selections or invoke actions")
     assert(c.TradeItems.Value[1]=="Gem x80"and s.TradeItems.Gem)

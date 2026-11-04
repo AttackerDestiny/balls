@@ -61,5 +61,15 @@ return function(scheduleSource,multiSource)
         Spots=function()return {a,b}end,CurrentFloor=function()return 1 end,CanMove=function()return true end,
         Go=function(spot)picked=spot.Id;return true end,Release=function()end,Save=function()end,Status=function()end})
     api.Update(1);assert(picked=="b","Ready spots use saved click order rather than catalog order")
+    local checks=0
+    local cached=makeSchedule({Samples=function()checks+=1;return {{Model=am.Model,Name="Boss A",Health=100,Position=point(0)}}end,CurrentFloor=function()return 1 end})
+    cached.Update(0,{a,b});local builds=cached.NameNormalizations
+    for tick=1,100 do cached.Update(tick*.11,{a,b})end
+    assert(cached.NameNormalizations==builds,"Repeated checks must reuse normalized boss/arena names")
+    local replacement={Id="a",Name="Renamed boss",PlaceId=1,Position=point(0),RespawnSeconds=45,EncounterNames={["Renamed boss"]=true}}
+    cached.Update(12,{replacement});assert(cached.NameNormalizations>builds,"Catalog replacement invalidates cached names")
+    local before=checks
+    cached.Update(13,{{Id="custom",Name="Custom",PlaceId=1}})
+    assert(checks==before,"Floors without known respawn timers must skip the boss sample scan")
     print("PASS Respawn rotation: confirmed kill clocks, 90/45 seconds, corpses, streaming, grouped bosses, adds, cooldown waits, due return and click-order priority")
 end
