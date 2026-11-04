@@ -104,6 +104,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("mobile-regression.test.luau")) + "))()(sources)\n"
     fixture += "local result=assert(loadstring(" + quote(read("continuous-swing.test.luau")) + "))()(" + quote(swing) + ")\n"
     fixture += 'assert(result.Passed)\nprint("PASS Normal swing cadence")\n'
+    fixed_start = script.index("function state.ResolveAutoOffset(mob)")
+    fixed = script[fixed_start:script.index("    local now,mobRoot=os.clock(),data.Root", fixed_start)] + '\nreturn "default"\nend'
+    fixture += "assert(loadstring(" + quote(read("unborn-position.test.luau")) + "))()(" + quote(fixed) + ")\n"
     encounter_start = script.index("function state.ReadAutomationEncounter(spot)")
     encounter = script[encounter_start:script.index("function state.RegisterAutomationDestination", encounter_start)]
     valid_start = script.index("local function validMob(mob, mobs)")

@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-03.startup-below-v1.12.40"
-local VERSION="1.12.40"
+local BUILD="2026-11-04.unborn-fixed-position-v1.12.41"
+local VERSION="1.12.41"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2051,10 +2051,23 @@ end
         end})
 end
 function state.ResolveAutoOffset(mob)
+    state.FixedFarmPosition=nil
     local data=getMobData(mob)
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     if not data or not root then return nil end
+    if state.AutoFarm and mob.Name=="Suspended Unborn"then
+        -- Supplied arena (-2439,60,5389), with the requested +10 height.
+        local destination=Vector3.new(-2439,70,5389)
+        activeOffsetMob,offsetSample=nil,nil
+        state.FixedFarmPosition=destination
+        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
+        state.FarmTargetAirborne=false
+        state.TeleportOffset=destination.Y-data.Root.Position.Y
+        state.OffsetStatus="Suspended Unborn · fixed arena position +10 studs"
+        data.LastGroundedFarmDestination=destination
+        return state.TeleportOffset
+    end
     local now,mobRoot=os.clock(),data.Root
     local key=state.GetOffsetKey(mob,data)
     if not data.BodyBelow or not data.BodyAbove or data.OffsetRootSize ~= mobRoot.Size then
@@ -4612,7 +4625,7 @@ local function updateMovement()
     end
     if now >= nextMovementStatusUpdate or changedTarget then
         nextMovementStatusUpdate = now + 0.2
-        movementStatus(string.format("Auto offset %.1f %s %s", math.abs(state.TeleportOffset),state.OffsetMode=="Above" and "above" or "below",state.FollowTarget.Name))
+        movementStatus(state.FixedFarmPosition and "Suspended Unborn · fixed arena position +10 studs"or string.format("Auto offset %.1f %s %s", math.abs(state.TeleportOffset),state.OffsetMode=="Above" and "above" or "below",state.FollowTarget.Name))
     end
 end
 
