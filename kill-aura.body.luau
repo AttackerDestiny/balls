@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.fps-hotpaths-v1.12.44"
-local VERSION="1.12.44"
+local BUILD="2026-11-04.credit-and-best-gear-v1.12.45"
+local VERSION="1.12.45"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -243,7 +243,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -346,7 +346,7 @@ local restore = {
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
-    AutoFarm=preference("AutoFarm",false)==true,BossOnly=preference("BossOnly",false)==true,
+    AutoFarm=preference("AutoFarm",false)==true,BossOnly=preference("BossOnly",false)==true,CreditCheck=preference("CreditCheck",false)==true,CreditWhitelistText=preference("CreditWhitelistText",""),
     FarmRange=math.huge,
     Threat=3,
     SkillAura=preference("SkillAura",false)==true,
@@ -455,6 +455,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
+    CreditCheck=restore.CreditCheck,CreditWhitelistText=restore.CreditWhitelistText,
     BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
     HitsSent = 0, LastTarget = "None", LastError = nil,
@@ -604,7 +605,7 @@ return function(state)
             local delta=ctx.Delta and ctx.Delta(data,root)or data.Root.Position-root.Position
             local range=ctx.Radius(mob)
             if delta:Dot(delta)>range*range then continue end
-            ctx.Damage(mob)
+            if ctx.Damage(mob)==false then continue end
             api.Mark(mob,now,gap*math.max(1,data.AttackBackoff or 1))
             ctx.Sent(mob,data,now)
             sent+=1;tokens-=1
@@ -929,6 +930,105 @@ function state.ReadOwnDamage(health,counter)
     if counter and counter:IsA("ValueBase") and type(counter.Value)=="number" then return counter.Value,counter end
     return nil,nil
 end
+do
+    local make=(function()
+-- BEGIN BUNDLED CREDIT CHECK
+-- Coordinate only replicated damage contribution; never mutate enemy HP/counters.
+return function(ctx)
+    local api={}
+    local pending=setmetatable({}, {__mode="k"})
+    local state=ctx.State
+    local function status(text)state.CreditCheckStatus=text end
+    function api.Reset()table.clear(pending)end
+    function api.Allow(mob,data)
+        if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
+        local maximum=ctx.MaxHealth(data)
+        if type(maximum)~="number"or maximum~=maximum or maximum<=0 or maximum==math.huge then
+            status("Credit Check · waiting for maximum HP");return false
+        end
+        local required=maximum*.05
+        local members=ctx.Members()
+        local own=ctx.Damage(data,ctx.Self())or 0
+        local waiting,total=0,0
+        for _,person in ipairs(members)do
+            total+=1
+            if (ctx.Damage(data,person)or 0)<required then waiting+=1 end
+        end
+        if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
+        if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
+        if own>=required then
+            pending[mob]=nil
+            status("Credit Check · qualified · waiting for "..waiting.." account(s)")
+            return false
+        end
+        local flight=pending[mob]
+        if flight then
+            if own<flight.Before then pending[mob]=nil
+            elseif own>flight.Before then pending[mob]=nil
+            elseif ctx.Now()<flight.Deadline then status("Credit Check · waiting for damage acknowledgment");return false
+            else pending[mob]=nil end
+        end
+        status("Credit Check · "..math.floor(own).." / "..math.ceil(required))
+        return true
+    end
+    function api.Sent(mob,data)
+        if not state.CreditCheck or ctx.Rank(mob)>2 then return end
+        local maximum=ctx.MaxHealth(data)
+        local own=ctx.Damage(data,ctx.Self())or 0
+        if type(maximum)=="number"and maximum>0 and own<maximum*.05 then
+            pending[mob]={Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
+        end
+    end
+    return api
+end
+
+-- END BUNDLED CREDIT CHECK
+    end)()
+    local parsedText,whitelist,members,rosterAt=nil,{},nil,0
+    local function roster()
+        local text=state.CreditWhitelistText or ""
+        if text~=parsedText then
+            parsedText=text;whitelist={};rosterAt=0
+            for word in text:gmatch("[%w_]+")do whitelist[word:lower()]=true end
+        end
+        local now=os.clock()
+        if members and now<rosterAt then return members end
+        rosterAt=now+.25;members={player}
+        for _,person in ipairs(Players:GetPlayers())do
+            if person~=player and (whitelist[person.Name:lower()]or whitelist[tostring(person.UserId)])then members[#members+1]=person end
+        end
+        return members
+    end
+    state.CreditController=make({State=state,Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,
+        Members=roster,MaxHealth=function(data)
+            local health=data.Health
+            if health:IsA("DoubleConstrainedValue")or health:IsA("IntConstrainedValue")then return health.MaxValue end
+            local maximum=health:GetAttribute("MaxValue")or data.Entity:GetAttribute("MaxHealth")
+            if type(maximum)=="number"then return maximum end
+            local value=data.Entity:FindFirstChild("MaxHealth")
+            return value and value:IsA("ValueBase")and tonumber(value.Value)or nil
+        end,
+        Damage=function(data,person)
+            local counter=data.Health:FindFirstChild(person.Name)or data.Health:FindFirstChild(tostring(person.UserId))
+            local value=counter and counter:IsA("ValueBase")and counter.Value
+            return type(value)=="number"and value==value and math.max(0,value)or nil
+        end})
+    function state.SetCreditCheck(on)
+        state.CreditCheck=on==true;state.CreditController.Reset()
+        if state.WakeSkillAura then state.WakeSkillAura()end
+        requestSave()
+    end
+    function state.SetCreditWhitelist(text)
+        local entries,seen={},{}
+        for word in tostring(text or ""):gmatch("[%w_]+")do
+            if not seen[word:lower()]then entries[#entries+1]=word;seen[word:lower()]=true end
+        end
+        local value=table.concat(entries,", ")
+        if #entries>100 or #value>2000 then error("Use at most 100 Credit Check whitelist entries")end
+        state.CreditWhitelistText=value;parsedText=nil;members=nil
+        state.CreditController.Reset();requestSave()
+    end
+end
 local function getMobRoot(mob)
     local data = getMobData(mob)
     return data and data.Root
@@ -1103,7 +1203,7 @@ local function settingsPayload()
         ProgressionBossClearedName=state.ProgressionBossClearedName,
         ProgressionRestore=state.ProgressionRestore,
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
-        Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,
+        Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,CreditCheck=state.CreditCheck,CreditWhitelistText=state.CreditWhitelistText,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
         AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
@@ -1478,11 +1578,11 @@ do
         end
     end
     toggle.Parent=pages.Combat; farmToggle.Parent=pages.Combat
-    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Weapon",25,34,pages.Combat)
+    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Gear",25,34,pages.Combat)
     state.UI.AutoEquipBestSword=bestSword
     function state.SetAutoEquipBestSword(on)
         state.AutoEquipBestSword=on==true
-        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Weapon · ON" or "Auto Equip Best Weapon · OFF"
+        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Gear · ON" or "Auto Equip Best Gear · OFF"
         bestSword.BackgroundColor3=state.AutoEquipBestSword and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
         if state.ProgressionGearController then state.ProgressionGearController.Reset()end
         requestSave()
@@ -3591,7 +3691,27 @@ do
         end
         requestSave()
     end
-    bind(workspace.DescendantAdded, function(part) if state.TransparentMap then applyPart(part) end end)
+    local pendingParts,queuedParts={},setmetatable({}, {__mode="k"})
+    local pendingHead,pendingTail,streamWorker=1,0,false
+    bind(workspace.DescendantAdded,function(part)
+        if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
+        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=true
+        if streamWorker then return end
+        streamWorker=true
+        task.defer(function()
+            while state.Running and not restoringZoom and pendingHead<=pendingTail do
+                local deadline=os.clock()+.001
+                local count=0
+                while pendingHead<=pendingTail and count<48 and os.clock()<deadline do
+                    local current=pendingParts[pendingHead];pendingParts[pendingHead]=nil;pendingHead+=1;queuedParts[current]=nil
+                    if current.Parent and state.TransparentMap then pcall(applyPart,current)end
+                    count+=1
+                end
+                task.wait()
+            end
+            table.clear(pendingParts);table.clear(queuedParts);pendingHead,pendingTail=1,0;streamWorker=false
+        end)
+    end)
     bind(workspace.DescendantRemoving,function(part)
         if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
     end)
@@ -3812,6 +3932,12 @@ return function(ctx)
             end
             return
         end
+        -- Streaming also adds attachments, constraints, value objects and UI
+        -- layout nodes. They cannot render effects and must not grow the queue.
+        if not(instance:IsA("BasePart")or instance:IsA("ParticleEmitter")or instance:IsA("Beam")or instance:IsA("Trail")
+            or instance:IsA("Smoke")or instance:IsA("Fire")or instance:IsA("Sparkles")or instance:IsA("Light")
+            or instance:IsA("Decal")or instance:IsA("Texture")or instance:IsA("BillboardGui")or instance:IsA("SurfaceGui")
+            or instance:IsA("Highlight")or instance:IsA("Sound"))then return end
         -- Hide proven effects on arrival, before waiting for the next mobile frame.
         -- Cap synchronous work during bursty casts; overflow uses the bounded queue.
         local now=os.clock()
@@ -4838,7 +4964,7 @@ end
 
 -- END BUNDLED AURA TOUCH
     end)()
-    state.AuraTouch=make({Active=function()return state.Running and not state.StopEverything and (state.Enabled or state.SkillAura)end,
+    state.AuraTouch=make({Active=function()return state.Running and not state.StopEverything and (state.Enabled or state.SkillAura or state.CreditCheck)end,
         Items=function()
             local items=workspace:FindFirstChild("CharacterItems")
             return items and items:FindFirstChild(tostring(player.UserId))
@@ -5063,6 +5189,7 @@ local function updateSkillAura()
         local mobRoot=validMob(mob,mobs)
         if not mobRoot then return end
         local data=getMobData(mob)
+        if state.CreditController and not state.CreditController.Allow(mob,data)then return end
         local reach=state.AutoRanges.Range("Skill",data,name)
         if attackDeltaFor(data,root).Magnitude<=reach and (not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)) then target,targetRoot=mob,mobRoot end
     end
@@ -5161,7 +5288,9 @@ local function updateSkillAura()
                 CanRun=function() return current() and os.clock()<lease.ExpiresAt end,
                 Send=function(mob,entry)
                     if not current() then return false end
+                    if state.CreditController and not state.CreditController.Allow(mob,entry)then return false end
                     if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
+                    if state.CreditController then state.CreditController.Sent(mob,entry)end
                     Combat.DealDamage(mob,name)
                     state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob
                     state.LastEnemyAttackKind="Skill";state.LastEnemyAttackSkill=name
@@ -5607,6 +5736,8 @@ normalScheduler.Bind({
     Radius=attackRadiusFor,
     Delta=attackDeltaFor,
     Damage=function(mob)
+        local creditData=getMobData(mob)
+        if state.CreditController and not state.CreditController.Allow(mob,creditData)then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation() end
         if not pendingDamage[mob] then
             local data=getMobData(mob)
@@ -5616,6 +5747,7 @@ normalScheduler.Bind({
                 Contribution=contribution,Counter=counter,SkillRequests=state.SkillHitRequests}
         end
         if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
+        if state.CreditController then state.CreditController.Sent(mob,creditData)end
         Combat.DealDamage(mob,nil)
         state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind="Normal"
     end,
@@ -7101,10 +7233,10 @@ return function(ctx)
         ctx.Release()
         retries=retries+1
         api.LastError=message
-        api.Phase=retries>=3 and "Paused" or "Retrying travel"
-        retryAt=now+math.min(8,2*retries)
-        ctx.Status(retries>=3 and ("Multi Spot paused · "..message.." · toggle off/on to retry")
-            or ("Retrying arena travel · "..message))
+        api.Phase="Retrying travel"
+        local delay=retries<3 and 2*retries or math.min(60,5*2^math.min(4,retries-3))
+        retryAt=now+delay;api.RetryAt=retryAt
+        ctx.Status("Retrying arena in "..delay.."s · "..message)
         -- Runtime failures must never overwrite the user's saved ON preference.
         ctx.Save()
     end
@@ -7184,7 +7316,7 @@ return function(ctx)
     end
     function api.Reset()
         api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.LastVisits={}
-        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;ctx.Release()
+        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil;ctx.Release()
     end
     function api.Update(now)
         if not state.MultiSpot or not state.Running then return end
@@ -7224,7 +7356,11 @@ return function(ctx)
             api.Phase="Idle";api.Current=nil
         end
         if api.Phase=="Retrying travel" then
-            if now<retryAt then return end
+            if now<retryAt then
+                ctx.Status("Retrying arena in "..math.max(1,math.ceil(retryAt-now)).."s · "..tostring(api.LastError))
+                return
+            end
+            if not ctx.CanMove()then return end
             api.Phase="Idle";api.Current=nil
         end
         -- Observe an in-progress trip even if casting or TravelBusy prevents a new one.
@@ -7234,7 +7370,7 @@ return function(ctx)
                 return
             end
             if not ctx.Arrived(api.Current) then travelFailed(now,"Arrival was not confirmed");return end
-            api.MoveDeadline=nil;retries=0;api.LastError=nil
+            api.MoveDeadline=nil;retries=0;api.LastError=nil;api.RetryAt=nil
             local alive,seen=ctx.Encounter(api.Current)
             api.Phase="Waiting for spawn";api.EncounterSeen=api.EncounterSeen or seen or alive>0;clearedSince=nil;api.Visits=api.Visits+1
             ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name)
@@ -8867,7 +9003,7 @@ return function(ctx)
             end
             return result
     end
-    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return not state.AccountProgression end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
+    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return false end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
         Active=gearActive,
         Busy=function()return state.AutoTradeBusy or state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
@@ -9593,9 +9729,9 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
+    for _,key in ipairs({"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
     local function plain(value,depth)
         assert(depth<=12,"Config nesting is too deep")
@@ -25599,7 +25735,11 @@ return function(ctx)
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
     stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
-    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Weapon","SetAutoEquipBestSword")
+    stateToggle("CreditCheck","Combat","Credit Check","SetCreditCheck")
+    input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)
+        if text~=s.CreditWhitelistText then invoke("SetCreditWhitelist",text)end
+    end,"Input A List Of User")
+    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
     stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")

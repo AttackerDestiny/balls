@@ -65,8 +65,9 @@ return function(source)
     print("PASS Shared Safe floor: cross-account load, live read and stale unrelated saves")
 
     local orderOne=make(context({Version=1}))
-    orderOne.Save({BossOnly=true,MultiSpotOrder={"b","a"}})
+    orderOne.Save({CreditCheck=true,CreditWhitelistText="CreditFriend",BossOnly=true,MultiSpotOrder={"b","a"}})
     local orderTwo=make(context({Version=1}))
+    assert(orderTwo.Values.CreditCheck and orderTwo.Values.CreditWhitelistText=="CreditFriend")
     assert(orderTwo.Values.BossOnly and orderTwo.Values.MultiSpotOrder[1]=="b"and orderTwo.Values.MultiSpotOrder[2]=="a")
     print("PASS Boss Only and ordered Multi Spot priorities share across account loads")
 

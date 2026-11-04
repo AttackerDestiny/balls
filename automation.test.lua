@@ -181,9 +181,26 @@ test("failed arena travel retries same arena without saving toggle off",function
     f.Api.Update(2);assert(#f.Goes==1)
     f.Api.Update(3);assert(f.Goes[2]=="a")
     f.Api.Update(4);f.Api.Update(8);f.Api.Update(9)
-    assert(f.State.MultiSpot and f.Api.Phase=="Paused" and #f.Goes==3)
-    f.Api.Update(1000);assert(#f.Goes==3,"Bound retries; no request spam")
+    assert(f.State.MultiSpot and f.Api.Phase=="Retrying travel" and #f.Goes==3)
+    f.Api.Update(13);assert(#f.Goes==3,"Cooldown prevents request spam")
+    f.Api.Update(14);assert(#f.Goes==4,"Travel retries automatically without a manual toggle")
+    f.Arrived=true;f.Api.Update(15);assert(f.Api.RetryAt==nil and f.Api.Phase=="Clearing arena")
 end)
+test("Repeated Multi Spot travel failures retry with bounded cooldown and stop when disabled",function()
+    local f=multiFixture();f.Arrived=false
+    f.Api.Update(0)
+    local t=1
+    for i=1,10 do
+        f.Api.Update(t)
+        assert(f.Api.Phase=="Retrying travel"and f.Api.RetryAt-t<=60)
+        local count=#f.Goes
+        f.Api.Update(f.Api.RetryAt-.01);assert(#f.Goes==count)
+        f.Api.Update(f.Api.RetryAt);assert(#f.Goes==count+1)
+        t=f.Api.RetryAt+1
+    end
+    f.State.MultiSpot=false;local count=#f.Goes;f.Api.Update(t+1000);assert(#f.Goes==count)
+end)
+
 test("travel watchdog runs while no new movement is allowed",function()
     local f=multiFixture();f.Api.Update(0);f.Moving=true;f.Allowed=false
     f.Api.Update(5);assert(f.Api.Phase=="Moving")

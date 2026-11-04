@@ -203,6 +203,12 @@ return function(ctx)
             end
             return
         end
+        -- Streaming also adds attachments, constraints, value objects and UI
+        -- layout nodes. They cannot render effects and must not grow the queue.
+        if not(instance:IsA("BasePart")or instance:IsA("ParticleEmitter")or instance:IsA("Beam")or instance:IsA("Trail")
+            or instance:IsA("Smoke")or instance:IsA("Fire")or instance:IsA("Sparkles")or instance:IsA("Light")
+            or instance:IsA("Decal")or instance:IsA("Texture")or instance:IsA("BillboardGui")or instance:IsA("SurfaceGui")
+            or instance:IsA("Highlight")or instance:IsA("Sound"))then return end
         -- Hide proven effects on arrival, before waiting for the next mobile frame.
         -- Cap synchronous work during bursty casts; overflow uses the bounded queue.
         local now=os.clock()

@@ -38,7 +38,7 @@ return function(state)
             local delta=ctx.Delta and ctx.Delta(data,root)or data.Root.Position-root.Position
             local range=ctx.Radius(mob)
             if delta:Dot(delta)>range*range then continue end
-            ctx.Damage(mob)
+            if ctx.Damage(mob)==false then continue end
             api.Mark(mob,now,gap*math.max(1,data.AttackBackoff or 1))
             ctx.Sent(mob,data,now)
             sent+=1;tokens-=1

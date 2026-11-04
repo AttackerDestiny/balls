@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("CREDIT CHECK", "credit-check.module.luau"),
         ("FARM COORDINATION", "farm-coordination.module.luau"),
         ("RESPAWN SCHEDULE", "respawn-schedule.module.luau"),
         ("STARTUP BELOW", "startup-below.module.luau"),
@@ -132,6 +133,9 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
+    stream_start=script.index("    local pendingParts,queuedParts=")
+    stream_budget=script[stream_start:script.index("    bind(workspace.DescendantRemoving",stream_start)]
+    fixture += "assert(loadstring(" + quote(read("map-stream-budget.test.luau")) + "))()(" + quote(stream_budget) + ")\n"
     gate_start = script.index('    if state.FarmCoordination and not state.DodgeReturnPending')
     movement_gate = script[gate_start:script.index('    local destination = state.AutoOffsetDestination or targetRoot.Position', gate_start)]
     fixture += "assert(loadstring(" + quote(read("fps-budget.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(movement_gate) + ")\n"
@@ -141,6 +145,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
+    credit_send_start=script.index("                Send=function(mob,entry)")+len("                Send=")
+    credit_send=script[credit_send_start:script.index("\n                end,",credit_send_start)]+"\nend"
+    fixture += "assert(loadstring(" + quote(read("credit-check.test.luau")) + "))()(" + quote(read("credit-check.module.luau")) + "," + quote(read("attack-scheduler.module.luau")) + "," + quote(credit_send) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("windui.test.luau")) + "))()(" + quote(read("windui.module.luau")) + ")\n"
     payload_start = script.index("local function settingsPayload()")

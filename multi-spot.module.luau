@@ -7,10 +7,10 @@ return function(ctx)
         ctx.Release()
         retries=retries+1
         api.LastError=message
-        api.Phase=retries>=3 and "Paused" or "Retrying travel"
-        retryAt=now+math.min(8,2*retries)
-        ctx.Status(retries>=3 and ("Multi Spot paused · "..message.." · toggle off/on to retry")
-            or ("Retrying arena travel · "..message))
+        api.Phase="Retrying travel"
+        local delay=retries<3 and 2*retries or math.min(60,5*2^math.min(4,retries-3))
+        retryAt=now+delay;api.RetryAt=retryAt
+        ctx.Status("Retrying arena in "..delay.."s · "..message)
         -- Runtime failures must never overwrite the user's saved ON preference.
         ctx.Save()
     end
@@ -90,7 +90,7 @@ return function(ctx)
     end
     function api.Reset()
         api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.LastVisits={}
-        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;ctx.Release()
+        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil;ctx.Release()
     end
     function api.Update(now)
         if not state.MultiSpot or not state.Running then return end
@@ -130,7 +130,11 @@ return function(ctx)
             api.Phase="Idle";api.Current=nil
         end
         if api.Phase=="Retrying travel" then
-            if now<retryAt then return end
+            if now<retryAt then
+                ctx.Status("Retrying arena in "..math.max(1,math.ceil(retryAt-now)).."s · "..tostring(api.LastError))
+                return
+            end
+            if not ctx.CanMove()then return end
             api.Phase="Idle";api.Current=nil
         end
         -- Observe an in-progress trip even if casting or TravelBusy prevents a new one.
@@ -140,7 +144,7 @@ return function(ctx)
                 return
             end
             if not ctx.Arrived(api.Current) then travelFailed(now,"Arrival was not confirmed");return end
-            api.MoveDeadline=nil;retries=0;api.LastError=nil
+            api.MoveDeadline=nil;retries=0;api.LastError=nil;api.RetryAt=nil
             local alive,seen=ctx.Encounter(api.Current)
             api.Phase="Waiting for spawn";api.EncounterSeen=api.EncounterSeen or seen or alive>0;clearedSince=nil;api.Visits=api.Visits+1
             ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name)
