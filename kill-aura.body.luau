@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.cloudphone-load-v1.12.48"
-local VERSION="1.12.48"
+local BUILD="2026-11-04.credit-full-group-v1.12.49"
+local VERSION="1.12.49"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -948,22 +948,38 @@ return function(ctx)
             pending[mob]=nil
         end
     end
+    local groupWasReady
+    local function groupReady()
+        local members=ctx.Members()
+        local missing={}
+        for _,person in ipairs(members)do
+            if type(person)=="table"and person.CreditMissing then missing[#missing+1]=person.Name end
+        end
+        local ready=#missing==0 and #members>1
+        if ready~=groupWasReady then table.clear(pending);groupWasReady=ready end
+        return ready,members,missing
+    end
     function api.Allow(mob,data)
+        api.Bypass=false
         if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
+        local ready,members,missing=groupReady()
+        if not ready then
+            api.Bypass=true;pending[mob]=nil
+            status(#missing>0 and ("Credit Check inactive · missing from server: "..table.concat(missing,", "))or "Credit Check inactive · no other accounts in whitelist")
+            return true
+        end
         local maximum=ctx.MaxHealth(data)
         if type(maximum)~="number"or maximum~=maximum or maximum<=0 or maximum==math.huge then
             status("Credit Check · waiting for maximum HP");return false
         end
         local required=maximum*.05
-        local members=ctx.Members()
         api.Observe(mob,data)
         local own=ctx.Damage(data,ctx.Self())or 0
-        local waiting,total,missing,noCounter,below=0,0,{},{},{}
+        local waiting,total,noCounter,below=0,0,{},{}
         for _,person in ipairs(members)do
             total+=1
             local damage=ctx.Damage(data,person)
-            if type(person)=="table"and person.CreditMissing then missing[#missing+1]=person.Name
-            elseif damage==nil then noCounter[#noCounter+1]=person.Name end
+            if damage==nil then noCounter[#noCounter+1]=person.Name end
             if (type(person)=="table"and person.CreditMissing)or (damage or 0)<required then
                 waiting+=1
                 if damage~=nil and not(type(person)=="table"and person.CreditMissing)then
@@ -974,8 +990,7 @@ return function(ctx)
         if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
         if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
         local detail
-        if #missing>0 then detail="not in this server: "..table.concat(missing,", ")
-        elseif #noCounter>0 then detail="no replicated damage counter: "..table.concat(noCounter,", ")
+        if #noCounter>0 then detail="no replicated damage counter: "..table.concat(noCounter,", ")
         else detail="below required: "..table.concat(below,", ")end
         if own>=required then
             pending[mob]=nil
@@ -999,7 +1014,7 @@ return function(ctx)
             api.ActionReason=type(maximum)=="number"and (ctx.Damage(data,ctx.Self())or 0)>=maximum*.05 and "Qualified"or "Waiting"
             return false
         end
-        if not state.CreditCheck or ctx.Rank(mob)>2 or not ctx.Planner or not ctx.Options then return true end
+        if api.Bypass or not state.CreditCheck or ctx.Rank(mob)>2 or not ctx.Planner or not ctx.Options then return true end
         local own=ctx.Damage(data,ctx.Self())
         if own==nil and kind=="Normal"then return true end -- Native skill registration.
         local remaining=ctx.MaxHealth(data)*.05-(own or 0)
@@ -1026,6 +1041,7 @@ return function(ctx)
     end
     function api.Sent(mob,data,kind)
         if not state.CreditCheck or ctx.Rank(mob)>2 then return end
+        if not groupReady()then pending[mob]=nil;return end
         local maximum=ctx.MaxHealth(data)
         local own=ctx.Damage(data,ctx.Self())or 0
         if type(maximum)=="number"and maximum>0 and own<maximum*.05 then

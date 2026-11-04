@@ -58,5 +58,18 @@ return function(planSource,creditSource)
     assert(own==250000 and not api.AllowAction(mob,data,"Skill")and api.ActionReason=="Normal")
     active=false;assert(api.AllowAction(mob,data,"Normal"));api.Sent(mob,data,"Normal");own+=50000
     assert(not api.AllowAction(mob,data,"Normal"));other=300000;assert(api.AllowAction(mob,data,"Skill"))
+    local group={me,peer,{Name="Absent",CreditMissing=true}}
+    own=0;other=0
+    api=assert(loadstring(creditSource))()({State=state,Planner=planner,Rank=function()return 1 end,Now=function()return now end,
+        Self=function()return me end,Members=function()return group end,
+        MaxHealth=function()return 6000000 end,Damage=function(_,p)return p==me and own or other end,
+        Options=function()return {NormalKey="n",SkillKey="tick",CastKey="cast",CanNormal=true,CanSkill=true}end})
+    assert(api.AllowAction(mob,data,"Normal")and api.AllowAction(mob,data,"Skill"))
+    api.Sent(mob,data,"Normal")
+    assert(api.AllowAction(mob,data,"Skill"),"Inactive credit checking must not introduce acknowledgment pacing")
+    group={me,peer};own=300000
+    assert(not api.AllowAction(mob,data,"Normal"),"Checking automatically resumes when the full list is present")
+    group={me,peer,{Name="Absent",CreditMissing=true}}
+    assert(api.AllowAction(mob,data,"Normal"),"A member leaving resumes unrestricted damage without toggling Credit Check")
     print("PASS Credit damage planning: 250k skill + 50k normal, minimal excess, disabled modes, observed damage, weapon keys, acknowledgment and unrestricted group finish")
 end

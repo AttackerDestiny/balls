@@ -44,7 +44,9 @@ return function(source,schedulerSource,skillSendSource)
     assert(sends==1 and marked==1,"Qualified group resumes the normal scheduler")
     data.Damage[me]=50;data.Damage[other]=50
     local absent={Name="MissingFriend",CreditMissing=true}
-    members={me,other,absent};assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("not in this server: MissingFriend",1,true))
+    members={me,other,absent};assert(api.Allow(mob,data)and state.CreditCheckStatus:find("inactive",1,true))
+    assert(api.AllowAction(mob,data,"Normal")and api.AllowAction(mob,data,"Skill"),"A missing whitelisted account bypasses both the credit hold and damage planner")
+    members={me};assert(api.Allow(mob,data),"A solo account does not need shared credit checking")
     members={me,other,third};data.Damage[third]=nil
     assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("no replicated damage counter: Third",1,true))
     data.Damage[third]=49;assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("below required: Third 49/50",1,true))
