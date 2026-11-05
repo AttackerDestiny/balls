@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.55**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.56**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -243,7 +243,7 @@ Multi-select from these eight saved options:
 
 Options are explicitly selected. A lower FPS cap reduces resource use; it is not an FPS increase. Unsupported APIs report failure rather than being assumed available.
 
-**Cleanup status** reports removed map parts, pending work and stopped animations. Map processing releases each consumed instance reference immediately and caps the streaming queue at 8,192 entries, with a deferred rescan after overflow. Explicit map deletion permits arena travel to confirm its configured height without a deleted floor; idle holding avoids cumulative height drift. Ordinary walking and floor-dependent dodges can still need geometry.
+Map processing releases each consumed instance reference immediately and caps the streaming queue at 8,192 entries, with a deferred rescan after overflow. Explicit map deletion permits arena travel to confirm its configured height without a deleted floor; idle holding avoids cumulative height drift. Ordinary walking and floor-dependent dodges can still need geometry.
 
 Ground-following discards cached floor heights while map deletion is active. This prevents a stationary enemy from remaining permanently classified as airborne above deleted geometry, which previously could leave the farming position outside attack range. Real upward velocity and supported native attack hints still pause ground following.
 

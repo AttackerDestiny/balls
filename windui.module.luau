@@ -292,13 +292,6 @@ return function(ctx)
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
     end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
-    paragraph("PerformanceCleanupStatus","Utility","Cleanup status",function()
-        local map=s.MapDeletion
-        local animations=s.AnimationRemoval
-        return "Map: "..tostring(map and map.Removed or 0).." removed · "..tostring(map and map.Pending or 0).." pending"
-            .." · Animations stopped: "..tostring(animations and animations.Stopped or 0)
-            ..(map and map.LastError and (" · "..map.LastError)or "")
-    end)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()

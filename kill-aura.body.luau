@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.visual-cleanup-memory-v1.12.55"
-local VERSION="1.12.55"
+local BUILD="2026-11-04.cleanup-status-removed-v1.12.56"
+local VERSION="1.12.56"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -26341,13 +26341,6 @@ return function(ctx)
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
     end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
-    paragraph("PerformanceCleanupStatus","Utility","Cleanup status",function()
-        local map=s.MapDeletion
-        local animations=s.AnimationRemoval
-        return "Map: "..tostring(map and map.Removed or 0).." removed · "..tostring(map and map.Pending or 0).." pending"
-            .." · Animations stopped: "..tostring(animations and animations.Stopped or 0)
-            ..(map and map.LastError and (" · "..map.LastError)or "")
-    end)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()
