@@ -1348,7 +1348,6 @@ local function getMobRoot(mob)
     local data = getMobData(mob)
     return data and data.Root
 end
-
 -- Yield only while initializing; gameplay object creation stays synchronous.
 state.StartupSliceAt=os.clock()
 function state.YieldStartup()
@@ -2169,7 +2168,6 @@ end
     function state.SetPerformanceBoost(name,enabled) return state.PerformanceBoost.Set(name,enabled) end
     renderBoost()
 end
-
 state.MovementOwnership=(function()
 -- BEGIN BUNDLED MOVEMENT OWNER
 -- Resolve ownership from active controller state; no competing persistent leases.
@@ -5353,7 +5351,6 @@ end
             return items and items:FindFirstChild(tostring(player.UserId))
         end})
 end
-
 local swingThread
 local swingTrack,nextSwingAt,swingIndex=nil,0,0
 local function stopSword(force)
@@ -6247,7 +6244,6 @@ local function scan()
     end
     return normalScheduler.Update(now,candidates,root,mobs)
 end
-
 local frameTiming=(function()
 -- BEGIN BUNDLED FRAME TIMING
 -- All deadlines remain wall-clock based. Steady 10 FPS is not a freeze.
@@ -6568,7 +6564,6 @@ end
         end
     end)
 end
-
 state.SetAutoSwing(restore.AutoSwing)
 state.SetEnabled(restore.Enabled)
 if restore.AutoFarm then state.SetAutoFarm(true); if not restore.Enabled then state.SetEnabled(false) end end
@@ -9673,7 +9668,6 @@ end
 end
 
 runtimeOwner.Ready()
-
 -- Manual restart intentionally retires the same-build singleton before reloading.
 do
     local make=(function()
@@ -10260,7 +10254,6 @@ end
     state.ExportConfig=transfer.Export
     state.ImportConfig=transfer.Import
 end
-
 -- WindUI is bundled at a fixed release; queued rejoins need no library download.
 do
     local librarySource=(function()
@@ -28295,7 +28288,6 @@ end
     end
     -- END MODERN UI FAILURE
 end
-
 -- Independent status overlay; hiding WindUI leaves this under the runtime root.
 do
     local make=(function()

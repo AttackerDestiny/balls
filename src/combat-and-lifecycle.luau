@@ -610,4 +610,3 @@ local function scan()
     end
     return normalScheduler.Update(now,candidates,root,mobs)
 end
-

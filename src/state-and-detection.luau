@@ -205,4 +205,3 @@ local function getMobRoot(mob)
     local data = getMobData(mob)
     return data and data.Root
 end
-

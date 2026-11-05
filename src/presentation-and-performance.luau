@@ -241,4 +241,3 @@ do
     function state.SetPerformanceBoost(name,enabled) return state.PerformanceBoost.Set(name,enabled) end
     renderBoost()
 end
-

@@ -1452,4 +1452,3 @@ do
             return items and items:FindFirstChild(tostring(player.UserId))
         end})
 end
-
