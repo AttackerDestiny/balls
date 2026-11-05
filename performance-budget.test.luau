@@ -12,5 +12,10 @@ return function(moduleSource)
     assert(not state.NetworkPressureLimited and state.FrameRequestCap==4,"Restore normal throughput after recovery")
     state.AverageFrameTime=1/30; api.Update(now+6)
     assert(state.FrameRequestCap==2,"Frame pressure must also spread the load")
+    state.PingMs=650;api.Update(now+7)
+    assert(state.FrameRequestCap==1 and state.MaxRequestsPerSecond==12,"Severe latency must not burst two requests at once")
+    state.PingMs=70;state.AverageFrameTime=1/60;api.Update(now+8)
+    assert(state.FrameRequestCap==1,"Severe pressure retains recovery hysteresis")
+    api.Update(now+11);assert(state.FrameRequestCap==4)
     return {Passed=true,LatencyBackoff=true,RecoveryHysteresis=true,FrameBackoff=true}
 end

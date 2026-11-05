@@ -21,6 +21,23 @@ return function(source,canMoveSource)
     for _,client in ipairs(clients)do
         assert(client.Ready("move")and not client.Ready("move"),"Low FPS skips missed beats without a catch-up burst")
     end
+    local people={};for i=1,14 do people[i]={UserId=i}end
+    local enemy={}
+    local positions={}
+    local vector=function(x,y,z)return {X=x,Y=y,Z=z}end
+    for i=1,14 do
+        local client=make({Now=function()return serverTime end,Vector=vector,UserId=i,
+            Members=function()local copy=table.clone(people);table.sort(copy,function(a,b)return a.UserId>b.UserId end);return copy end})
+        local point=client.Spread(vector(0,-20,0),enemy,vector(0,0,0),25)
+        assert(point.X^2+point.Y^2+point.Z^2<25^2,"Separated positions stay inside the attack sphere")
+        for _,other in ipairs(positions)do
+            assert((point.X-other.X)^2+(point.Z-other.Z)^2>=3^2,"14 accounts must not overlap")
+        end
+        positions[#positions+1]=point
+        assert(client.Spread(vector(.1,-20,.1),enemy,vector(0,0,0),25)==point,"Small enemy motion must retain the hold")
+        local constrained=client.Spread(vector(0,-23,0),{},vector(0,0,0),24)
+        assert(constrained.X^2+constrained.Y^2+constrained.Z^2<24^2,"Tight reach takes precedence over spacing")
+    end
     local state={AutoFarm=true}
     local living=true
     state.IsFarmEnemyAlive=function()return living end

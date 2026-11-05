@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.49**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.50**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -147,7 +147,9 @@ Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common 
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
-Farming uses common position geometry and shared server-clock pacing. It avoids following a boss's jump into the sky. **Suspended Unborn is an exception:** farming holds at **(-2439, 70, 5389)**, the supplied arena position plus 10 studs, instead of beneath its moving body.
+Farming uses common geometry and shared server-clock pacing, with separate account positions around each enemy. Slots follow the server's sorted user IDs, refreshed at most once per second. The position controller holds the slot, ignores movement under 0.75 studs, and retains it during boss jumps. Joining/leaving players can reassign slots. Update every farming account to use this behavior.
+
+Normal target spacing stays inside the calculated attack sphere and preserves vertical body clearance; tight reach or very large groups can reduce separation. **Suspended Unborn is an exception:** slots surround the fixed **(-2439, 70, 5389)** arena anchor at the supplied +10 height, with a horizontal radius capped at 12 studs, instead of following its moving body. This fixed override does not infer attack range from the boss position.
 
 Auto Farm OFF releases its movement, collision, and arena-float ownership. Independently active safety, trade, or native travel can still own movement.
 
@@ -168,6 +170,8 @@ Applies only to **main bosses and mini-bosses**, targeting **5% of maximum HP**.
 5. Once everyone qualifies, unrestricted scripted damage resumes.
 
 The local account is always included; username/user-ID aliases are deduplicated. A solo/empty credit group needs no shared-credit hold. A present player without a visible contribution counter is unverified, not qualified. Safe Mode and Credit Check use **different whitelists**.
+
+Roster calculations are reused between refreshes. An unchanged roster retains pending hit acknowledgments; membership changes clear them. Damage counters are checked on every attempt, and NaN/infinite values remain unverified. Severe latency above 500 ms or script loop cost above 6 ms reduces normal requests to one per frame and 12 per second, with a three-second recovery interval. This reduces outgoing bursts; it does not change the network's underlying latency.
 
 The planner learns normal-hit and selected-skill damage per equipped weapon/enemy type. It chooses a low-excess combination and rechecks actual contribution after each hit. With 300k remaining, observed 250k skill damage, and 50k normal hits, it can plan one skill plus one normal hit. Unknown damage requires calibration; criticals, partial skill windows, changed equipment, and replication can alter estimates. Only enabled aura modes are used.
 

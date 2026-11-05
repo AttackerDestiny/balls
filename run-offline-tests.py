@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("PERFORMANCE BUDGET", "performance-budget.module.luau"),
         ("CREDIT DAMAGE PLAN", "credit-damage-plan.module.luau"),
         ("CREDIT ROSTER", "credit-roster.module.luau"),
         ("CREDIT CHECK", "credit-check.module.luau"),
@@ -144,6 +145,7 @@ def main():
     move_adapter = read("server-isolation-client.module.luau")
     can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
     fixture += "assert(loadstring(" + quote(read("farm-coordination.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(can_move) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("performance-budget.test.luau")) + "))()(" + quote(read("performance-budget.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"

@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.credit-full-group-v1.12.49"
-local VERSION="1.12.49"
+local BUILD="2026-11-04.farm-spacing-credit-v1.12.50"
+local VERSION="1.12.50"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -547,6 +547,37 @@ return function(ctx)
         local function snap(value)return math.floor(value*2+.5)/2 end
         return ctx.Vector(snap(point.X),snap(point.Y),snap(point.Z))
     end
+    local roster,rosterAt,slot,count=nil,0,1,1
+    local held=setmetatable({}, {__mode="k"})
+    function api.Spread(point,mob,center,reach)
+        if not ctx.Members then return point end
+        local now=ctx.Now()
+        if not roster or now>=rosterAt then
+            rosterAt=now+1
+            roster=ctx.Members()
+            table.sort(roster,function(a,b)return a.UserId<b.UserId end)
+            slot,count=1,math.max(1,#roster)
+            for i,person in ipairs(roster)do if person.UserId==ctx.UserId then slot=i;break end end
+        end
+        local radius=count>1 and math.min(12,4/(2*math.sin(math.pi/count)))or 0
+        if center and reach then
+            -- Preserve vertical body clearance. Reserve space for position snapping.
+            local vertical=math.abs(point.Y-center.Y)+.5
+            radius=math.min(radius,math.sqrt(math.max(0,(math.max(0,reach-1))^2-vertical^2))-.5)
+            radius=math.max(0,radius)
+        end
+        local angle=(slot-1)*2*math.pi/count
+        local result=api.Position(ctx.Vector(point.X+math.cos(angle)*radius,point.Y,point.Z+math.sin(angle)*radius))
+        local previous=held[mob]
+        if previous and previous.Slot==slot and previous.Count==count then
+            local p=previous.Point
+            local distance=(result.X-p.X)^2+(result.Y-p.Y)^2+(result.Z-p.Z)^2
+            if distance<.75^2 then return p end
+        end
+        held[mob]={Point=result,Slot=slot,Count=count}
+        api.Slot,api.Count,api.Spacing=slot,count,count>1 and 2*radius*math.sin(math.pi/count)or 0
+        return result
+    end
     function api.Deadline(killedAt,seconds)
         return math.ceil((killedAt+seconds)*2)/2
     end
@@ -555,7 +586,8 @@ end
 
 -- END BUNDLED FARM COORDINATION
     end)()
-    state.FarmCoordination=make({Now=state.FarmClock,Vector=Vector3.new})
+    state.FarmCoordination=make({Now=state.FarmClock,Vector=Vector3.new,UserId=player.UserId,
+        Members=function()return Players:GetPlayers()end})
 end
 env.SB2KillAura = state
 local connections = {}
@@ -940,24 +972,39 @@ return function(ctx)
     local pending=setmetatable({}, {__mode="k"})
     local state=ctx.State
     local function status(text)state.CreditCheckStatus=text end
-    function api.Reset()table.clear(pending)end
+    local function damage(data,person)
+        local value=ctx.Damage(data,person)
+        if type(value)~="number"or value~=value or math.abs(value)==math.huge then return nil end
+        return value
+    end
+    local cachedMembers,cachedReady,cachedMissing,groupKey
+    function api.Reset()
+        table.clear(pending)
+        cachedMembers,cachedReady,cachedMissing,groupKey=nil,nil,nil,nil
+        state.CreditDamagePlan=nil
+    end
     function api.Observe(mob,data)
         local flight=pending[mob]
-        local own=ctx.Damage(data,ctx.Self())
+        local own=damage(data,ctx.Self())
         if flight and own and own>flight.Before then
             if ctx.Planner and flight.Key then ctx.Planner.Learn(flight.Key,own-flight.Before)end
             pending[mob]=nil
         end
     end
-    local groupWasReady
     local function groupReady()
         local members=ctx.Members()
+        if members==cachedMembers then return cachedReady,members,cachedMissing end
         local missing={}
+        local keys={}
         for _,person in ipairs(members)do
+            keys[#keys+1]=tostring(person.UserId or person.Name)..":"..tostring(type(person)=="table"and person.CreditMissing==true)
             if type(person)=="table"and person.CreditMissing then missing[#missing+1]=person.Name end
         end
         local ready=#missing==0 and #members>1
-        if ready~=groupWasReady then table.clear(pending);groupWasReady=ready end
+        table.sort(keys)
+        local key=table.concat(keys,"|")
+        if key~=groupKey then table.clear(pending);groupKey=key end
+        cachedMembers,cachedReady,cachedMissing=members,ready,missing
         return ready,members,missing
     end
     function api.Allow(mob,data)
@@ -975,16 +1022,16 @@ return function(ctx)
         end
         local required=maximum*.05
         api.Observe(mob,data)
-        local own=ctx.Damage(data,ctx.Self())or 0
+        local own=damage(data,ctx.Self())or 0
         local waiting,total,noCounter,below=0,0,{},{}
         for _,person in ipairs(members)do
             total+=1
-            local damage=ctx.Damage(data,person)
-            if damage==nil then noCounter[#noCounter+1]=person.Name end
-            if (type(person)=="table"and person.CreditMissing)or (damage or 0)<required then
+            local contribution=damage(data,person)
+            if contribution==nil then noCounter[#noCounter+1]=person.Name end
+            if (type(person)=="table"and person.CreditMissing)or (contribution or 0)<required then
                 waiting+=1
-                if damage~=nil and not(type(person)=="table"and person.CreditMissing)then
-                    below[#below+1]=person.Name.." "..math.floor(damage).."/"..math.ceil(required)
+                if contribution~=nil and not(type(person)=="table"and person.CreditMissing)then
+                    below[#below+1]=person.Name.." "..math.floor(contribution).."/"..math.ceil(required)
                 end
             end
         end
@@ -1012,11 +1059,11 @@ return function(ctx)
         api.ActionReason=nil
         if not api.Allow(mob,data)then
             local maximum=ctx.MaxHealth(data)
-            api.ActionReason=type(maximum)=="number"and (ctx.Damage(data,ctx.Self())or 0)>=maximum*.05 and "Qualified"or "Waiting"
+            api.ActionReason=type(maximum)=="number"and (damage(data,ctx.Self())or 0)>=maximum*.05 and "Qualified"or "Waiting"
             return false
         end
         if api.Bypass or not state.CreditCheck or ctx.Rank(mob)>2 or not ctx.Planner or not ctx.Options then return true end
-        local own=ctx.Damage(data,ctx.Self())
+        local own=damage(data,ctx.Self())
         if own==nil and kind=="Normal"then return true end -- Native skill registration.
         local remaining=ctx.MaxHealth(data)*.05-(own or 0)
         if remaining<=0 then return true end -- Everyone qualifies; unrestricted damage.
@@ -1044,7 +1091,7 @@ return function(ctx)
         if not state.CreditCheck or ctx.Rank(mob)>2 then return end
         if not groupReady()then pending[mob]=nil;return end
         local maximum=ctx.MaxHealth(data)
-        local own=ctx.Damage(data,ctx.Self())or 0
+        local own=damage(data,ctx.Self())or 0
         if type(maximum)=="number"and maximum>0 and own<maximum*.05 then
             local options=ctx.Options and ctx.Options(mob,data,kind or "Normal")
             pending[mob]={Key=options and ((kind=="Skill")and options.SkillKey or options.NormalKey),Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
@@ -2347,6 +2394,7 @@ function state.ResolveAutoOffset(mob)
     if state.AutoFarm and mob.Name=="Suspended Unborn"then
         -- Supplied arena (-2439,60,5389), with the requested +10 height.
         local destination=Vector3.new(-2439,70,5389)
+        if state.FarmCoordination then destination=state.FarmCoordination.Spread(destination,mob)end
         activeOffsetMob,offsetSample=nil,nil
         state.FixedFarmPosition=destination
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
@@ -2405,12 +2453,12 @@ function state.ResolveAutoOffset(mob)
             state.OffsetStatus=reason
             return nil
         end
-        local destination=state.FarmCoordination.Position(plan.Destination)
+        local destination=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
         data.LastGroundedFarmDestination=destination
         activeOffsetMob,offsetSample=nil,nil
         state.TeleportOffset=destination.Y-mobRoot.Position.Y
-        state.OffsetStatus="Shared farm position · server-clock pacing"
+        state.OffsetStatus="Separated farm hold · slot "..tostring(state.FarmCoordination.Slot or 1)
         return state.TeleportOffset
     end
     local center=root.Position+state.AutoRanges.Delta(data,root)
@@ -6041,7 +6089,7 @@ end)()(state)
 state.PerformanceBudget=(function()
 -- BEGIN BUNDLED PERFORMANCE BUDGET
 return function(state)
-    local nextUpdate,pressureUntil=0,0
+    local nextUpdate,pressureUntil,severeUntil=0,0,0
     local api={}
     function api.Update(now)
         now=now or os.clock()
@@ -6050,14 +6098,17 @@ return function(state)
         local pressure=(state.AverageFrameTime or 1/60)>1/45 or (state.PingMs or 0)>300
             or (state.AverageLoopCost or 0)>.002
         if pressure then pressureUntil=now+3 end
+        if (state.PingMs or 0)>500 or (state.AverageLoopCost or 0)>.006 then severeUntil=now+3 end
         local limited=now<pressureUntil
-        state.FrameRequestCap=limited and 2 or 4
-        state.MaxRequestsPerSecond=limited and 24 or 48
+        local severe=now<severeUntil
+        state.FrameRequestCap=severe and 1 or (limited and 2 or 4)
+        state.MaxRequestsPerSecond=severe and 12 or (limited and 24 or 48)
         state.NetworkPressureLimited=limited
     end
     api.Update()
     return api
 end
+
 -- END BUNDLED PERFORMANCE BUDGET
 end)()(state)
 

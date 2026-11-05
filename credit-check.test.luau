@@ -51,6 +51,18 @@ return function(source,schedulerSource,skillSendSource)
     assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("no replicated damage counter: Third",1,true))
     data.Damage[third]=49;assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("below required: Third 49/50",1,true))
     data.Damage[third]=50;assert(api.Allow(mob,data));members={me,other}
+    data.Damage[me]=50;data.Damage[other]=0/0
+    assert(not api.Allow(mob,data),"NaN is an unknown counter, never qualified")
+    data.Damage[other]=math.huge
+    assert(not api.Allow(mob,data),"Infinite counters cannot authorize finishing")
+    data.Damage[other]=50
+    assert(api.Allow(mob,data),"Replicated valid counters immediately resume finishing")
+    data.Damage[me]=0;data.Damage[other]=0;api.Reset();api.Sent(mob,data)
+    members={me,other} -- Same membership, fresh roster snapshot.
+    assert(not api.Allow(mob,data),"Roster refreshes must retain an in-flight hit")
+    members={me,third};data.Damage[third]=0
+    assert(api.Allow(mob,data),"A changed group invalidates the old acknowledgment lease")
+    members={me,other};api.Reset()
     local calls=0
     local send=assert(loadstring("return "..skillSendSource))
     setfenv(send,setmetatable({state={CreditController=api},current=function()return true end,
