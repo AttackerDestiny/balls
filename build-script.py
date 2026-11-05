@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "MAP DELETION": "map-deletion.module.luau",
     "PERFORMANCE BOOST": "performance-boost.module.luau",
     "PERFORMANCE BUDGET": "performance-budget.module.luau",
     "CREDIT DAMAGE PLAN": "credit-damage-plan.module.luau",

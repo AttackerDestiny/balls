@@ -59,9 +59,14 @@ return function(source)
         assert(not rendering and cap==15,"Apply source resource-saving options")
         api.SetUIVisible(true);assert(cap==60,"An open UI must not remain throttled to 15 FPS")
         api.SetUIVisible(false);assert(cap==15,"Hiding UI restores the farming FPS limit")
+        local mapEnabled,mapDestroyed
+        state.MapDeletion={Set=function(value)mapEnabled=value;return true end,Destroy=function()mapDestroyed=true end}
+        assert(api.Set("Delete map",true)and mapEnabled,"The map option must reach its controller")
+        assert(api.Set("Delete map",false)and mapEnabled==false,"OFF must stop map deletion")
         state.StopEverything=true
         assert(not api.Set("Limit FPS",false),"Respect master pause")
         api.Destroy(); api.Destroy()
+        assert(mapDestroyed,"Cleanup must retire the map deletion worker")
         assert(rendering and cap==60 and emitter.Enabled and graphics.ServerEvent==original and ui.ServerEvent==uiOriginal and not playersHidden and not effectsHidden,"Cleanup restores owned resources")
     end)
     api.Destroy(); root:Destroy()

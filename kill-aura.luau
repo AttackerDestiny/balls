@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.ui-frame-budget-v1.12.52"
-local VERSION="1.12.52"
+local BUILD="2026-11-04.map-credit-convergence-v1.12.53"
+local VERSION="1.12.53"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -1007,6 +1007,14 @@ return function(ctx)
         cachedMembers,cachedReady,cachedMissing=members,ready,missing
         return ready,members,missing
     end
+    function api.FarmTarget(locked,candidates,valid,less)
+        if not state.CreditCheck or not groupReady()then return locked end
+        local best
+        for mob in pairs(candidates)do
+            if ctx.Rank(mob)<=2 and valid(mob)and (not best or less(mob,best))then best=mob end
+        end
+        return best or locked
+    end
     function api.Allow(mob,data)
         api.Bypass=false
         if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
@@ -1038,11 +1046,11 @@ return function(ctx)
         if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
         if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
         local detail
-        if #noCounter>0 then detail="no replicated damage counter: "..table.concat(noCounter,", ")
+        if #noCounter>0 then detail="no replicated damage counter on "..tostring(mob.Name or "this enemy")..": "..table.concat(noCounter,", ")
         else detail="below required: "..table.concat(below,", ")end
         if own>=required then
             pending[mob]=nil
-            status("Credit Check · qualified · "..detail)
+            status("Credit Check · you qualified · group "..(total-waiting).."/"..total.." ready · "..detail)
             return false
         end
         local flight=pending[mob]
@@ -1866,7 +1874,7 @@ do
     create("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.BoostOptions)
     create("UIPadding",{PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.BoostOptions)
     state.UI.BoostButtons={}
-    for index,name in ipairs({"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Disable rendering","Limit FPS"}) do
+    for index,name in ipairs({"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}) do
         local button=uiButton("Boost"..index,name,index,28,state.UI.BoostOptions)
         button.Font=Enum.Font.Gotham; button.TextSize=11
         state.UI.BoostButtons[name]=button
@@ -2106,7 +2114,7 @@ end
 -- Source performance options; text is visible unless explicitly hidden.
 return function(ctx)
     local state=ctx.State
-    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Disable rendering","Limit FPS"}}
+    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}}
     local options,known={},{}
     for _,name in ipairs(api.Names) do known[name]=true; options[name]=ctx.Options and ctx.Options[name]==true end
     state.PerformanceBoosters=options
@@ -2214,6 +2222,8 @@ return function(ctx)
             if not ctx.PlayerVisibility or not ctx.PlayerVisibility.Set(enabled) then return false end
         elseif name=="Hide effects" then
             if not ctx.PlayerVisibility or not ctx.PlayerVisibility.SetEffects(enabled) then return false end
+        elseif name=="Delete map"and state.MapDeletion then
+            if not state.MapDeletion.Set(enabled)then return false end
         end
         options[name]=enabled
         if name=="No damage particles" then if enabled then attachParticles() else detachParticles() end end
@@ -2228,6 +2238,7 @@ return function(ctx)
         if disposed then return end
         disposed=true
         rootAdded:Disconnect(); detachParticles(); unhookGraphics(); unhookUI()
+        if state.MapDeletion then state.MapDeletion.Destroy()end
         if ctx.PlayerVisibility then ctx.PlayerVisibility.Destroy() end
         if renderOwned then pcall(ctx.SetRendering,true); renderOwned=false end
         if fpsOwned then pcall(ctx.SetFPS,oldCap); fpsOwned=false end
@@ -2749,6 +2760,10 @@ function state.GetFarmPriorityTarget(now)
     if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     local mobs=refreshMobIndex()
     if not mobs then return nil end
+    if state.CreditController and state.CreditCheck then
+        local focus=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
+        if focus then return focus end
+    end
     if state.IsFarmEnemyAlive()then
         local locked=state.FarmTargetLock or state.FollowTarget
         return targetPriority.Rank(locked)<=2 and locked or nil
@@ -3941,6 +3956,103 @@ do
         player.CameraMaxZoomDistance=oldZoom
         for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
     end
+    local makeDeletion=(function()
+-- BEGIN BUNDLED MAP DELETION
+-- Client-only static geometry removal; never delete gameplay containers/models.
+return function(ctx)
+    local api={Removed=0}
+    local enabled,disposed,worker=false,false,false
+    local generation=0
+    local added
+    local needsScan=false
+    local queue,queued={},setmetatable({}, {__mode="k"})
+    local head,tail=1,0
+    local protectedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,
+        WaveDefenseStuff=true,MobSpawnEffects=true,CurrentCamera=true}
+    local protectedWords={"teleport","portal","spawn","checkpoint","trigger","hazard","npc","shop","quest","pad","door"}
+    local function removable(part)
+        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")then return false end
+        if ctx.Protected(part)then return false end
+        local current=part
+        while current and current~=ctx.Root do
+            if protectedNames[current.Name]or current:IsA("Camera")or current:IsA("Tool")then return false end
+            local name=current.Name:lower()
+            for _,word in ipairs(protectedWords)do
+                if name:find(word,1,true)then return false end
+            end
+            if current:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(current)
+                or current:FindFirstChildOfClass("Humanoid")or current:FindFirstChild("Entity"))then return false end
+            if current:FindFirstChildOfClass("ProximityPrompt")or current:FindFirstChildOfClass("ClickDetector")
+                or current:FindFirstChildOfClass("TouchTransmitter")then return false end
+            current=current.Parent
+        end
+        return current==ctx.Root
+    end
+    api.Removable=removable
+    local function start()
+        if worker or not enabled or disposed then return end
+        worker=true
+        local token=generation
+        ctx.Defer(function()
+            if token~=generation or disposed or not ctx.State.Running then return end
+            local scan=needsScan and ctx.Root:QueryDescendants("BasePart")or {}
+            needsScan=false
+            local index=1
+            while token==generation and enabled and not disposed and ctx.State.Running do
+                if ctx.State.StopEverything then ctx.Wait(.25)
+                else
+                    local deadline=ctx.Now()+.001
+                    local count=0
+                    while count<32 and ctx.Now()<deadline and token==generation and enabled do
+                        local part
+                        if index<=#scan then part=scan[index];index+=1
+                        elseif head<=tail then part=queue[head];queue[head]=nil;head+=1;queued[part]=nil
+                        else break end
+                        if removable(part)then
+                            local ok=pcall(function()part:Destroy()end)
+                            if ok then api.Removed+=1 end
+                        end
+                        count+=1
+                    end
+                    if index>#scan and head>tail then break end
+                    ctx.Wait()
+                end
+            end
+            if token==generation then
+                table.clear(queue);table.clear(queued);head,tail=1,0;worker=false
+            end
+        end)
+    end
+    function api.Set(value)
+        if disposed then return false end
+        value=value==true
+        if value==enabled then return true end
+        enabled=value;generation+=1
+        if added then added:Disconnect();added=nil end
+        table.clear(queue);table.clear(queued);head,tail=1,0;worker=false
+        if enabled then
+            needsScan=true
+            added=ctx.Root.DescendantAdded:Connect(function(part)
+                if not enabled or not part:IsA("BasePart")or queued[part]then return end
+                tail+=1;queue[tail]=part;queued[part]=true
+                start()
+            end)
+            start()
+        end
+        return true
+    end
+    function api.Destroy()
+        if disposed then return end
+        api.Set(false);disposed=true
+    end
+    return api
+end
+
+-- END BUNDLED MAP DELETION
+    end)()
+    state.MapDeletion=makeDeletion({State=state,Root=workspace,Players=Players,Now=os.clock,Defer=task.defer,Wait=task.wait,
+        Protected=function(part)return not mapPart(part)end})
+    state.MapDeletion.Set(state.PerformanceBoosters["Delete map"]==true)
     state.SetTransparentMap(restore.TransparentMap)
 end
 
@@ -5040,6 +5152,9 @@ local function updateMovement()
             -- not a confirmed kill. Wait for this enemy instead of retargeting.
             if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
         else locked=nil end
+        if not state.AccountProgression and state.CreditController then
+            locked=state.CreditController.FarmTarget(locked,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
+        end
         if locked then
             state.FarmTargetLock=locked
             state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
@@ -26044,7 +26159,7 @@ return function(ctx)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
 
-    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Disable rendering","Limit FPS"}
+    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}
     local function applyBoost(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
@@ -26053,7 +26168,7 @@ return function(ctx)
     dropdown("PerformanceBoosters","Utility","Performance boosters",function()
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
-    end,applyBoost,true)
+    end,applyBoost,true,"Delete map removes local scenery/floors in batches. OFF stops deletion; rejoin to restore. Gameplay objects and terrain stay.")
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()

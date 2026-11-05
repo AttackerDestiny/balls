@@ -1,4 +1,4 @@
-return function(prioritySource,dataSource,validSource,selectionSource)
+return function(prioritySource,dataSource,validSource,selectionSource,creditSource)
     local function load(source,env)
         local fn=assert(loadstring(source));setfenv(fn,setmetatable(env or {},{__index=getfenv()}));return fn()
     end
@@ -117,6 +117,15 @@ return function(prioritySource,dataSource,validSource,selectionSource)
     for _,a in ipairs(synchronized)do assert(a.Select(vec(0),mainB,3)==globalMini,"After main bosses, all accounts choose the same out-of-arena mini-boss")end
     globalMini.Children.Entity.Children.Health.Value=0
     for _,a in ipairs(synchronized)do assert(a.Select(vec(0),globalMini,4)==nil,"Regular mobs outside the selected arena remain excluded")end
+    local creditFactory=assert(loadstring(creditSource))()
+    mainA.Children.Entity.Children.Health.Value=100;mainB.Children.Entity.Children.Health.Value=100
+    for i=1,3 do
+        local a=account({mainA,mainB})
+        a.State.CreditCheck=true;a.State.FarmTargetLock=i==1 and mainA or mainB
+        a.State.CreditController=creditFactory({State=a.State,Members=function()return {{Name="A"},{Name="B"}}end,Rank=a.Priority.Rank})
+        assert(a.Select(vec(i*1000),a.State.FarmTargetLock,0)==mainA,"Active credit groups must converge despite conflicting living locks")
+    end
+    print("PASS Credit target convergence: split living locks across three accounts adopt one boss instead of waiting on each other")
     print("PASS Global boss override: main=1, mini=2, cross-arena priority, different account locks converge after current kills, all priority kills and regular arena scope")
     print("PASS Shared farm targets: three account origins, previous targets, iteration order, boss/name/position ordering, death, late HitLives, invulnerability and trade priority")
     print("PASS Forced farm priority: main=1, mini=2, regular=3, finish-current-before-switch, native metadata updates and mixed rank markers")

@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.52**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.53**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -117,7 +117,7 @@ Rotation uses the supplied **90s/45s respawn times** for the timed built-in aren
 
 Timers begin at the observed boss death, not at arrival or after clearing adds. Actual living spawns override predictions. An already-dead body or streaming disappearance does not fabricate a new kill. Timers belong to the current runtime/server; a rejoin does not import another server's spawn predictions. Untimed/custom spots receive periodic spawn checks instead of an invented timer.
 
-The current living enemy is finished before changing target or spot, including when a higher-priority spot becomes ready. With Boss Only OFF, remaining arena mobs must also be cleared before normal rotation leaves. With Boss Only ON, ordinary adds are excluded. Outside-arena bosses can be selected after the current fight; rotation resumes afterward.
+The current living enemy is normally finished before changing target or spot, including when a higher-priority spot becomes ready. An active complete Credit Check group instead converges on one common loaded boss order, overriding conflicting living locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must also be cleared before normal rotation leaves. With Boss Only ON, ordinary adds are excluded. Outside-arena bosses can be selected after the current fight; rotation resumes afterward.
 
 After five seconds without a target, empty arenas can return to their selected anchor. Travel failures automatically retry with increasing cooldowns capped at 60 seconds; success clears the backoff. Explicit protection/controller pauses are separate from travel-retry cooldowns.
 
@@ -145,7 +145,7 @@ Offline users, full servers, locked floors, and native join permissions can prev
 
 ### Target selection and movement
 
-Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. The current living target stays locked even if something higher priority spawns. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release it. Temporary invulnerability or missing streamed health is not a confirmed kill.
+Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. The current living target normally stays locked even if something higher priority spawns. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
@@ -174,6 +174,8 @@ Applies only to **main bosses and mini-bosses**, targeting **5% of maximum HP**.
 5. Once everyone qualifies, unrestricted scripted damage resumes.
 
 The local account is always included; username/user-ID aliases are deduplicated. A solo/empty credit group needs no shared-credit hold. A present player without a visible contribution counter is unverified, not qualified. Safe Mode and Credit Check use **different whitelists**.
+
+Credit belongs to each enemy separately. Qualifying on Radioactive Experiment does not qualify that account on C-618 Uriotol. With Auto Farm active, a complete group uses a common loaded boss order even if accounts previously locked different living enemies. Update every participating account and use matching whitelists; differing streamed enemies can still affect which targets each client can see. Status names the enemy whose counters are missing. All verified members reaching 5% on that same enemy releases the damage gate immediately.
 
 Roster calculations are reused between refreshes. An unchanged roster retains pending hit acknowledgments; membership changes clear them. Damage counters are checked on every attempt, and NaN/infinite values remain unverified. Severe latency above 500 ms or script loop cost above 6 ms reduces normal requests to one per frame and 12 per second, with a three-second recovery interval. This reduces outgoing bursts; it does not change the network's underlying latency.
 
@@ -231,6 +233,7 @@ Multi-select from these eight saved options:
 | **No vel obtained in chat** | Hides Vel-obtained notifications |
 | **Hide players** | Hides supported other-player visuals locally |
 | **Hide effects** | Hides supported effects through the visual controller |
+| **Delete map** | Default OFF. Locally deletes static map parts, including floors, in bounded batches and handles newly streamed scenery. Preserves character/enemy models, gameplay effects, hazards, interaction objects, teleport/spawn objects, and terrain. OFF stops further deletion; rejoin to restore deleted geometry. Missing floors can prevent ordinary walking, travel, and floor-based dodge probes. |
 | **Disable rendering** | Disables 3D rendering when its API is supported |
 | **Limit FPS** | Caps hidden farming at 15 FPS; allows 60 FPS while the UI is open; restores the previous cap when released |
 

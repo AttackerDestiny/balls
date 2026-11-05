@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("MAP DELETION", "map-deletion.module.luau"),
         ("PERFORMANCE BOOST", "performance-boost.module.luau"),
         ("PERFORMANCE BUDGET", "performance-budget.module.luau"),
         ("CREDIT DAMAGE PLAN", "credit-damage-plan.module.luau"),
@@ -125,7 +126,8 @@ def main():
     farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
     # The arena fixture needs validMob returned; the selection fixture embeds its definition.
     valid_definition = valid.removesuffix("\nreturn validMob")
-    fixture += "assert(loadstring(" + quote(read("farm-sync.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("target-priority.module.luau"), data, valid_definition, farm_selection)) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("farm-sync.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("target-priority.module.luau"), data, valid_definition, farm_selection, read("credit-check.module.luau"))) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("map-deletion.test.luau")) + "))()(" + quote(read("map-deletion.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-dodge.test.luau")) + "))()(" + quote(read("atheon-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ground-follow.test.luau")) + "))()(" + quote(read("ground-follow.module.luau")) + ")\n"
     fixture += "local misc=assert(loadstring(" + quote(read("misc-skill.test.luau")) + "))()(" + quote(read("misc-skill.module.luau")) + ")\nassert(misc.Passed)\nprint('PASS Combat-only Cursed Enhancement and support skills')\n"

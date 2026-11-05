@@ -11,6 +11,7 @@ return function(source,schedulerSource,skillSendSource)
     assert(not api.Allow(mob,data),"Normal and skill send paths must share one in-flight credit hit")
     data.Damage[me]=49;assert(api.Allow(mob,data));api.Sent(mob,data)
     data.Damage[me]=50;assert(not api.Allow(mob,data),"Pause exactly at 5% of maximum HP")
+    assert(state.CreditCheckStatus:find("you qualified · group 1/2 ready",1,true),"Personal credit cannot be presented as whole-group qualification")
     data.Max=1000;data.Damage[other]=49;assert(not api.Allow(mob,data),"Do not use remaining HP or another account's partial credit")
     data.Damage[other]=50;assert(api.Allow(mob,data),"Finish only after everyone qualifies")
     members={me,other,third};assert(not api.Allow(mob,data),"A newly present whitelisted member must qualify")
@@ -48,7 +49,7 @@ return function(source,schedulerSource,skillSendSource)
     assert(api.AllowAction(mob,data,"Normal")and api.AllowAction(mob,data,"Skill"),"A missing whitelisted account bypasses both the credit hold and damage planner")
     members={me};assert(api.Allow(mob,data),"A solo account does not need shared credit checking")
     members={me,other,third};data.Damage[third]=nil
-    assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("no replicated damage counter: Third",1,true))
+    assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("no replicated damage counter on this enemy: Third",1,true))
     data.Damage[third]=49;assert(not api.Allow(mob,data)and state.CreditCheckStatus:find("below required: Third 49/50",1,true))
     data.Damage[third]=50;assert(api.Allow(mob,data));members={me,other}
     data.Damage[me]=50;data.Damage[other]=0/0

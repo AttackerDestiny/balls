@@ -1,7 +1,7 @@
 -- Source performance options; text is visible unless explicitly hidden.
 return function(ctx)
     local state=ctx.State
-    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Disable rendering","Limit FPS"}}
+    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}}
     local options,known={},{}
     for _,name in ipairs(api.Names) do known[name]=true; options[name]=ctx.Options and ctx.Options[name]==true end
     state.PerformanceBoosters=options
@@ -109,6 +109,8 @@ return function(ctx)
             if not ctx.PlayerVisibility or not ctx.PlayerVisibility.Set(enabled) then return false end
         elseif name=="Hide effects" then
             if not ctx.PlayerVisibility or not ctx.PlayerVisibility.SetEffects(enabled) then return false end
+        elseif name=="Delete map"and state.MapDeletion then
+            if not state.MapDeletion.Set(enabled)then return false end
         end
         options[name]=enabled
         if name=="No damage particles" then if enabled then attachParticles() else detachParticles() end end
@@ -123,6 +125,7 @@ return function(ctx)
         if disposed then return end
         disposed=true
         rootAdded:Disconnect(); detachParticles(); unhookGraphics(); unhookUI()
+        if state.MapDeletion then state.MapDeletion.Destroy()end
         if ctx.PlayerVisibility then ctx.PlayerVisibility.Destroy() end
         if renderOwned then pcall(ctx.SetRendering,true); renderOwned=false end
         if fpsOwned then pcall(ctx.SetFPS,oldCap); fpsOwned=false end

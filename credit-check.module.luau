@@ -39,6 +39,14 @@ return function(ctx)
         cachedMembers,cachedReady,cachedMissing=members,ready,missing
         return ready,members,missing
     end
+    function api.FarmTarget(locked,candidates,valid,less)
+        if not state.CreditCheck or not groupReady()then return locked end
+        local best
+        for mob in pairs(candidates)do
+            if ctx.Rank(mob)<=2 and valid(mob)and (not best or less(mob,best))then best=mob end
+        end
+        return best or locked
+    end
     function api.Allow(mob,data)
         api.Bypass=false
         if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
@@ -70,11 +78,11 @@ return function(ctx)
         if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
         if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
         local detail
-        if #noCounter>0 then detail="no replicated damage counter: "..table.concat(noCounter,", ")
+        if #noCounter>0 then detail="no replicated damage counter on "..tostring(mob.Name or "this enemy")..": "..table.concat(noCounter,", ")
         else detail="below required: "..table.concat(below,", ")end
         if own>=required then
             pending[mob]=nil
-            status("Credit Check · qualified · "..detail)
+            status("Credit Check · you qualified · group "..(total-waiting).."/"..total.." ready · "..detail)
             return false
         end
         local flight=pending[mob]
