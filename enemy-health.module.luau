@@ -76,9 +76,9 @@ return function(ctx)
         rows[mob]=nil
         if healthRows[row.Health]==row then healthRows[row.Health]=nil end
         layoutDirty,snapshotDirty=true,true
-        for _,connection in ipairs(row.Connections) do connection:Disconnect() end
-        if row.Tween then row.Tween:Cancel() end
-        row.Frame:Destroy()
+        for _,connection in ipairs(row.Connections or {}) do pcall(function()connection:Disconnect()end)end
+        if row.Tween then pcall(function()row.Tween:Cancel()end)end
+        if row.Frame then pcall(function()row.Frame:Destroy()end)end
     end
     function api.Touch(mob)
         if disposed or not root.Parent or not state.Running or not mob or not mob.Parent then return end
@@ -94,6 +94,7 @@ return function(ctx)
         healthRows[data.Health]=row
         layoutDirty,snapshotDirty=true,true
         row.Frame=create("Frame",{Name="Target_"..serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(42,42,44),BackgroundTransparency=0,BorderSizePixel=0},root)
+        if disposed or not state.Running or not root.Parent then remove(mob);return end
         row.Frame:SetAttribute("TargetName",mob.Name)
         corner(row.Frame,14)
         create("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=1,Transparency=.92},row.Frame)

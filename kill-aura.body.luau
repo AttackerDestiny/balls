@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.pistol-priority-v1.12.57"
-local VERSION="1.12.57"
+local BUILD="2026-11-04.cancelled-runtime-cleanup-v1.12.58"
+local VERSION="1.12.58"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -378,7 +378,12 @@ if type(restore.Skill)~="string" then restore.Skill="Piercing Dash" end
 if type(restore.ProgressionRestore)~="table"then restore.ProgressionRestore=nil end
 if restore.ProgressionFloor~=12 then restore.ProgressionComplete=false end
 if previousRuntime and previousRuntime.Destroy then
-    previousRuntime.Destroy(true)
+    local retired,reason=pcall(previousRuntime.Destroy,true)
+    if not retired then
+        previousRuntime.Running=false
+        env.SB2LastReplacementError=tostring(reason)
+        warn("[SB2] Previous runtime cleanup failed; continuing replacement: "..tostring(reason))
+    end
 end
 runtimeOwner.Retire()
 if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
@@ -1575,9 +1580,9 @@ return function(ctx)
         rows[mob]=nil
         if healthRows[row.Health]==row then healthRows[row.Health]=nil end
         layoutDirty,snapshotDirty=true,true
-        for _,connection in ipairs(row.Connections) do connection:Disconnect() end
-        if row.Tween then row.Tween:Cancel() end
-        row.Frame:Destroy()
+        for _,connection in ipairs(row.Connections or {}) do pcall(function()connection:Disconnect()end)end
+        if row.Tween then pcall(function()row.Tween:Cancel()end)end
+        if row.Frame then pcall(function()row.Frame:Destroy()end)end
     end
     function api.Touch(mob)
         if disposed or not root.Parent or not state.Running or not mob or not mob.Parent then return end
@@ -1593,6 +1598,7 @@ return function(ctx)
         healthRows[data.Health]=row
         layoutDirty,snapshotDirty=true,true
         row.Frame=create("Frame",{Name="Target_"..serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(42,42,44),BackgroundTransparency=0,BorderSizePixel=0},root)
+        if disposed or not state.Running or not root.Parent then remove(mob);return end
         row.Frame:SetAttribute("TargetName",mob.Name)
         corner(row.Frame,14)
         create("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=1,Transparency=.92},row.Frame)
@@ -26626,7 +26632,7 @@ end
             end
         end)
     end)
-    if not ok then
+    if not ok and state.Running and env.SB2LoadToken==loadToken and runtimeOwner.Alive()then
         state.WindUIError=tostring(result)
         if state.WindUI then pcall(state.WindUI.Destroy);state.WindUI=nil end
         if library and library.Window then pcall(function()library.Window:Destroy()end)end

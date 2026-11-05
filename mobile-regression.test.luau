@@ -117,6 +117,14 @@ return function(sources)
         f.Time=.13;api.Update();assert(f.State.HealthUpdates==before+2 and f.State.ObservedHealth==9000)
         api.Destroy()
     end)
+    test("HUD replacement cleans up partially initialized rows without a Frame",function()
+        local f=hudFixture();local mob,h=f.Mob("Boss",100)
+        local api=f.Factory(f.Ctx)
+        local disconnected=false
+        api.Rows[mob]={Health=h,Connections={{Disconnect=function()disconnected=true end}}}
+        api.Destroy();api.Destroy()
+        assert(disconnected and next(api.Rows)==nil and api.Root.Parent==nil,"Partial HUD cleanup cannot abort runtime replacement")
+    end)
     local function travelFixture()
         local f={Time=0,Probes=0,Streams=0,Active=true,Character={},Root={Parent=true,Position=vec(0,5,0),Size=vec(2,2,1)},Humanoid={Health=100,HipHeight=2}}
         f.Ctx={Clock=function()return f.Time end,Wait=function(n)f.Time+=n end,

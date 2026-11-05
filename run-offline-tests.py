@@ -113,6 +113,13 @@ def main():
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     fixture += "assert(loadstring(" + quote(read("mobile-regression.test.luau")) + "))()(sources)\n"
+    replacement_start=script.index("if previousRuntime and previousRuntime.Destroy then")
+    replacement=script[replacement_start:script.index("if env.SB2FarmRecoveryUntil",replacement_start)]
+    fixture += "assert(loadstring(" + quote(read("replacement-failure.test.luau")) + "))()(" + quote(replacement) + ")\n"
+    fallback_start=script.index("    if not ok and state.Running and env.SB2LoadToken==loadToken")
+    fallback=script[fallback_start:script.index("-- Independent status overlay",fallback_start)]
+    fallback=fallback[:fallback.rfind("end")]
+    fixture += "assert(loadstring(" + quote(read("cancelled-ui-fallback.test.luau")) + "))()(" + quote(fallback) + ")\n"
     fixture += "local result=assert(loadstring(" + quote(read("continuous-swing.test.luau")) + "))()(" + quote(swing) + ")\n"
     fixture += 'assert(result.Passed)\nprint("PASS Normal swing cadence")\n'
     fixed_start = script.index("function state.ResolveAutoOffset(mob)")
