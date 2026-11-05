@@ -57,6 +57,8 @@ return function(source)
         assert(api.Set("Delete dead mobs",true)); api.Set("No damage particles",true)
         api.Set("Disable rendering",true); api.Set("Limit FPS",true)
         assert(not rendering and cap==15,"Apply source resource-saving options")
+        api.SetUIVisible(true);assert(cap==60,"An open UI must not remain throttled to 15 FPS")
+        api.SetUIVisible(false);assert(cap==15,"Hiding UI restores the farming FPS limit")
         state.StopEverything=true
         assert(not api.Set("Limit FPS",false),"Respect master pause")
         api.Destroy(); api.Destroy()

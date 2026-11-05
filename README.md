@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.51**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.52**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -66,6 +66,8 @@ Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Ut
 | Multi Spot HUD | Separate centered, draggable status panel while Multi Spot is enabled; independent of main-window visibility |
 
 Main controls load first, with remaining tabs populated in background batches. If WindUI initialization fails, the older compatibility window appears and the error is recorded. This alternate layout is a fallback, not another script version.
+
+Show/hide preserves the window's size and skips the full-window resize animation. Visible dropdown refreshes process one control per update instead of rebuilding an entire tab on the opening frame. Reopening an unchanged tab does not force a new refresh.
 
 ## Main
 
@@ -230,7 +232,7 @@ Multi-select from these eight saved options:
 | **Hide players** | Hides supported other-player visuals locally |
 | **Hide effects** | Hides supported effects through the visual controller |
 | **Disable rendering** | Disables 3D rendering when its API is supported |
-| **Limit FPS** | Caps FPS at 15 when supported and restores the previous cap when released |
+| **Limit FPS** | Caps hidden farming at 15 FPS; allows 60 FPS while the UI is open; restores the previous cap when released |
 
 Options are explicitly selected. A lower FPS cap reduces resource use; it is not an FPS increase. Unsupported APIs report failure rather than being assumed available.
 
@@ -418,7 +420,7 @@ Potassium, Arceus X and other executors expose different capabilities. Compatibi
 | Safe Mode cannot block/rejoin | Native input/dialog, readable block list, installed source, file access, teleport queue support, limits and teleport errors |
 | Unexpected gear selection | Effective upgrades/scaling, level requirement, accessory utility score, cosmetic skin exclusion and native acknowledgment |
 | Inventory view unavailable | Native inventory/debug compatibility and replicated target profile |
-| Severe FPS drops | Explicit performance options and frame-time/memory measurements to separate script overhead from rendering/VM load; Limit FPS intentionally caps at 15 |
+| Severe FPS drops | Explicit performance options and frame-time/memory measurements to separate script overhead from rendering/VM load; Limit FPS intentionally caps hidden farming at 15 and allows 60 while the UI is open |
 
 ## Development and verification
 

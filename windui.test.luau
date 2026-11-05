@@ -3,7 +3,9 @@
 return function(source)
     local make=assert(loadstring(source))()
     local queue,calls={},{}
-    local window={CurrentTab=1,Closed=false}
+    local frame={Size="final",Background={},Main={}}
+    local window={CurrentTab=1,Closed=false,Size="final",UIElements={Main=frame}}
+    local nativeOpens,nativeCloses=0,0
     local function later(control)queue[#queue+1]=function()control.Callback(control.Value)end end
     local function flush()
         local count=0
@@ -36,11 +38,11 @@ return function(source)
         assert((name=="Restart script"and icon=="rotate-cw"and order==996)or (name=="Auto-hide UI on execute"and icon=="eye-off"and order==995))
         return {Callback=callback,Topbar=true}
     end
-    function window:OnOpen(fn)self.Opened=fn end
-    function window:OnClose(fn)self.ClosedCallback=fn end
+    function window:OnOpen(fn)self.Opened=fn;self.OnOpenCallback=fn end
+    function window:OnClose(fn)self.ClosedCallback=fn;self.OnCloseCallback=fn end
     function window:OnDestroy(fn)self.DestroyedCallback=fn end
-    function window:Open()self.Closed=false;if self.Opened then self.Opened()end end
-    function window:Close()self.Closed=true;if self.ClosedCallback then self.ClosedCallback()end end
+    function window:Open()nativeOpens+=1;self.Closed=false;if self.Opened then self.Opened()end end
+    function window:Close()nativeCloses+=1;self.Closed=true;if self.ClosedCallback then self.ClosedCallback()end;return {Destroy=function()window.Destroyed=true end}end
     function window:Destroy()self.Destroyed=true;if self.DestroyedCallback then self.DestroyedCallback()end end
     local wind={GetThemes=function()return {Dark={},Light={}}end,SetTheme=function(_,name)return name=="Dark"or name=="Light"end,CreateWindow=function(_,opts)
         assert(opts.Acrylic==false and opts.Folder=="SB2Codex/WindUI","Use the existing workspace and avoid mobile acrylic overhead")
@@ -188,6 +190,8 @@ return function(source)
     assert(not visible and s.UIHidden and s.HealthVisible,"Hiding WindUI must leave the health HUD visible")
     api.Update(10);flush();assert(inventoryReads==reads,"A hidden UI must not scan inventory choices")
     api.SetVisible(true);assert(visible and not s.UIHidden)
+    assert(frame.Visible and frame.Main.Visible and frame.Size=="final"and nativeOpens==0 and nativeCloses==0,"Show/hide must preserve layout without native resize animations")
+    local readsOnOpen=inventoryReads;api.SetVisible(true);assert(inventoryReads==readsOnOpen,"Repeated show requests do not rebuild controls")
     api.Destroy();api.Destroy();before=#calls
     c.AutoTrade:Emit(false);c.RestartScript.Callback();flush()
     assert(#calls==before and window.Destroyed,"Old callbacks are inert after runtime cleanup")
@@ -197,6 +201,11 @@ return function(source)
     assert(staged.Controls.SafeMode and not staged.Controls.Enabled,"Main controls become available before background tabs")
     deferred();flush()
     assert(staged.Controls.Enabled and staged.Controls.AutoTrade,"Background build must finish every feature")
+    staged.Tabs.Utility:Select();local priorReads=inventoryReads
+    staged.Update(20);flush()
+    assert(inventoryReads==priorReads,"An opening frame must not synchronously rebuild the whole Utility tab")
+    for i=1,10 do staged.Update(20+i*.3);flush()end
+    assert(inventoryReads>priorReads,"Sliced refreshes must eventually update inventory")
     assert(staged.Tabs.Settings and staged.Controls.Theme and staged.Controls.ConfigImport and staged.Controls.ConfigExport)
     staged.Controls.Theme:Emit("Light");assert(s.Theme=="Light")
     staged.Controls.ConfigExport.Callback();assert(calls[#calls].Name=="ExportConfig")

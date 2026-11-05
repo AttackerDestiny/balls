@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.farm-hold-cleanup-v1.12.51"
-local VERSION="1.12.51"
+local BUILD="2026-11-04.ui-frame-budget-v1.12.52"
+local VERSION="1.12.52"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2118,8 +2118,18 @@ return function(ctx)
     local uiOriginal,uiWrapper
     local renderOwned,fpsOwned=false,false
     local oldCap
+    local uiVisible=false
     if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS); if ok and type(value)=="number" then oldCap=value end end
     local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and options[name] end
+    function api.SetUIVisible(visible)
+        visible=visible==true
+        if disposed or uiVisible==visible then return end
+        uiVisible=visible
+        if fpsOwned then
+            local ok,message=pcall(ctx.SetFPS,uiVisible and 60 or 15)
+            if not ok then state.LastBoostError=tostring(message)end
+        end
+    end
     local function restoreParticles()
         for instance,record in pairs(particles) do pcall(function() instance.Enabled=record.Enabled; instance.Transparency=record.Transparency end) end
         table.clear(particles)
@@ -2196,7 +2206,7 @@ return function(ctx)
             renderOwned=enabled
         elseif name=="Limit FPS" then
             if not ctx.SetFPS or oldCap==nil then state.LastBoostError="FPS cap control is unavailable"; return false end
-            local ok,message=pcall(ctx.SetFPS,enabled and 15 or oldCap)
+            local ok,message=pcall(ctx.SetFPS,enabled and (uiVisible and 60 or 15)or oldCap)
             if not ok then state.LastBoostError=tostring(message); return false end
             fpsOwned=enabled
         elseif name=="Hide players" then
@@ -25762,6 +25772,8 @@ return function(ctx)
     local nextUpdate,nextChoices=0,0
     local buildSlice=os.clock()
     local lastTab
+    local choiceCursor=1
+    local visibilityApplied=false
     local function yieldBuild()
         if disposed or s.Running==false then error("UI initialization cancelled")end
         if ctx.Yield then ctx.Yield()end
@@ -25798,6 +25810,27 @@ return function(ctx)
         User={Enabled=false},OpenButton={Title="Feather"}})
     assert(window,"WindUI window was not created")
     api.Window=window
+    -- Keep the window at its final size: size tweens invalidate every nested layout.
+    local frame=window.UIElements and window.UIElements.Main
+    if frame then
+        local nativeClose=window.Close
+        local function visibility(visible)
+            if disposed or window.Destroyed then return end
+            window.Closed=not visible;window.CanDropdown=visible
+            window.CanResize=visible and window.Resizable~=false
+            if frame.Size~=window.Size then frame.Size=window.Size end
+            frame.Background.ImageTransparency=0
+            frame.Main.Visible=visible;frame.Visible=visible
+            local callback=visible and window.OnOpenCallback or window.OnCloseCallback
+            if callback then callback()end
+        end
+        window.Open=function()visibility(true)end
+        window.Close=function()
+            visibility(false)
+            -- Preserve the library's native disposal and connection cleanup.
+            return {Destroy=function()return nativeClose(window):Destroy()end}
+        end
+    end
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
@@ -26073,9 +26106,12 @@ return function(ctx)
 
     function api.SetVisible(value)
         if disposed then return end
-        api.Visible=value==true;s.UIHidden=not api.Visible
+        value=value==true
+        if visibilityApplied and api.Visible==value and window.Closed==not value then return end
+        visibilityApplied=true
+        api.Visible=value;s.UIHidden=not api.Visible
         ctx.Visibility(api.Visible)
-        if api.Visible then window:Open();nextChoices=0 else window:Close()end
+        if api.Visible then window:Open()else window:Close()end
     end
     window:OnOpen(function()if not disposed then api.Visible=true;s.UIHidden=false;ctx.Visibility(true)end end)
     window:OnClose(function()if not disposed then api.Visible=false;s.UIHidden=true;ctx.Visibility(false)end end)
@@ -26085,7 +26121,7 @@ return function(ctx)
         nextUpdate=now+.25
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
-        if tab~=lastTab then lastTab=tab;nextChoices=0 end
+        if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
             if entry.Tab==tab then
@@ -26100,8 +26136,9 @@ return function(ctx)
             end
         end
         if now>=nextChoices then
-            nextChoices=now+1
-            for _,entry in ipairs(dropdowns)do
+            local processed=0
+            while choiceCursor<=#dropdowns do
+                local entry=dropdowns[choiceCursor];choiceCursor+=1
                 if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
                 local options=signature(view.Options);local value=entry.Signature(view.Value)
@@ -26110,8 +26147,12 @@ return function(ctx)
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
                 if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
                 entry.Syncing=false
+                processed+=1
+                if ctx.Defer and processed>=1 then break end
                 end
             end
+            if choiceCursor>#dropdowns then choiceCursor=1;nextChoices=now+1
+            else nextChoices=now+.25 end
         end
     end
     function api.Destroy()
@@ -26213,6 +26254,7 @@ end
             end,
             Visibility=function(visible)
                 panel.Visible=false
+                if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(visible)end
                 if state.Running then showUI.Visible=true else showUI.Visible=false end
                 roots(function(root)root.Enabled=visible end)
             end})

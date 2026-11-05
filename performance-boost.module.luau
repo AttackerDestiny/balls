@@ -14,8 +14,18 @@ return function(ctx)
     local uiOriginal,uiWrapper
     local renderOwned,fpsOwned=false,false
     local oldCap
+    local uiVisible=false
     if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS); if ok and type(value)=="number" then oldCap=value end end
     local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and options[name] end
+    function api.SetUIVisible(visible)
+        visible=visible==true
+        if disposed or uiVisible==visible then return end
+        uiVisible=visible
+        if fpsOwned then
+            local ok,message=pcall(ctx.SetFPS,uiVisible and 60 or 15)
+            if not ok then state.LastBoostError=tostring(message)end
+        end
+    end
     local function restoreParticles()
         for instance,record in pairs(particles) do pcall(function() instance.Enabled=record.Enabled; instance.Transparency=record.Transparency end) end
         table.clear(particles)
@@ -92,7 +102,7 @@ return function(ctx)
             renderOwned=enabled
         elseif name=="Limit FPS" then
             if not ctx.SetFPS or oldCap==nil then state.LastBoostError="FPS cap control is unavailable"; return false end
-            local ok,message=pcall(ctx.SetFPS,enabled and 15 or oldCap)
+            local ok,message=pcall(ctx.SetFPS,enabled and (uiVisible and 60 or 15)or oldCap)
             if not ok then state.LastBoostError=tostring(message); return false end
             fpsOwned=enabled
         elseif name=="Hide players" then

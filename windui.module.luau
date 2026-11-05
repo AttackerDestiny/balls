@@ -9,6 +9,8 @@ return function(ctx)
     local nextUpdate,nextChoices=0,0
     local buildSlice=os.clock()
     local lastTab
+    local choiceCursor=1
+    local visibilityApplied=false
     local function yieldBuild()
         if disposed or s.Running==false then error("UI initialization cancelled")end
         if ctx.Yield then ctx.Yield()end
@@ -45,6 +47,27 @@ return function(ctx)
         User={Enabled=false},OpenButton={Title="Feather"}})
     assert(window,"WindUI window was not created")
     api.Window=window
+    -- Keep the window at its final size: size tweens invalidate every nested layout.
+    local frame=window.UIElements and window.UIElements.Main
+    if frame then
+        local nativeClose=window.Close
+        local function visibility(visible)
+            if disposed or window.Destroyed then return end
+            window.Closed=not visible;window.CanDropdown=visible
+            window.CanResize=visible and window.Resizable~=false
+            if frame.Size~=window.Size then frame.Size=window.Size end
+            frame.Background.ImageTransparency=0
+            frame.Main.Visible=visible;frame.Visible=visible
+            local callback=visible and window.OnOpenCallback or window.OnCloseCallback
+            if callback then callback()end
+        end
+        window.Open=function()visibility(true)end
+        window.Close=function()
+            visibility(false)
+            -- Preserve the library's native disposal and connection cleanup.
+            return {Destroy=function()return nativeClose(window):Destroy()end}
+        end
+    end
     -- Use the existing mobile Show UI button so the HUD remains independent.
     window.IsOpenButtonEnabled=false
     if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
@@ -320,9 +343,12 @@ return function(ctx)
 
     function api.SetVisible(value)
         if disposed then return end
-        api.Visible=value==true;s.UIHidden=not api.Visible
+        value=value==true
+        if visibilityApplied and api.Visible==value and window.Closed==not value then return end
+        visibilityApplied=true
+        api.Visible=value;s.UIHidden=not api.Visible
         ctx.Visibility(api.Visible)
-        if api.Visible then window:Open();nextChoices=0 else window:Close()end
+        if api.Visible then window:Open()else window:Close()end
     end
     window:OnOpen(function()if not disposed then api.Visible=true;s.UIHidden=false;ctx.Visibility(true)end end)
     window:OnClose(function()if not disposed then api.Visible=false;s.UIHidden=true;ctx.Visibility(false)end end)
@@ -332,7 +358,7 @@ return function(ctx)
         nextUpdate=now+.25
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
-        if tab~=lastTab then lastTab=tab;nextChoices=0 end
+        if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end
         if not api.Visible then return end
         for _,entry in ipairs(toggles)do
             if entry.Tab==tab then
@@ -347,8 +373,9 @@ return function(ctx)
             end
         end
         if now>=nextChoices then
-            nextChoices=now+1
-            for _,entry in ipairs(dropdowns)do
+            local processed=0
+            while choiceCursor<=#dropdowns do
+                local entry=dropdowns[choiceCursor];choiceCursor+=1
                 if entry.Tab==tab then
                 local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
                 local options=signature(view.Options);local value=entry.Signature(view.Value)
@@ -357,8 +384,12 @@ return function(ctx)
                 if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
                 if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
                 entry.Syncing=false
+                processed+=1
+                if ctx.Defer and processed>=1 then break end
                 end
             end
+            if choiceCursor>#dropdowns then choiceCursor=1;nextChoices=now+1
+            else nextChoices=now+.25 end
         end
     end
     function api.Destroy()
