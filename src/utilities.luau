@@ -343,7 +343,18 @@ do
         Position=function(portal)
             if portal:IsA("BasePart")then return portal.Position end
             if portal:IsA("Model")then return portal:GetPivot().Position end
+            if portal:IsA("Attachment")then return portal.WorldPosition end
+            -- Some maps wrap the actual touch part in a Folder.
+            local fallback
+            for _,part in ipairs(portal:GetDescendants())do
+                if part:IsA("BasePart")then
+                    if part:FindFirstChildOfClass("TouchTransmitter")then return part.Position end
+                    fallback=fallback or part
+                end
+            end
+            return fallback and fallback.Position
         end,
+        Arrived=function(root,point)return root.Parent~=nil and (root.Position-point).Magnitude<=12 end,
         Move=function(root,point,now)
             if state.CancelSkillAura then state.CancelSkillAura("Atheon portal teleport")end
             stopSword(true);finishAttackBurst("Atheon portal teleport")

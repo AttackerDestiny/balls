@@ -5,10 +5,12 @@ return function(source)
     local portal,root,busy,fail=nil,nil,false,false
     local moves=0
     local unlocked=false
+    local arrived=true
     local api=make({State=state,Busy=function()return busy end,
         Unlocked=function()return unlocked end,
         Find=function()return portal end,Root=function()return root end,
         Position=function(p)return p.Position end,
+        Arrived=function()return arrived end,
         Move=function(r,p)
             if fail then error("transient")end
             assert(r==root and p==portal.Position);moves+=1
@@ -37,6 +39,10 @@ return function(source)
     api.Reset();fail=true;api.Update(109)
     unlocked=true;fail=false;api.Update(111)
     assert(moves==5 and state.AtheonUnlockStatus=="Atheon is already unlocked","Unlock during retry cancels the pending teleport")
-    api.Reset();state.Running=false;api.Update(112);assert(moves==5)
+    unlocked=false;api.Reset();arrived=false;api.Update(112);assert(moves==6)
+    api.Update(112.5);assert(moves==6,"Allow replication time before checking arrival")
+    api.Update(113);assert(moves==7,"Server position correction must retry automatically")
+    arrived=true;api.Update(114);api.Update(115);assert(moves==7,"Verified arrival stops repeated teleports")
+    api.Reset();state.Running=false;api.Update(116);assert(moves==7)
     print("PASS Atheon Unlock: unlock guard, missing portal/character, protection, one placement, respawn, re-enable, retry and shutdown")
 end

@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.atheon-portal-destination-v2.0.3"
-local VERSION="2.0.3"
+local BUILD="2026-11-05.atheon-arrival-retry-v2.0.4"
+local VERSION="2.0.4"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -10271,8 +10271,12 @@ do
 return function(ctx)
     local api={}
     local completedRoot,completedPortal
+    local pendingRoot,pendingPortal,pendingPosition,verifyAt
     local nextAttempt=0
-    function api.Reset()completedRoot=nil;completedPortal=nil;nextAttempt=0 end
+    function api.Reset()
+        completedRoot=nil;completedPortal=nil;nextAttempt=0
+        pendingRoot=nil;pendingPortal=nil;pendingPosition=nil;verifyAt=nil
+    end
     function api.Update(now)
         if not ctx.State.Running or not ctx.State.AtheonUnlock or ctx.Busy()or now<nextAttempt then return end
         nextAttempt=now+.5
@@ -10282,12 +10286,24 @@ return function(ctx)
         local root=ctx.Root()
         if not root then ctx.State.AtheonUnlockStatus="Waiting for a living character";return end
         if completedRoot==root and completedPortal==portal then return end
+        if pendingRoot==root and pendingPortal==portal then
+            if now<verifyAt then return end
+            if ctx.Arrived(root,pendingPosition)then
+                completedRoot,completedPortal=root,portal
+                pendingRoot,pendingPortal,pendingPosition=nil,nil,nil
+                ctx.State.AtheonUnlockStatus="Moved to AtheonPortal"
+                return
+            end
+            pendingRoot,pendingPortal,pendingPosition=nil,nil,nil
+            ctx.State.AtheonUnlockStatus="Portal position corrected · retrying"
+        end
         local destination=ctx.Position(portal)
         if not destination then ctx.State.AtheonUnlockStatus="AtheonPortal has no supported position";return end
         local ok,reason=pcall(ctx.Move,root,destination,now)
         if ok then
-            completedRoot,completedPortal=root,portal
-            ctx.State.AtheonUnlockStatus="Moved to AtheonPortal"
+            pendingRoot,pendingPortal,pendingPosition=root,portal,destination
+            verifyAt=now+1
+            ctx.State.AtheonUnlockStatus="Verifying arrival at AtheonPortal"
         else nextAttempt=now+2;ctx.State.AtheonUnlockStatus="Portal teleport retry · "..tostring(reason)end
     end
     return api
@@ -10313,7 +10329,18 @@ end
         Position=function(portal)
             if portal:IsA("BasePart")then return portal.Position end
             if portal:IsA("Model")then return portal:GetPivot().Position end
+            if portal:IsA("Attachment")then return portal.WorldPosition end
+            -- Some maps wrap the actual touch part in a Folder.
+            local fallback
+            for _,part in ipairs(portal:GetDescendants())do
+                if part:IsA("BasePart")then
+                    if part:FindFirstChildOfClass("TouchTransmitter")then return part.Position end
+                    fallback=fallback or part
+                end
+            end
+            return fallback and fallback.Position
         end,
+        Arrived=function(root,point)return root.Parent~=nil and (root.Position-point).Magnitude<=12 end,
         Move=function(root,point,now)
             if state.CancelSkillAura then state.CancelSkillAura("Atheon portal teleport")end
             stopSword(true);finishAttackBurst("Atheon portal teleport")
