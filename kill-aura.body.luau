@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.atlantis-arenas-v2.0.5"
-local VERSION="2.0.5"
+local BUILD="2026-11-05.friend-pad-spacing-v2.0.6"
+local VERSION="2.0.6"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7320,6 +7320,24 @@ end
 
 
 
+local padSlot=(function()
+-- BEGIN BUNDLED PAD SLOT
+-- Deterministic, pad-local standing positions shared by accounts in one server.
+return function(userId,ids,width,depth,bodyWidth,bodyDepth)
+    local halfX=math.max(0,(width-bodyWidth)/2-.5)
+    local halfZ=math.max(0,(depth-bodyDepth)/2-.5)
+    local columns=math.max(1,math.floor(halfX*2/math.max(3,bodyWidth+1))+1)
+    local rows=math.max(1,math.floor(halfZ*2/math.max(3,bodyDepth+1))+1)
+    local rank=0
+    for _,id in ipairs(ids)do if id<userId then rank+=1 end end
+    local slot=rank%(columns*rows)
+    local column,row=slot%columns,math.floor(slot/columns)
+    return columns==1 and 0 or -halfX+column*halfX*2/(columns-1),
+        rows==1 and 0 or -halfZ+row*halfZ*2/(rows-1)
+end
+
+-- END BUNDLED PAD SLOT
+end)()
 function state.PanicToSpawn(inPlace)
     local holdHere=inPlace==true
     if state.SafePanicHoldHere~=holdHere then state.SafePanicHerePosition=nil;state.SafePanicHereRoot=nil end
@@ -7358,7 +7376,14 @@ function state.PanicToSpawn(inPlace)
             end
             state.SafePanicSpawnPart=pad
         end
-        if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
+        if pad then
+            local height=pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5
+            if state.AutoJoinFriendHolding then
+                local ids={}
+                for _,person in ipairs(Players:GetPlayers())do ids[#ids+1]=person.UserId end
+                local x,z=padSlot(player.UserId,ids,pad.Size.X,pad.Size.Z,root.Size.X,root.Size.Z)
+                position=pad.CFrame:PointToWorldSpace(Vector3.new(x,height,z))
+            else position=pad.Position+Vector3.new(0,height,0)end
         elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0)end
     end
     if not position then return false end

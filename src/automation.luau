@@ -327,6 +327,10 @@ end
 
 
 
+local padSlot=(function()
+-- BEGIN BUNDLED PAD SLOT
+-- END BUNDLED PAD SLOT
+end)()
 function state.PanicToSpawn(inPlace)
     local holdHere=inPlace==true
     if state.SafePanicHoldHere~=holdHere then state.SafePanicHerePosition=nil;state.SafePanicHereRoot=nil end
@@ -365,7 +369,14 @@ function state.PanicToSpawn(inPlace)
             end
             state.SafePanicSpawnPart=pad
         end
-        if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
+        if pad then
+            local height=pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5
+            if state.AutoJoinFriendHolding then
+                local ids={}
+                for _,person in ipairs(Players:GetPlayers())do ids[#ids+1]=person.UserId end
+                local x,z=padSlot(player.UserId,ids,pad.Size.X,pad.Size.Z,root.Size.X,root.Size.Z)
+                position=pad.CFrame:PointToWorldSpace(Vector3.new(x,height,z))
+            else position=pad.Position+Vector3.new(0,height,0)end
         elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0)end
     end
     if not position then return false end

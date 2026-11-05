@@ -134,7 +134,7 @@ After five seconds without a target, empty arenas can return to their selected a
 ### Friend Joiner
 
 - **Friend username:** Roblox username to join.
-- **Auto Join Friend:** uses the native friend-teleport route with paced attempts and stays when the entered user appears.
+- **Auto Join Friend:** uses the native friend-teleport route with paced attempts and stays when the entered user appears. Accounts use deterministic positions across the pad's local surface instead of stacking at its center, with character-footprint margins and spacing. Separate positions are limited by the pad's available area.
 - **Status:** `Friend Appeared` if the user is in the server, otherwise `Friend Unappeared`. This label reports presence rather than the complete teleport-error history.
 
 Offline users, full servers, locked floors, and native join permissions can prevent travel. Protection and Account Progression can pause it. When used with Safe Mode, the friend must also be allowed by the Safe Mode whitelist.
