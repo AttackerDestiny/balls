@@ -10,6 +10,7 @@ SOURCE = ROOT / "src/main.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "INSTANCE QUEUE": "instance-queue.module.luau",
     "SETTINGS SNAPSHOT": "settings-snapshot.module.luau",
     "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",

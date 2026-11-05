@@ -318,3 +318,41 @@ do
     state.ExportConfig=transfer.Export
     state.ImportConfig=transfer.Import
 end
+
+-- Atheon portal helper is a paced utility, independent of farming toggles.
+do
+    local make=(function()
+-- BEGIN BUNDLED ATHEON UNLOCK
+-- END BUNDLED ATHEON UNLOCK
+    end)()
+    state.AtheonUnlockController=make({State=state,
+        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
+            or state.AutoTradeBusy or state.AutomationTeleporting or state.TravelBusy or state.AutoJoinFriendHolding
+            or state.Dodging or state.Recovering end,
+        Find=function()return workspace:FindFirstChild("AtheonPortal")end,
+        Root=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            local root=character and character:FindFirstChild("HumanoidRootPart")
+            return humanoid and humanoid.Health>0 and root and not root.Anchored and root or nil
+        end,
+        Position=function(portal)
+            if portal:IsA("BasePart")then return portal.Position end
+            if portal:IsA("Model")then return portal:GetPivot().Position end
+        end,
+        Move=function(root,point,now)
+            if state.CancelSkillAura then state.CancelSkillAura("Atheon portal teleport")end
+            stopSword(true);finishAttackBurst("Atheon portal teleport")
+            stopMovement("Atheon portal teleport",true)
+            state.FollowTarget=nil;state.FarmTargetLock=nil
+            state.FarmPauseUntil=now+2;state.AtheonUnlockPauseUntil=now+2
+            pivotRoot(root,point)
+        end})
+    function state.SetAtheonUnlock(on)
+        state.AtheonUnlock=on==true;state.AtheonUnlockController.Reset()
+        state.AtheonUnlockStatus=state.AtheonUnlock and "Waiting for AtheonPortal"or "Atheon Unlock is off"
+        workScheduler.Wake("AtheonUnlock");requestSave()
+    end
+    taskController("AtheonUnlock",.5,function(now)state.AtheonUnlockController.Update(now)end)
+    table.insert(frameOrder,1,"AtheonUnlock")
+end

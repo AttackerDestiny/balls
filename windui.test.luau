@@ -68,7 +68,7 @@ return function(source)
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
         CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
-        AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
+        AtheonUnlock="SetAtheonUnlock",AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
     end
     for key,method in pairs({CreditWhitelistText="SetCreditWhitelist",SafeWhitelistText="SetSafeWhitelist",JoinFriendUsername="SetJoinFriendUsername",
@@ -147,6 +147,8 @@ return function(source)
     c.CreditCheck:Emit(true);assert(s.CreditCheck)
     c.CreditWhitelist:Emit("CreditFriend, 123");assert(s.CreditWhitelistText=="CreditFriend, 123"and s.SafeWhitelistText==safeList,"Credit whitelist must stay separate from Safe Mode")
     assert(c.AutoEquipBestSword.Title=="Auto Equip Best Gear")
+    assert(c.AtheonUnlock.Title=="Atheon Unlock")
+    c.AtheonUnlock:Emit(true);assert(s.AtheonUnlock and calls[#calls].Name=="SetAtheonUnlock")
     c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")

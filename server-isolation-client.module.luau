@@ -374,6 +374,7 @@ end
         Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
+            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false end
             if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character

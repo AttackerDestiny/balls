@@ -20,7 +20,7 @@ local previous=(function()
 -- A reload retains settings, never the previous runtime's instances or closures.
 return function(previous,userId)
     if not previous or previous.UserId~=userId then return nil end
-    local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+    local fields={"AtheonUnlock","AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.runtime-rewrite-v2.0.0"
-local VERSION="2.0.0"
+local BUILD="2026-11-05.atheon-unlock-v2.0.1"
+local VERSION="2.0.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -282,7 +282,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -382,6 +382,7 @@ local restore = {
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
+    AtheonUnlock=preference("AtheonUnlock",false)==true,
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
@@ -500,6 +501,7 @@ local GameUI = require(services.UI)
 local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
+    AtheonUnlock=restore.AtheonUnlock,
     CreditCheck=restore.CreditCheck,CreditWhitelistText=restore.CreditWhitelistText,
     BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
@@ -1478,7 +1480,7 @@ local function settingsPayload()
     local position = {X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AtheonUnlock=state.AtheonUnlock,AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -8590,6 +8592,7 @@ end
         Resume=function()state.MultiSpotPriorityActive=false end,
         CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
+            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false end
             if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
@@ -10151,7 +10154,7 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
     for _,key in ipairs({"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
@@ -10253,6 +10256,69 @@ end
         end})
     state.ExportConfig=transfer.Export
     state.ImportConfig=transfer.Import
+end
+
+-- Atheon portal helper is a paced utility, independent of farming toggles.
+do
+    local make=(function()
+-- BEGIN BUNDLED ATHEON UNLOCK
+-- One portal placement per enable/character/portal; no permanent movement hold.
+return function(ctx)
+    local api={}
+    local completedRoot,completedPortal
+    local nextAttempt=0
+    function api.Reset()completedRoot=nil;completedPortal=nil;nextAttempt=0 end
+    function api.Update(now)
+        if not ctx.State.Running or not ctx.State.AtheonUnlock or ctx.Busy()or now<nextAttempt then return end
+        nextAttempt=now+.5
+        local portal=ctx.Find()
+        if not portal then ctx.State.AtheonUnlockStatus="Waiting for workspace.AtheonPortal";return end
+        local root=ctx.Root()
+        if not root then ctx.State.AtheonUnlockStatus="Waiting for a living character";return end
+        if completedRoot==root and completedPortal==portal then return end
+        local destination=ctx.Position(portal)
+        if not destination then ctx.State.AtheonUnlockStatus="AtheonPortal has no supported position";return end
+        local ok,reason=pcall(ctx.Move,root,destination,now)
+        if ok then
+            completedRoot,completedPortal=root,portal
+            ctx.State.AtheonUnlockStatus="Moved to AtheonPortal"
+        else nextAttempt=now+2;ctx.State.AtheonUnlockStatus="Portal teleport retry · "..tostring(reason)end
+    end
+    return api
+end
+
+-- END BUNDLED ATHEON UNLOCK
+    end)()
+    state.AtheonUnlockController=make({State=state,
+        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
+            or state.AutoTradeBusy or state.AutomationTeleporting or state.TravelBusy or state.AutoJoinFriendHolding
+            or state.Dodging or state.Recovering end,
+        Find=function()return workspace:FindFirstChild("AtheonPortal")end,
+        Root=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            local root=character and character:FindFirstChild("HumanoidRootPart")
+            return humanoid and humanoid.Health>0 and root and not root.Anchored and root or nil
+        end,
+        Position=function(portal)
+            if portal:IsA("BasePart")then return portal.Position end
+            if portal:IsA("Model")then return portal:GetPivot().Position end
+        end,
+        Move=function(root,point,now)
+            if state.CancelSkillAura then state.CancelSkillAura("Atheon portal teleport")end
+            stopSword(true);finishAttackBurst("Atheon portal teleport")
+            stopMovement("Atheon portal teleport",true)
+            state.FollowTarget=nil;state.FarmTargetLock=nil
+            state.FarmPauseUntil=now+2;state.AtheonUnlockPauseUntil=now+2
+            pivotRoot(root,point)
+        end})
+    function state.SetAtheonUnlock(on)
+        state.AtheonUnlock=on==true;state.AtheonUnlockController.Reset()
+        state.AtheonUnlockStatus=state.AtheonUnlock and "Waiting for AtheonPortal"or "Atheon Unlock is off"
+        workScheduler.Wake("AtheonUnlock");requestSave()
+    end
+    taskController("AtheonUnlock",.5,function(now)state.AtheonUnlockController.Update(now)end)
+    table.insert(frameOrder,1,"AtheonUnlock")
 end
 -- WindUI is bundled at a fixed release; queued rejoins need no library download.
 do
@@ -27956,6 +28022,7 @@ return function(ctx)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
 
+    stateToggle("AtheonUnlock","Utility","Atheon Unlock","SetAtheonUnlock")
     local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
     local function applyBoost(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end

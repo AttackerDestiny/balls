@@ -282,6 +282,7 @@ return function(ctx)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
 
+    stateToggle("AtheonUnlock","Utility","Atheon Unlock","SetAtheonUnlock")
     local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
     local function applyBoost(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end

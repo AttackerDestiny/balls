@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.runtime-rewrite-v2.0.0"
-local VERSION="2.0.0"
+local BUILD="2026-11-05.atheon-unlock-v2.0.1"
+local VERSION="2.0.1"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -149,6 +149,7 @@ local restore = {
     SkillRange=30,
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
+    AtheonUnlock=preference("AtheonUnlock",false)==true,
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
