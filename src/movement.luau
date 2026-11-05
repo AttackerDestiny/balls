@@ -888,6 +888,12 @@ local function discoverDestinations(onlyMobs)
         if marker and string.find(string.lower(stage),"rift",1,true) then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position) end
     end
     if not onlyMobs then
+    local atheonPortal=workspace:FindFirstChild("AtheonPortal")
+    if atheonPortal and (atheonPortal:IsA("BasePart")or atheonPortal:IsA("Model"))then
+        rememberDestination("map:AtheonPortal","Atheon Portal","Portal",atheonPortal:GetPivot().Position)
+    elseif destinations["map:AtheonPortal"]then
+        destinations["map:AtheonPortal"]=nil;destinationsDirty=true
+    end
     local mapContainers = { workspace }
     for _, folderName in ipairs({ "Models", "OptimizedGame" }) do
         local folder = workspace:FindFirstChild(folderName)

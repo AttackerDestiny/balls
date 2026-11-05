@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.atheon-unlock-guard-v2.0.2"
-local VERSION="2.0.2"
+local BUILD="2026-11-05.atheon-portal-destination-v2.0.3"
+local VERSION="2.0.3"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP

@@ -235,6 +235,8 @@ Inventory viewing does not transfer items or ownership. It requires compatible n
 
 ### Atheon Unlock
 
+The **Main → Teleport → Spot** dropdown also includes **Portal · Atheon Portal** whenever `workspace.AtheonPortal` is present. Select it for manual travel using the normal teleport depth; **Refresh List** updates its availability and position.
+
 **Atheon Unlock** (OFF by default) teleports to `workspace.AtheonPortal` when enabled, only if Atheon is still locked for the current account. Accounts with Atheon unlocked, including characters already on that floor, skip the portal. It waits for the portal and a living character, retries failed moves, and makes one placement per enable, character, or replacement portal rather than holding the character there. Farming and arena travel pause briefly after arrival. Safety, trading, travel, and dodge activity take precedence. The toggle is saved and included in config export/import; native unlock requirements still apply.
 
 ### Perfromance Booster
