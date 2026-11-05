@@ -1,139 +1,449 @@
-# balls
+# Feather · Swordburst 2
 
-Swordburst 2 Luau script with a loader that fetches the latest published version.
+Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-The interface uses [WindUI](https://footagesus.github.io/WindUI-Docs/docs), with every existing feature available across Main, Combat, Challenge Floors, Auto Skill, Misc, Player, Utility, Speacial and Settings. It includes searchable selectors for floors, arenas, skills, players and trade items, plus multi-select performance and dismantle options. Controls use the existing gameplay controllers and shared autosave; WindUI's separate config system is not enabled. Hide UI and Right Shift hide the window while keeping enemy health bars visible. Closing the script releases both interfaces and automation. If WindUI initialization fails on an executor, the compatibility window remains available.
+This guide describes **v1.12.49**. Saved settings can override fresh-install defaults.
 
-WindUI release 1.6.66 is bundled locally, with acrylic disabled and a narrow sidebar on small screens. UI status refreshes run at most four times per second; dynamic choices refresh once per second only for the visible tab. Main controls initialize first, with other tabs populated in small background batches. The MIT license and original release are in `vendor/`. The standalone loader does not download WindUI separately, though the library may fetch its normal visual assets. Offline checks use WindUI API doubles and compile the actual bundled release; mobile rendering still requires live device validation.
+## Contents
 
-The Settings tab provides the bundled WindUI themes and portable configuration import/export. Config Export copies every field from the autosave snapshot plus custom saved spots from all available floor files. Paste that JSON into Config Import and leave the input to validate and reload the script. The import replaces saved feature preferences, including enabled toggles; account credentials and temporary rejoin tickets are not configuration. Cross-floor custom spot transfer requires executor file access.
+- [Run and update](#run-and-update)
+- [Interface](#interface)
+- [Main](#main)
+- [Combat](#combat)
+- [Challenge Floors](#challenge-floors)
+- [Auto Skill](#auto-skill)
+- [Misc and Player](#misc-and-player)
+- [Utility](#utility)
+- [Speacial](#speacial)
+- [Settings](#settings)
+- [Built-in background features](#built-in-background-features)
+- [Default Multi Spot arenas](#default-multi-spot-arenas)
+- [Feature interactions](#feature-interactions)
+- [Multiple accounts and devices](#multiple-accounts-and-devices)
+- [Local files and persistence](#local-files-and-persistence)
+- [Performance and compatibility](#performance-and-compatibility)
+- [Troubleshooting](#troubleshooting)
+- [Development and verification](#development-and-verification)
+
+## Run and update
+
+Execute:
 
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()
 ```
 
-The standalone script automatically creates `SB2Codex` in the executor's workspace and saves its own runnable source, account settings, and rejoin state. Settings and the whitelist are shared between accounts using the same executor workspace through `SB2Codex/shared-settings.json`. Existing configured profiles are migrated automatically. Current-floor context, progression checkpoints and rejoin tickets remain per-account. Re-execute the loader on each account to load shared changes. Separate devices or isolated app storage do not share local files.
+The loader fetches the current [kill-aura.luau](kill-aura.luau). Both paths remain stable between releases. You can also execute the complete standalone entry directly.
 
-Safe Mode floor unlock labels update when the account's native unlock data changes. Opening the dropdown, selecting a floor, and starting floor travel recheck the current profile, so newly unlocked floors become selectable without restarting. Unlock events update existing buttons without rebuilding the dropdown or polling every frame.
+| Capability | Used for |
+| --- | --- |
+| Luau execution, `loadstring`, HTTP fetch | Public loader |
+| Executor file access | Saved settings, custom spots, shared preferences, cached recovery |
+| Teleport queue support | Running again after automated rejoining/floor travel |
+| Native block-dialog/input access | Safe Mode and moderator block confirmation |
+| Clipboard support | Config Export |
+| Optional FPS/rendering APIs | Limit FPS and Disable rendering |
+| Compatible native inventory/debug access | View player inventory |
 
-Features include Auto Farm with noclip, Kill Aura, Skill Aura, Safe Mode with an editable whitelist, Multi Spot, Atheon Dodge, and Account Progression in the **Speacial** tab. Moderator detection confirms the moderator is blocked before disconnecting. Unconfirmed blocking pauses automation without kicking.
+Required `SB2Codex` folders/files are created automatically. No manual workspace setup is needed.
 
-Anti-AFK starts automatically with every runtime, including after queued rejoins. One Player.Idled listener sends a VirtualUser right-click when idle, with a 20-second duplicate-event guard and no polling loop or movement. It remains active with farming paused, disconnects when closed/replaced, and catches unsupported executor input without stopping other features. Executor input support still requires device validation; offline tests do not wait through a real idle timeout.
+Use the header's **Restart script** icon or re-execute the loader to update. Update each account: existing runtimes do not continuously download new commits. Repeated execution of the same active build is deduplicated; a newer build replaces the older runtime.
 
-Kill Aura and Skill Aura use the supplied source's damage rules: one native damage call per enemy every 0.3 seconds, cast only after the target registers the account's damage, and send the skill name during its active duration. The two modes share per-enemy cooldowns. Skill Aura uses the full duration rather than a fixed three-hit sequence; Summon Pistol uses the source's immediate 0.2-second window. Timestamp timers replace per-hit delayed tasks, existing mob tracking replaces repeated child-list scans, and frame/request budgets pace crowded fights without catch-up spam at low FPS. Damage reservations avoid repeated lethal hits while HP replicates. Native blade touches are suppressed during aura use and original touch values restore when disabled or closed. Existing compatible-weapon selection, normal-speed swing visuals, effect suppression, progression, dodge and trade pauses remain integrated. No live combat was used for verification.
+## Interface
 
-Auto Farm checks native root/entity/health and remaining HitLives as in the supplied source; late HitLives replication is refreshed immediately rather than waiting for the geometry cache. Every 0.15 seconds, eligible enemies use one common order: boss, mini-boss, regular; then enemy name and world X/Z/Y. Character distance and each account's previous target do not break farming ties. Accounts seeing the same eligible enemies on the same floor/arena therefore choose the same target. Different streaming visibility, protection states or selected arenas can still produce different eligible sets; this does not transfer accounts between servers.
+Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Settings**.
 
-Auto Farm priority is forced: main boss = 1, mini-boss = 2, regular enemy = 3. Model Rank, Entity Rank/Difficulty and tags are evaluated together; an unrelated Rank cannot mask a boss marker. Explicit MainBoss/FloorBoss markers take priority, while a generic BossBar does not turn a mini-boss into a main boss. Priorities are evaluated after the current enemy dies; newly spawned higher-priority enemies wait for the living target lock. Arena/progression restrictions and protection still apply.
+`Speacial` and `Perfromance Booster` retain their current UI spelling. The interface uses bundled **WindUI 1.6.66**, searchable dropdowns, and multi-select controls.
 
-Account Progression skips F6 (Helmfirth), travelling directly from F5 to F7 when F7 is unlocked. It coordinates farming and floor travel, selects owned usable gear, and synchronizes Safe Mode's selected floor. Multi Spot waits while progression owns travel. The latest code has offline regression coverage; executor-specific behavior also requires live validation.
+| Control | Behavior |
+| --- | --- |
+| Floating circular feather button | Shows/hides the main window; initially near the top center |
+| Right Shift | Shows/hides the window when text input is not focused |
+| Header restart icon | Saves preferences and re-executes the loader |
+| Header eye icon | Saves whether to auto-hide the UI on execution |
+| Header window controls | Minimize/resize/close; closing disposes owned automation and UI |
+| Enemy health HUD | Theme-matched bars for attacked enemies; remains visible when the main window is hidden |
+| Multi Spot HUD | Separate centered, draggable status panel while Multi Spot is enabled; independent of main-window visibility |
 
-## Development
+Main controls load first, with remaining tabs populated in background batches. If WindUI initialization fails, the older compatibility window appears and the error is recorded. This alternate layout is a fallback, not another script version.
 
-- Run `kill-aura.luau`, the generated standalone entry.
-- Edit `kill-aura.body.luau` and the matching `*.module.luau` files.
-- Run `python build-script.py` to refresh bundles and the standalone entry.
-- Run `python run-offline-tests.py` before publishing.
+## Main
 
-Offline verification requires Python 3.10+, Lua 5.1+ on `PATH`, and the official Luau CLI tools. Supply their directory with `python run-offline-tests.py --luau-tool-dir /path/to/luau-tools`.
+### Teleport
 
-Do not commit executor workspace files, account settings, local logs, credentials, or session notes. Each completed script update is committed and pushed so the loader serves the current version.
-At steady 10Ã¢â‚¬â€œ15 FPS, combat remains active instead of repeatedly entering a lag pause. Sudden freezes still trigger a brief recovery pause. Health-bar and cosmetic refreshes are paced separately from movement and dodge checks. Low FPS still limits how quickly the client can observe hazards.
+- **Spot:** select a destination to immediately request travel. No separate Teleport button is needed. The same spot can be selected again after its request.
+- **Refresh List:** refreshes destinations on the current floor.
+- Normal destination travel arrives at the source position **minus 20 studs in Y**. Automatic arena travel checks streaming and actual arrival.
 
-After its own confirmed moderator-block kick, the script attempts to rejoin the current place, with at most three requests eight seconds apart. It queues the public loader for the destination session when the executor supports teleport queues. This only handles the scriptâ€™s moderator kick; it does not bypass bans. Some executors stop scripts after disconnection or reject post-kick teleports, so live executor support is required. Stop Everything or runtime replacement cancels pending requests.
+At startup, the floor runtime makes a one-time placement at the current character's X/Z and detected ground minus 20 studs, then lets the normal controllers take over. It waits a bounded time for a living character and uses a standing-height estimate if ground geometry is unavailable. The native login-place Play helper runs before floor-only behavior.
 
-Auto Join Friend is in Main: enter a Roblox username and turn the toggle on. It uses the native FriendTeleport route, retries no more than once every 20 seconds, and stays once the target is in the same server. The toggle and username share the normal autosave. Account Progression takes priority; Safe Mode requires the target in its whitelist. Native restrictions (offline player, full server, locked floors or join permissions) remain enforced and appear in the status. Teleport queue support is required to resume automatically.
+### Safe Mode
 
-The Main tab's restart script button saves settings, downloads and compiles the public loader, retires the current runtime, and runs the loader again. Repeated clicks during restart are ignored. Fetch or compile failures leave the current runtime active.
+**Default OFF.** Searches for a protected server on **Safe floor**. Protected means only the local account and allowed players are present; a server with whitelisted players is acceptable.
 
-Skill Aura visual suppression includes mobile-safe property fallbacks, disabled/transparent emitters, beams and trails, particle/trail clearing, and smoke/fire/sparkle/texture cleanup. New confirmed effects are suppressed immediately within a bounded work limit; overflow uses the existing queue. Unsupported property writes do not stop later effects from being processed. Rendering properties restore on cleanup; hitbox physics, damage timelines, normal swings and protected hazard/text cues remain intact. Arceus X device validation is separate from offline tests.
+- Detects unlisted arrivals and pauses ordinary farming/movement during protection.
+- Uses native block confirmation before requesting another server.
+- Same-floor rejoining uses the place ID without a teleport-pad detour. Native floor changes still use their required pad staging.
+- After dispatching the rejoin, moves the waiting character 10,000 studs horizontally away at the same height. This changes the waiting position, not Roblox's loading time.
+- If an outsider remains and the search has not rejoined after eight seconds, the fallback confirms blocking, prepares recovery, then kicks and attempts rejoining. It does not intentionally kick through this fallback without confirmed blocking.
+- Uses bounded transient retries, **12-hop / 15-minute** search limits, and bounded same-server return recovery.
+- Continues monitoring after reaching a protected server. Status exposes failed/unverified operations.
 
-Auto Join Friend physically returns to the spawn/teleport pad and waits for position replication before the native request. Farming yields while the pad is held. A pad-specific rejection gets one bounded retry; other server errors are shown normally. Cancellation releases the hold unless Safe Mode or moderator protection still owns it.
+**Safe floor** supports the normal floor catalog, Atheon, and Atlantis, subject to native unlocks. Profile unlock changes refresh the available labels. During Account Progression, Safe Mode protects the current progression floor instead of travelling back to the manually selected floor.
 
-Auto Equip Best Weapon is a separate Combat toggle, ON by default and autosaved across accounts. It works independently of Auto Farm, ranking owned level-usable weapons of every class by native damage, upgrades and scaling. It equips only one weapon in Right and clears an existing Left weapon before equipping. Turning it OFF prevents weapon auto-equipping, including during Account Progression; progression still manages armor and accessories. Inventory, level and equipment changes trigger reevaluation with native acknowledgments and bounded retry.
+**Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 
-Multi Spot returns to the selected arena anchor only after five continuous seconds with no living or unknown arena enemies. Combat, spot changes and protection reset the delay. Auto Farm detection has no distance cap for client-loaded mobs; server spawning and Roblox streaming still determine which mobs are available. Infinity is kept out of the JSON settings payload.
+The inline **X** clears only the editor. The old active/saved list remains until a new non-empty replacement is submitted. Native blocks can remain on the account afterward; the script does not automatically unblock every searched player.
 
-Safe Mode uses a 0.15-second initial settle and 0.3-second solo confirmation window, with a 0.03-second active worker interval (subject to frame scheduling). The block dialog waits for stable layout, avoids redundant clicks after acknowledgment, and retains latency-aware native confirmation before hopping; the separate post-block settle timer is removed. Hidden-effect maintenance processes at most 64 entries or roughly 0.6 ms per update, progressing round-robin through larger sets. Network/server loading time and device rendering costs remain outside script control.
+### Multi Spot
 
-Utility has separate Auto Dismantle Common, Uncommon, and Rare toggles (OFF by default, shared autosave). It processes existing inventory on startup with saved toggles ON, when enabling a rarity, and newly received drops. Inventory scanning is batched; equipped items, native Locked/Favorited attributes, stacked items, and Undismantleable definitions are rechecked before sending. It preserves equipped items, detected lock/favorite/skin flags, Novice items, auras, and planned auto-equipment upgrades. Each new drop gets a short replication delay and is checked again before one native Equipment/Dismantle Event request. Requests are paced and never blindly retried; Stop Everything/protection/travel pauses processing. No live inventory was dismantled in offline verification.
+**Default OFF. Auto Farm must be ON for automatic arena movement.**
 
-Shared autosave merges only preferences changed by the saving runtime into the latest shared file. Another account saving an unrelated option no longer overwrites a newer Safe Mode toggle or whitelist with stale values. Re-execute on each account to load shared updates; this is local-workspace sharing, not cross-device synchronization. Floor/progression context remains per-account.
+| Control | Behavior |
+| --- | --- |
+| **Saved Spot** | Multi-selects arenas for the currently joined floor only |
+| Selection order | First click = priority 1, second = priority 2, etc.; numbers appear in the dropdown |
+| Deselect/reselect | Moves a selected spot to the end of its priority order |
+| **Save Spot** | Adds a custom arena using current X/Z and detected surface height, up to 20 custom spots per floor |
 
-Safe Mode recovers from temporary native block-list/dialog errors and failed rejoins with up to three retries (0.5, 1, and 2 seconds). Retry attempts keep the original search clock and hop count; rejoin retries recheck the previous native block without adding another block. Missing executor capabilities, unreliable matchmaking, and search limits remain terminal and show the reason at spawn. No automatic restart bypasses those limits.
+Rotation uses the supplied **90s/45s respawn times** for the timed built-in arenas below:
 
-Utility groups the three dismantle rarity toggles under Auto Dismantle. Auto Trade (OFF by default) uses the Safe Mode whitelist for request acceptance and partner validation. Its inventory dropdown selects item names (all eligible copies), and Offer mode switches between Selected and Legendary+ (Legendary, Tribute, and Burst). The separate Tribute mode is removed; saved Tribute selections migrate to Legendary+. Vel is automatically set to the maximum affordable amount including the 10% tax: floor(balance * 10 / 11), capped at the native 100,000,000 offer limit. The manual Vel box is removed. Equipped, Locked/Favorited, and native trade-restricted items are excluded. Automatic final confirmation/acceptance is built in: the exact outgoing items/Vel must be replicated, the offer must remain stable for two seconds, and both native confirmations are required before acceptance. Unselected outgoing items pause automation. Trading pauses farming, auto equipment and dismantling. Modes, selections and toggle share normal autosave. No real trade was accepted or completed in verification.
+1. Observe a living boss becoming dead and start its timer.
+2. Finish remaining arena mobs, unless Boss Only excludes them.
+3. Visit other ready/unvisited selected spots while that arena cools down.
+4. Return to ready spots according to selected priority; show a countdown if all known timed arenas are cooling down.
 
-Auto Trade also checks the visible native request prompt while enabled, recovering requests received before enabling or re-executing. It resolves the exact requesting username, rechecks whitelist membership, and calls the native AcceptRequest handler once per visible request. Initial RequestAccept snapshots initialize offering immediately. No live acceptance/completion was used to verify this recovery.
+Timers begin at the observed boss death, not at arrival or after clearing adds. Actual living spawns override predictions. An already-dead body or streaming disappearance does not fabricate a new kill. Timers belong to the current runtime/server; a rejoin does not import another server's spawn predictions. Untimed/custom spots receive periodic spawn checks instead of an invented timer.
 
-Auto Trade expands selected stacked items using their native Count value. It has no local item-count cap and fills all eligible selected quantities, adding at most four per batch and waiting for server acknowledgment before the next batch. Inventory dropdown quantities include stack counts. Final confirmation waits until the planned quantities are registered; server-enforced limits still apply. If additions are not acknowledged, automatic confirmation waits and the status explains the stalled batch.
+The current living enemy is finished before changing target or spot, including when a higher-priority spot becomes ready. With Boss Only OFF, remaining arena mobs must also be cleared before normal rotation leaves. With Boss Only ON, ordinary adds are excluded. Outside-arena bosses can be selected after the current fight; rotation resumes afterward.
 
-During an automated trade, movement captures the current X/Z and detected ground height once, then holds at ground minus 20 studs. Farming, swing/skill actions, Multi Spot and progression yield until the trade ends; existing feature preferences are preserved. Respawning reacquires a new anchor. Safe Mode/moderator protection and active server transitions take priority. Offline checks cover hold stability and release; no live trade was completed.
+After five seconds without a target, empty arenas can return to their selected anchor. Travel failures automatically retry with increasing cooldowns capped at 60 seconds; success clears the backoff. Explicit protection/controller pauses are separate from travel-retry cooldowns.
 
-Upgrade Protection Scroll and Resurrection Crystal are always included in Auto Trade in every offer mode, using their full eligible stack quantities. Equipped, Locked/Favorited and native trade-restricted instances remain excluded. Auto Trade must still be enabled and its partner whitelisted.
+### Friend Joiner
 
-Rejoin sources are saved at build-specific executor paths, verified/repaired before queueing; another account running an older build cannot replace the active build’s queued source. An independent protected-population check releases stale spawn holds after a stable protected result. Resumed search failures retain their original limits instead of starting fresh. After a Safe Mode native rejoin request returns or reports Started/InProgress, the character holds 10,000 studs horizontally away at the same height while waiting; failure/cancellation clears that destination. This changes the waiting position, not Roblox teleport loading time.
+- **Friend username:** Roblox username to join.
+- **Auto Join Friend:** uses the native friend-teleport route with paced attempts and stays when the entered user appears.
+- **Status:** `Friend Appeared` if the user is in the server, otherwise `Friend Unappeared`. This label reports presence rather than the complete teleport-error history.
 
-Safe rejoin escape is deferred immediately after entering the native Teleport call, rather than waiting for its return or Started callback. Request failure, Stop Everything, moderator priority and replacement dispatches cancel stale escape callbacks. Active search starts run their first check immediately; dialog layout and native block confirmation checks remain. Queue setup skips redundant validation once queued for the same run, identical cached sources compile once per runtime, and unchanged panic hold coordinates are not rewritten.
+Offline users, full servers, locked floors, and native join permissions can prevent travel. Protection and Account Progression can pause it. When used with Safe Mode, the friend must also be allowed by the Safe Mode whitelist.
 
-Same/visited-server returns now retry within the original search instead of immediately pausing. The first retry has no added delay; repeat returns wait 0.25 and 0.5 seconds. Existing blocked outsiders are reconfirmed and reused without another block prompt. A persisted three-return counter plus the existing hop/lifetime limits prevents endless rejoin loops across executions. An already-protected return finishes normally. Missing native block confirmation still prevents rejoining.
+## Combat
 
-With Safe Mode ON, a continuously present non-whitelisted player starts an eight-second timer. If the client is still in the same server at expiry, the fallback cancels normal search work, confirms the target’s native block, persists/queues recovery, then kicks. Departures, whitelist edits, disabled protection and job changes cancel the action. Rejoin recovery is armed before kicking and makes at most three attempts; temporary block/queue failures never kick and receive at most three bounded retries. Existing hop/lifetime limits remain. A low-frequency population timer and one fallback worker avoid per-frame inventory/world scans. Post-kick teleporting depends on executor support; no real kick/block test was performed.
+| Feature | Behavior and fresh default |
+| --- | --- |
+| **Kill Aura** | Scripted normal damage against eligible nearby enemies. Damage-only: manual walking/jumping works without Auto Farm. OFF. |
+| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. Does not automatically enable Kill Aura. OFF. |
+| **Boss Only** | Restricts Auto Farm and arena-clear checks to main bosses/mini-bosses, ignoring regular mobs. OFF. |
+| **Credit Check** | Coordinates the user-specified 5% boss-credit target with a separate group. OFF. |
+| **Credit Whitelist** | Independent usernames/user IDs for credit coordination |
+| **Credit Status** | Shows missing accounts/counters, required damage, current plan, or finishing status |
+| **Auto Equip Best Gear** | Equips the best owned usable weapon, armor, and accessories. ON. |
+| **Atheon Dodge** | Bounded evasions based on supported native Atheon attack/hazard state, followed by returning to farm. OFF. |
+| **Swing animation** | Normal-speed visible swings, independent of damage-request pacing. ON. |
 
-Safe Mode same-floor matchmaking now holds the current position rather than travelling to spawn. After native block confirmation and required state/queue preparation, the rejoin is dispatched in the same search update without an extra settle tick or ping-based confirmation delay. A 0.2-second idle check backs up player events. Repeated queue preflight reuses validated source until the saved path or storage generation changes, while still checking that the source file exists. Its eight-second fallback also holds in place. The after-dispatch 10,000-stud move is retained. Native floor-change/friend-join pad staging and moderator protection retain their separate pad behavior.
+### Target selection and movement
 
-UI cleanup in v1.12.1 removes the Combat, Travel, Settings and Dodge status cards, saved-mini-arena button and in-window Hide/Close controls. A separate floating Hide UI / Show UI button preserves health bars. Auto Farm, Auto Equip Best Weapon and Swing animation have no descriptions. Auto Farm no longer enables Kill Aura; progression still explicitly enables combat. Pasted whitelist entries accept whitespace or punctuation separators, normalize to comma-separated entries and remove duplicates.
+Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. The current living target stays locked even if something higher priority spawns. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release it. Temporary invulnerability or missing streamed health is not a confirmed kill.
 
-Auto Farm keeps its current living target locked, including regular mobs, mini-bosses and main bosses. After its death, the common canonical target order applies: main boss, mini-boss, regular. Accounts converge on the next common eligible target after finishing their existing fights. Death, exhausted HitLives, despawning or an explicit arena/progression change releases the lock. Temporary missing health data, invulnerability and offset retries preserve it.
+Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
-Multi Spot has a Save Spot button. It stores the current X/Z with the detected floor height as a numbered custom arena, selectable in the current-floor dropdown and persisted in the normal floor destination file. Custom arenas remain separate from boss discoveries, up to 20 per floor. Saved selections use existing Multi Spot autosave and clear-all-enemies behavior.
+Farming uses common position geometry and shared server-clock pacing. It avoids following a boss's jump into the sky. **Suspended Unborn is an exception:** farming holds at **(-2439, 70, 5389)**, the supplied arena position plus 10 studs, instead of beneath its moving body.
 
-The Multi Spot status HUD starts centered on execution and can be dragged with mouse or touch. The top-bar eye-off button toggles Auto-hide UI on execute (green indicator = ON); the preference shares normal autosave. The floating Show UI button and Right Shift still reopen the window, while the health and Multi Spot overlays remain independent.
+Auto Farm OFF releases its movement, collision, and arena-float ownership. Independently active safety, trade, or native travel can still own movement.
 
-View player inventory now routes the native inventory renderer to the selected replicated player profile, matching the supplied source. Enable it, then open the game inventory normally. Disabling it, a selected player leaving, or script cleanup restores the original own-profile reference when owned. Unsupported debug APIs or a changed renderer layout return an error without changing profile instances. The Auto Dismantle dropdown has no description.
+### Best gear
 
-Utility now places Auto Craft between Auto Dismantle and Auto Trade. Its saved multi-select options are Uncommon → Rare and Rare → Legendary; both start OFF. Connected native forge inspection confirmed five-to-one recipes with no Vel cost and the Item/Craft action. The adapter reads recipes from the game database, rejects changed recipes with additional costs, filters materials through CanOfferCrafting, waits for both input consumption and output acknowledgment, and never duplicates an unacknowledged spend. Crafting pauses during trade/protection/travel. Live verification used a stubbed craft sender and consumed no materials; full-chain checks are offline.
+Ranks weapons by effective damage across supported classes, armor by effective defense, and accessories by the planner's damage/defense/utility score. Upgrades, level scaling, and usable-level requirements are considered. It uses owned items only and excludes cosmetic accessory skins from ranking.
 
-Auto Farm movement no longer requires Kill Aura. Turning Kill Aura OFF leaves enabled farming movement running. Float-only cleanup handles absent position constraints and restores valid humanoid booleans; arena support constrains vertical velocity instead of merely canceling gravity, preventing jump momentum from persisting. With farm and both auras OFF, automatic idle support releases for manual control. The Spot selector clears after a request so the same destination can be clicked again without refresh callbacks teleporting. Regression checks cover cleanup and repeated spot requests; no live movement test was run for this update.
+The weapon goes in the right slot and the left weapon slot is cleared: **no dual wielding**. Armor and up to two accessories are also considered outside Account Progression. The internal saved toggle key stays compatible with older Auto Equip Best Weapon settings.
 
-When Auto Farm and Kill Aura are both OFF, manual movement now releases TravelHold too, prevents arena-float attachment and pauses Multi Spot movement/idle holds. This fixes the remaining floating/jump lock caused by a late arena-arrival callback recreating support after cleanup. Re-enabling farming resumes movement; Multi Spot selections remain saved. Safety panic/travel already in progress retains its existing priority.
+### Credit Check
 
-Kill Aura is damage-only and does not authorize farming movement, Multi Spot movement or arena support. Auto Farm owns movement independently; with Auto Farm OFF, Kill Aura can continue damaging nearby enemies while the character walks and jumps normally. Separate explicitly enabled safety/dodge and manual teleport features retain their own behavior.
+Applies only to **main bosses and mini-bosses**, targeting **5% of maximum HP**. This threshold was supplied for this feature; the script does not independently guarantee the game's reward rules.
 
-Safe floor is now a shared user preference. Running updated accounts in the same executor workspace check the shared file once per second and adopt the selected floor when unlocked. Unrelated saves do not overwrite newer floor choices. Account Progression keeps its current-floor protection separate and does not publish that temporary floor to other accounts. Accounts on separate devices or isolated executor workspaces still have separate files. Update every account once, then select the desired Safe floor on one account.
+1. Enter the participating usernames/user IDs in **Credit Whitelist** on every account.
+2. Enable Credit Check and join the same Roblox server.
+3. Checking activates only while **all configured accounts are present**. If anyone is missing, ordinary scripted damage continues without credit holds, damage planning, or acknowledgment pacing. Checking reactivates automatically when the full group returns.
+4. Each account attacks until its replicated contribution reaches the requirement, then stops further scripted hits against that enemy while its group qualifies.
+5. Once everyone qualifies, unrestricted scripted damage resumes.
 
-Quest reward claiming runs automatically in the background with no toggle. It reads the native Quests.Active/ToClaim completion state and sends the native SystemQuests/ClaimQuest action using the own-profile quest instance, without opening the menu. Requests are paced at one per half-second, revalidate completion before sending and allow at most three attempts while awaiting acknowledgment. Stop Everything, panic, moderator handling, teleport and active trade pause claims. Live inspection found 11 active quests and none claimable; completion/retry scenarios were verified offline without real claims.
+The local account is always included; username/user-ID aliases are deduplicated. A solo/empty credit group needs no shared-credit hold. A present player without a visible contribution counter is unverified, not qualified. Safe Mode and Credit Check use **different whitelists**.
 
-As of v1.12.32, the supplied F1–F12 arena list is embedded as the default Multi Spot catalog with exact coordinates, locked positions and 90/45-second respawn metadata. DA/RA/KA share one arena. Atheon and Atlantis remain available. Arrival applies Y minus 20 once. Teleport destination JSON files are no longer created, loaded or saved, including during bootstrap. Existing old files are left untouched and ignored. Save Spot persists only custom arenas in `custom-spots_<placeid>.json`; persistent settings, shared preferences and rejoin caches remain enabled.
+The planner learns normal-hit and selected-skill damage per equipped weapon/enemy type. It chooses a low-excess combination and rechecks actual contribution after each hit. With 300k remaining, observed 250k skill damage, and 50k normal hits, it can plan one skill plus one normal hit. Unknown damage requires calibration; criticals, partial skill windows, changed equipment, and replication can alter estimates. Only enabled aura modes are used.
 
-The Whitelist row includes an inline X button immediately left of the input. It clears only the editor. The active and saved whitelist stays unchanged while the field is empty; entering and submitting a non-empty replacement updates the shared whitelist.
+This gates local scripted hits. It cannot undo in-flight damage, split a single lethal hit, or stop other/manual attackers. More than 20 accounts cannot each receive 5% of one unhealed HP pool. It cannot guarantee every account gets drops or Vel.
 
-Auto Farm prioritizes every loaded main boss (1) and mini-boss (2) on the current floor, including enemies outside the selected Multi Spot arena. A priority enemy can interrupt arena travel when no living enemy is currently locked. Existing fights finish before boss or spot priority changes take effect; after priority enemies die, Multi Spot resumes eligible selected arenas and finishes remaining mobs before rotating. Accounts with the same loaded eligible priority enemies use the same name/world-position ordering even if their previous targets and selected arenas differ. Safe Mode, moderator protection, trade pauses and Account Progression ownership still apply. Unloaded/streamed-out enemies cannot be detected by this client-side ordering.
+## Challenge Floors
 
-Startup makes one placement at the character’s current X/Z and detected ground height minus 20 studs, before profile/service initialization and feature startup. It waits up to eight seconds for a living root, cancels with a superseded runtime, preserves rotation and clears velocity. If local ground geometry is unavailable, the standing rig height provides the fallback ground estimate. Normal movement/automation controllers take over after that placement. The login-place Play helper still runs before floor-only behavior.
+**Auto Dodge** reads supported native challenge-floor hazards and temporarily takes movement priority. Default ON, relevant only where supported hazards exist. It does not guarantee immunity, especially when low FPS delays observations.
 
-While Auto Farm targets Suspended Unborn, its farming destination is fixed at (-2439, 70, 5389): the supplied arena position plus 10 studs in Y. Boss movement and automatic below-target offset learning do not shift that position. Multi Spot’s saved arena coordinates remain the original source position.
+**Transparent map** runs by default; its former toggle is removed. Characters, mobs, and identified hazards/effects are excluded from ordinary map treatment. Extended camera zoom is also applied while the runtime owns it.
 
-Multi Spot now uses the supplied 90/45-second respawn times. A timer begins at an observed living-to-dead transition, independently of how long remaining adds take to clear. It skips arenas with active cooldowns, visits other ready/unvisited selections, and shows a countdown when every timed arena is cooling down. Fresh living bosses override predictions; streaming loss or an already-dead body never fabricates a kill timer. DA/RA/KA keep individual member clocks and the arena becomes due at the earliest member respawn. Timers are runtime/server-local. Custom spots without known respawn times receive periodic spawn checks.
+## Auto Skill
 
-The first clicked Saved Spot is priority 1, the second priority 2, and so on. The dropdown displays these numbers; deselect/reselect moves a spot to the end. Among ready arenas, rotation follows this order while skipping cooldowns. Priorities share normal autosave and config export/import. The Combat tab’s Boss Only toggle (default OFF) limits Auto Farm and arena-clear checks to main bosses and mini-bosses; normal adds do not block that mode’s rotation. With Boss Only OFF, arena rotation still waits for all remaining mobs. Existing live global main-boss/mini-boss combat priority and protection pauses remain active.
+- **Skill Aura + Skill:** selects an offensive skill compatible with the current weapon and uses its supported native activation route. Default OFF.
+- **Misc Skill + Skill:** selects an available support skill. Default OFF.
 
-Farm coordination remains Lua-only. Target acquisition, farming movement and Multi Spot departures use shared server-clock quarter-second beats, with no catch-up burst after low FPS. Farming uses common enemy geometry and normalized clearance inputs rather than each account’s learned offset, with half-stud position snapping; Suspended Unborn retains its explicit fixed position. Respawn deadlines use the same server clock and half-second boundaries. Use the same game server, selection order and settings on every device. This is best-effort coordination without inter-client messaging: replication delay, streaming, existing fights and different readiness can still prevent exact simultaneous movement or identical targets. Offline tests simulate 14 independent client clocks/positions; no real multi-device combat was tested.
+Offensive skills respect weapon compatibility, stamina, cooldowns, skill windows, target registration, and protection/travel pauses. Normal and skill requests share per-target pacing. Overkill reservations reduce redundant hits while HP replicates; active Credit Check gates both paths.
 
-The FPS optimization pass moves farming position calculations onto the shared movement beat, before geometry/ground probes; completed dodge returns bypass that wait. Respawn matching caches normalized catalog/model names, invalidates them on name/catalog replacement, and skips boss sampling on floors without timed spots. Map transparency caches exclusion folders through workspace add/remove events. WindUI refreshes toggle/status values only for the active visible tab. Combat request pacing and target locks stay unchanged. Offline checks verify bounded planning work, cache invalidation and offscreen status scanning; live FPS improvement still needs a connected client/device measurement.
+| Support skill | Use condition |
+| --- | --- |
+| Cursed Enhancement | Actively attacking a living enemy and the buff is not already active |
+| Heal / Mending Spirit | Health at or below 66% |
+| Summon Tree | Stamina at or below the supported threshold of 66 |
 
-Credit Check (Combat, default OFF) applies only to main bosses and mini-bosses and uses the user-specified threshold of 5% of maximum HP. Credit Whitelist is independent of Safe Mode and accepts usernames/user IDs; the group is the local account plus every configured whitelist entry. Credit Check activates only while all configured accounts are present in the server; if any are missing, normal scripted damage continues without credit holds or damage planning. Each scripted normal/skill hit rechecks replicated contribution counters. Once the local account qualifies, it waits until every configured group member qualifies, then finishing hits resume. Missing max HP pauses damage rather than guessing. One in-flight contribution request per enemy reduces replication overshoot. All farming accounts must enable it and use the same credit list; manual/external damage, already-issued hits, and a single lethal hit cannot be undone or split. This does not guarantee drops or prevent unrelated players from killing the enemy. The toggle/list use shared autosave and portable config.
+Choices are filtered from usable native skills. Skill-effect suppression retains supported hit/animation timelines while reducing local visuals and aims to preserve health text and important hazard cues. Game/executor changes can affect support.
 
-Auto Equip Best Gear replaces the old Auto Equip Best Weapon label and extends the same owned/level-usable equipment planner to armor and two accessories outside progression. Highest effective weapon damage still wins across classes; the left weapon slot is cleared and no dual wielding is introduced. Existing saved toggle values remain compatible.
+## Misc and Player
 
-Multi Spot travel errors retry automatically after cooldowns of 2, 4, 5, 10, 20, 40 and then at most 60 seconds. Success clears retry backoff; disabling Multi Spot cancels retries. Explicit controller pauses for other errors still retain their separate protection behavior. Streamed map transparency updates run in one bounded background worker rather than synchronously per arriving part, and non-rendering effect descendants no longer enter the visual suppression queue. Offline regressions cover these paths; no client was connected for measuring the reported 1–2 FPS spikes.
+**Misc** provides **Dismantle**, **Upgrade**, and **The Forge** buttons to open the native menus. Opening a menu does not itself enable its automatic Utility feature.
 
-Credit Status now distinguishes accounts missing from the server, accounts without a visible replicated contribution counter, and accounts still below the threshold. Usernames/user IDs are deduplicated against actual server player identities; a missing whitelist entry is never silently excluded. A connected-client read-only check confirmed other players’ NumberValue contribution counters under a boss’s IntConstrainedValue Health, including both values above the user-specified 5% threshold. This confirms visibility in that tested server; it does not establish visibility or synchronized behavior on every device/server.
+**Player** provides:
 
-In a second observed Smashroom fight, the listed other player reached 13,258.08 contribution while the local account reached 7,830 against a required 8,125, and the boss died from the server’s ongoing combat. Credit Check saw the other player correctly; this test did not demonstrate a successful all-accounts credit hold because unrelated/manual damage cannot be controlled by the local script. Credit Status lists names and current/required damage for present accounts below threshold.
+| Control | Behavior |
+| --- | --- |
+| **Select player** | Selects an available player |
+| **TP to player** | Requests movement to that player |
+| **View player** | Uses the selected player as the viewing target |
+| **View player inventory** | Uses that player's replicated profile through the guarded native inventory getter; open your normal Inventory menu to view it |
 
-Credit Check now learns weapon/enemy-specific normal-hit and selected-skill damage from replicated local contribution. It plans a low-excess normal/skill combination for the remaining requirement, uses the lower observed damage to avoid treating criticals as guaranteed, and rechecks actual credit after every request. Fully observed skill windows provide whole-cast estimates; partial credit-limited windows do not become full-cast estimates. A running scripted skill hands off to normals when one normal hit is enough. Unknown damage is calibrated, only enabled aura modes are used, and all damage becomes unrestricted again after every configured account qualifies. Estimates are runtime-local, capped at 128 keys, and cannot split a native hit or undo in-flight damage.
+Inventory viewing does not transfer items or ownership. It requires compatible native/debug access and replicated profile data. Turning it off, losing the player, or cleanup restores the original reference when the runtime still owns the change.
 
-The cloud-phone load pass uses reusable double buffers for continuous effect maintenance instead of ever-increasing queue indexes. Enemy health changes mark rows dirty and redraw at most once every 0.12 seconds per row, avoiding one cancelled/new tween for each player’s damage event. Dynamic equipment observers are deduplicated and disconnected when values leave inventory/equipment and at cleanup. Offline stress regressions cover 20,000 effect-maintenance cycles, 500-event health bursts and 1,000 inventory-observer add/remove cycles. No connected cloud-phone client was available to measure RAM/FPS, so these fixes do not establish the cause of a specific device’s 30-second slowdown or guarantee eight-account performance.
+## Utility
 
-As of v1.12.49, Credit Check automatically bypasses its hold, planner and acknowledgment pacing when any configured account is missing from the server (or the group contains only the local account). When all listed accounts are present, credit checking resumes automatically. A present account with no visible contribution counter still needs confirmed credit; absence and insufficient damage are distinct cases. Credit Status shows why checking is inactive.
+### Perfromance Booster
+
+Multi-select from these eight saved options:
+
+| Option | Effect |
+| --- | --- |
+| **No damage text** | Suppresses damage-number presentation |
+| **No damage particles** | Suppresses supported hit particles, beams, and trails |
+| **Delete dead mobs** | Suppresses/removes supported local dead-mob presentation |
+| **No vel obtained in chat** | Hides Vel-obtained notifications |
+| **Hide players** | Hides supported other-player visuals locally |
+| **Hide effects** | Hides supported effects through the visual controller |
+| **Disable rendering** | Disables 3D rendering when its API is supported |
+| **Limit FPS** | Caps FPS at 15 when supported and restores the previous cap when released |
+
+Options are explicitly selected. A lower FPS cap reduces resource use; it is not an FPS increase. Unsupported APIs report failure rather than being assumed available.
+
+### Auto Dismantle
+
+Multi-select **Common**, **Uncommon**, and/or **Rare**. Handles eligible existing inventory and new drops. Equipped, locked, favorited, and native-restricted items are preserved. Each rarity is opt-in; none is selected on a fresh configuration.
+
+### Auto Craft
+
+Select either or both:
+
+- **Uncommon → Rare:** five Uncommon Upgrade Crystals make one Rare Upgrade Crystal.
+- **Rare → Legendary:** five Rare Upgrade Crystals make one Legendary Upgrade Crystal.
+
+With both selected, available rare crystals can become legendary while uncommon crystals replenish rare crystals. Recipes are checked against native data. One request is sent at a time and inventory acknowledgment is required. An unacknowledged craft pauses further spending rather than blindly duplicating it. Protection, travel, and trading can pause crafting.
+
+### Auto Trade
+
+**Default OFF.** Accepts incoming requests only from the **Safe Mode whitelist**, which also validates the partner during a trade. Credit Whitelist does not authorize trades.
+
+| Control | Meaning |
+| --- | --- |
+| **Mode: Selected items** | Offers selected eligible inventory item names |
+| **Mode: Legendary+** | Offers eligible Legendary, Tribute, and Burst items |
+| **Inventory** | Selects item names from the local inventory, including displayed quantities |
+
+Offers all eligible copies/stacks, paced to native acknowledgment and trade limits. There is no old script-imposed 128-item cutoff. **Upgrade Protection Scroll** and **Resurrection Crystal** are always included when eligible, even if not selected. Equipped, locked/favorited, and native-restricted items are excluded.
+
+Vel is offered automatically at the maximum affordable amount after the sender's **10% tax**, capped at a 100,000,000 Vel offer. This is equivalent to `floor(balance / 1.10)`, subject to the cap. A 660,000 balance permits a 600,000 offer plus 60,000 tax. There is no manual Vel box.
+
+**Final acceptance is automatic.** The intended offer must replicate and remain stable before native confirmation/acceptance stages. Unexpected outgoing quantities pause automation. There is no extra final-accept toggle.
+
+Trading pauses conflicting farming, attacks, gear changes, and crafting/dismantling. Movement holds at current X/Z and detected ground minus 20 studs. Higher-priority protection can interrupt. Native restrictions/server acceptance determine success.
+
+## Speacial
+
+**Account Progression** automates normal floor progression toward F12:
+
+- Finds the current floor's main boss and coordinates farming/combat.
+- Checks a real credited boss defeat, then waits for native floor-unlock confirmation.
+- Uses the native teleport pad/floor route.
+- Selects owned usable gear through the equipment planner.
+- Skips F6/Helmfirth: F5 travels to F7 when F7 is unlocked.
+- Saves per-account checkpoints for resuming after a rejoin.
+- Makes Safe Mode protect the current progression floor; Multi Spot yields.
+- Restores saved farming preferences when progression is switched off.
+
+Streaming loss, an unrelated miniboss, or an uncredited corpse is not a completed main-boss kill. The script cannot grant a floor unlock the server has not awarded. **F12 is the endpoint**; Atheon and Atlantis are not additional progression stages.
+
+## Settings
+
+| Control | Behavior |
+| --- | --- |
+| **Theme** | Selects a theme from bundled WindUI |
+| **Config Export** | Copies portable JSON to the clipboard |
+| **Config Import** | Paste an export and submit/leave the field to validate and reload with those settings |
+
+Export includes every field from the autosave snapshot: feature toggles, **both whitelists**, floor/skill/item selections, Multi Spot order, layout/theme, relevant saved preferences/checkpoints, and **custom Save Spot entries from all available floor files**. Custom-spot transfer requires executor file access.
+
+Import replaces preferences and can enable the toggles in the export. Text is parsed as validated JSON, not executed as Lua. Credentials, temporary rejoin tickets, live server observations, and damage-learning caches are not portable configuration. Feather uses its own settings system rather than WindUI's separate config manager.
+
+## Built-in background features
+
+| Feature | Behavior |
+| --- | --- |
+| **Anti-AFK** | One idle listener requests supported VirtualUser input with duplicate-event pacing; no continuous movement loop |
+| **Completed quest claiming** | Reads native completion state and requests rewards for completed owned quest instances, with paced/bounded retries |
+| **Moderator protection** | Matches the script's moderator list, confirms native blocking before disconnecting, and arms bounded recovery |
+| **Rejoin recovery** | Queues installed source/loader where supported; build-specific caches avoid mixing different account builds |
+| **Startup Play helper** | Handles native login-place Play before waiting for a combat profile |
+| **Runtime ownership/cleanup** | Deduplicates execution and releases owned UI, connections, movement, and supported visual changes when closed/replaced |
+
+Post-kick rejoining depends on executor support: some executors stop scripts or reject teleports after disconnection. This is not a ban bypass. Blocks, kicks, trades, crafting spends, and floor progression are not exercised as destructive unit tests.
+
+## Default Multi Spot arenas
+
+These are embedded **source positions**, before the normal Multi Spot **Y − 20** arrival adjustment.
+
+| Floor | Spot | Source X, Y, Z | Respawn |
+| --- | --- | --- | --- |
+| F1 | Rahjin the Thief King | `-2939, -234, 1216` | 90s |
+| F2 | Borik the BeeKeeper | `-2010, 443, -8956` | 90s |
+| F3 | Ra'thae the Ice King | `-393, 4168, -369` | 90s |
+| F4 | Irath The Lion | `-2319, 2073, 95` | 90s |
+| F5 | Sa'jun the Centurian Chieftain | `2182, 1236, -717` | 90s |
+| F7 | Smashroom the Mushroom Behemoth | `3329, 730, -475` | 90s |
+| F8 | Formaug the Jungle Giant | `1550, 4081, 7720` | 90s |
+| F8 | Hippogriff | `3772, 5743, -9686` | 45s |
+| F9 | Mortis the Flaming Sear | `12392, 429, -3415` | 90s |
+| F9 | Polyserpant | `1926, 2889, -11348` | 45s |
+| F9 | Gargoyle Reaper | `-3613, 2905, -7708` | 45s |
+| F10 | Grim the Overseer | `104, 931, 23842` | 90s |
+| F10 | Baal, The Tormentor | `50, 261, 18107` | 45s |
+| F11 | Duality Reaper | `6154, 846, -4251` | 45s |
+| F11 | Za, the Eldest | `1753, 921, -6389` | 45s |
+| F11 | DA, RA, KA | `5129, 1614, 2104` | 45s per member |
+| F11 | Saurus, the All-Seeing | `5187, 2343, 6239` | 90s |
+| F12 | Limor the Devourer | `450, -337, 7912` | 45s |
+| F12 | Radioactive Experiment | `-3754, 167, 3570` | 90s |
+| F12 | Suspended Unborn | `-2439, 60, 5389` | 90s |
+| F12 | C-618 Uriotol, The Forgotten Hunter | `1685, 288, 3749` | 45s |
+| F12 | Warlord | `1031, 108, 5474` | 45s |
+| Atheon | Atheon arena | `840, 798, 336` | No supplied timer |
+| Atlantis | Leviathan | `15.89453125, 1320.01953125, -797.10546875` | No supplied timer |
+
+DA/RA/KA share one selected arena but track observed member death clocks; the arena can become due at the earliest member respawn. Suspended Unborn's separate **farming** exception is `-2439, 70, 5389`. Custom spots do not automatically receive a guessed respawn duration.
+
+## Feature interactions
+
+| Situation | Result |
+| --- | --- |
+| Auto Farm ON, both damage auras OFF | Farming movement without enabling either damage aura |
+| Kill Aura ON, Auto Farm OFF | Damage automation with manual movement |
+| Multi Spot ON, Auto Farm OFF | Selections stay saved; automatic arena movement waits |
+| Higher-priority enemy/spot becomes ready | Current living enemy is finished before switching |
+| Boss Only ON | Regular enemies/adds do not block farming/arena-clear checks |
+| Account Progression ON | Progression owns floor travel; Multi Spot yields; Safe Mode follows the progression floor |
+| Safe Mode handles an outsider | Protection interrupts ordinary farming/travel |
+| Auto Trade active | Conflicting attacks, farming, gear and inventory automation yield |
+| Credit Check ON, complete list present | Credit gate/planner applies to bosses/minis |
+| Credit Check ON, someone missing | Credit checking becomes inactive and ordinary damage continues |
+| Main window hidden | Automation, health HUD and enabled Multi Spot HUD continue |
+
+Dodge, recovery, native skill state, character readiness and server corrections can also temporarily own movement. Conflicting features do not run simultaneously merely because every toggle is ON.
+
+## Multiple accounts and devices
+
+Three distinct mechanisms are involved:
+
+1. **Shared files:** supported preferences are shared by accounts using the same executor workspace. Independent devices/isolated app storage do not share these files.
+2. **Common farming decisions:** accounts in one server use shared server-clock pacing, common target order/position geometry, and selected spot priority. No relay/backend is required.
+3. **Credit observation:** clients read replicated contribution counters for their configured group. This needs presence/readable counters; it is not a separate communication service.
+
+Use the same build, **same Roblox server**, same spots/order, same relevant toggles, and same Credit Whitelist on every device. Export/import can copy settings between devices.
+
+**Exact same-frame teleports and identical targets are not guaranteed.** Streaming, replication delay, FPS, readiness, corrections, and existing target locks can differ. An account finishing a fight does not abandon it to match another account. Counter visibility observed on one connected client does not establish successful coordination on every device/server.
+
+## Local files and persistence
+
+Paths are relative to the executor's workspace; do not add a second `workspace` directory manually.
+
+| File/folder | Purpose |
+| --- | --- |
+| `SB2Codex/settings_<userid>.json` | Account-local snapshot/checkpoints |
+| `SB2Codex/shared-settings.json` | Supported shared preferences within that exact workspace |
+| `SB2Codex/custom-spots_<placeid>.json` | Custom Save Spot positions only, per floor |
+| `SB2Codex/solo-search_<userid>.json` | Bounded Safe Mode resume state |
+| `SB2Codex/kill-aura.luau` | Installed standalone source for recovery |
+| `SB2Codex/source_<build>.luau` | Build-specific cached recovery source |
+| `SB2Codex/WindUI/`, possibly `WindUI/` | UI library support folders |
+
+Built-in teleport coordinates stay in source. Old `destinations_<placeid>.json` files are no longer created or loaded; existing ones are ignored and left untouched. Custom positions deliberately use their own files.
+
+Most shared changes are loaded on execution. Safe floor also has a lightweight live shared-file check, while progression retains current-floor protection context. Separate devices must import/copy settings; local shared files are not cloud synchronization. Live observations, damage estimates and resume tickets are not portable synchronization data.
+
+## Performance and compatibility
+
+Current overhead reductions include:
+
+- Shared mob tracking and timestamp-based damage pacing rather than per-hit delayed-task bursts.
+- Frame/request budgets and no catch-up spam after low-FPS frames.
+- UI/status work restricted to visible tabs and paced independently of combat.
+- Startup UI/map work and streaming transparency spread across small batches.
+- Reusable effect-maintenance buffers and per-update time/count budgets.
+- Health changes coalesced into at most one redraw per 0.12 seconds per enemy row.
+- Deduplicated equipment listeners, disconnected on removal/cleanup.
+- Cached respawn-name matching and bounded runtime damage-estimate caches.
+
+These reduce script work; they do not guarantee zero lag, a minimum FPS, or eight-account cloud-phone capacity. Native rendering/effects, executor behavior, server updates, and VM/device resources also matter. A 1–2 FPS drop or slowdown after 30 seconds is not by itself proof of a memory leak.
+
+Potassium, Arceus X and other executors expose different capabilities. Compatibility paths exist, but optional APIs and every executor/device combination are not universally verified.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Old compatibility window appears | WindUI failed to initialize. Update/restart and inspect the recorded error; the alternate layout alone does not identify the cause. |
+| Multi Spot starts but does not move | Auto Farm, current-floor selections, Safe Mode/progression/trade/dodge ownership, living character and travel state |
+| Travel timed out | Automatic cooldown/retry state, valid destination and streamed collision; explicit pauses can have another cause |
+| Credit Check does not wait | Boss/mini scope, complete whitelist presence, Credit Status and the separate Credit Whitelist |
+| Credit Check waits despite presence | Username/user ID, replicated contribution, max HP and actual 5% progress; a missing counter is not credit |
+| Boss dies before everyone qualifies | Other/manual attackers, single lethal hits and in-flight damage cannot be controlled by the local gate |
+| Accounts have different settings | Whether executor storage is truly shared; export/import on separate devices and restart every account |
+| Accounts target different mobs | Same server, loaded enemies, selection order, settings and existing fights; coordination is best-effort |
+| Safe Mode cannot block/rejoin | Native input/dialog, readable block list, installed source, file access, teleport queue support, limits and teleport errors |
+| Unexpected gear selection | Effective upgrades/scaling, level requirement, accessory utility score, cosmetic skin exclusion and native acknowledgment |
+| Inventory view unavailable | Native inventory/debug compatibility and replicated target profile |
+| Severe FPS drops | Explicit performance options and frame-time/memory measurements to separate script overhead from rendering/VM load; Limit FPS intentionally caps at 15 |
+
+## Development and verification
+
+| Path | Role |
+| --- | --- |
+| [loader.luau](loader.luau) | Stable public loader |
+| [kill-aura.luau](kill-aura.luau) | Generated standalone entry; do not hand-edit |
+| [kill-aura.body.luau](kill-aura.body.luau) | Runtime body and bundle integration |
+| `*.module.luau` | Feature/controller implementations |
+| `*.test.luau`, `*.test.lua` | Offline regressions and injected engine doubles |
+| [build-script.py](build-script.py) | Bundles modules and the pinned UI library |
+| [run-offline-tests.py](run-offline-tests.py) | Consistency, regression, encoding and compile checks |
+| [vendor/](vendor/) | Pinned WindUI, provenance and upstream license |
+
+Build and verify:
+
+```powershell
+python build-script.py
+python run-offline-tests.py
+```
+
+Requires Python 3.10+, Lua 5.1+ on `PATH`, and the official Luau CLI tools. To specify the Luau directory:
+
+```powershell
+python run-offline-tests.py --luau-tool-dir C:/path/to/luau-tools
+```
+
+Coverage includes block confirmation/recovery, arena clearing/respawns/priorities, target locks, movement release, gear planning, trading/crafting gates, credit counters/planning, config transfer, mobile HUD ownership, and long-running queue/listener stress cases. Engine doubles do not replace live-device validation. Live checks have observed contribution counters, UI construction and selected native data paths; full multi-device combat, eight-account cloud-phone FPS/RAM stability and every executor remain unverified.
+
+Never use real account blocks, kicks, trades, crafting spends or floor progression as unit tests. Respect the current live-test scope. Runtime changes require a build/version bump, regenerated entry, relevant checks and a normal commit/push. Do not publish executor workspaces, settings, logs, credentials or private session notes.
+
+### UI attribution
+
+WindUI comes from [Footagesus/WindUI](https://github.com/Footagesus/WindUI). Release **1.6.66** is bundled so queued recovery does not download a separate UI library. Its embedded banner differs from the release tag; provenance/checksum are in [vendor/README.md](vendor/README.md). See [vendor/WindUI-LICENSE.txt](vendor/WindUI-LICENSE.txt) for its MIT license. The library may still fetch normal visual assets.
