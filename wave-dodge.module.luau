@@ -79,6 +79,9 @@ return function(ctx)
         params.RespectCanCollide = true
         local hit=workspace:Raycast(Vector3.new(point.X,reference+8,point.Z),Vector3.new(0,-math.max(180,offset+160),0),params)
         if hit and hit.Normal.Y > 0.6 then cachedFloor = hit.Position.Y end
+        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then
+            return point.Y+20 -- Missing deleted geometry must not accumulate vertical drift.
+        end
         return cachedFloor or reference
     end
     function api.BlackoutPoint(point)

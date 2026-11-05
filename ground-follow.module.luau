@@ -16,6 +16,7 @@ return function(ctx)
         local standing=math.max(data.BodyBelow or root.Size.Y*.5,
             root.Size.Y*.5+(humanoid and humanoid.HipHeight or 0))
         local floor=record.Floor
+        if ctx.MapDeleted and ctx.MapDeleted()then floor=nil;record.Floor=nil end
         local position=root.Position
         local elevated=floor and position.Y-floor>standing+7
         local rising=root.AssemblyLinearVelocity.Y>10

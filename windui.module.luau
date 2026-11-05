@@ -11,6 +11,8 @@ return function(ctx)
     local lastTab
     local choiceCursor=1
     local visibilityApplied=false
+    local memory=ctx.Memory or {Pruned=0,Update=function()end}
+    api.Memory=memory
     local function yieldBuild()
         if disposed or s.Running==false then error("UI initialization cancelled")end
         if ctx.Yield then ctx.Yield()end
@@ -280,7 +282,7 @@ return function(ctx)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
 
-    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}
+    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
     local function applyBoost(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
@@ -289,7 +291,14 @@ return function(ctx)
     dropdown("PerformanceBoosters","Utility","Performance boosters",function()
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
-    end,applyBoost,true,"Delete map removes local scenery/floors in batches. OFF stops deletion; rejoin to restore. Gameplay objects and terrain stay.")
+    end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+    paragraph("PerformanceCleanupStatus","Utility","Cleanup status",function()
+        local map=s.MapDeletion
+        local animations=s.AnimationRemoval
+        return "Map: "..tostring(map and map.Removed or 0).." removed · "..tostring(map and map.Pending or 0).." pending"
+            .." · Animations stopped: "..tostring(animations and animations.Stopped or 0)
+            ..(map and map.LastError and (" · "..map.LastError)or "")
+    end)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()
@@ -356,6 +365,7 @@ return function(ctx)
     function api.Update(now)
         if disposed or s.Running==false or now<nextUpdate then return end
         nextUpdate=now+.25
+        memory.Update();s.UIReferencesPruned=memory.Pruned
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
         if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end

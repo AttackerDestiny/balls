@@ -3,13 +3,13 @@ return function(source)
     local function test(name,fn)fn();count+=1;print("PASS "..name)end
     local function vec(x,y,z)return {X=x,Y=y,Z=z}end
     local function fixture()
-        local floor,hint=0,nil
+        local floor,hint,deleted=0,nil,false
         local probes=0
         local mob={FindFirstChildOfClass=function()return {HipHeight=2}end}
         local data={Root={Position=vec(0,5,0),Size=vec(2,2,2),AssemblyLinearVelocity=vec(0,0,0)},BodyBelow=5}
         local load=assert(loadstring(source));setfenv(load,setmetatable({Vector3={new=vec}},{__index=getfenv()}))
-        local api=load()({Floor=function()probes+=1;return floor end,GroundHint=function()return hint end})
-        return {API=api,Mob=mob,Data=data,Floor=function(y)floor=y end,Hint=function(p)hint=p end,Probes=function()return probes end}
+        local api=load()({MapDeleted=function()return deleted end,Floor=function()probes+=1;return floor end,GroundHint=function()return hint end})
+        return {API=api,Mob=mob,Data=data,Floor=function(y)floor=y end,Deleted=function(value)deleted=value end,Hint=function(p)hint=p end,Probes=function()return probes end}
     end
     test("ground following tracks ordinary walking",function()
         local f=fixture();local p,air=f.API.Resolve(f.Mob,f.Data,0);assert(p.Y==5 and not air)
@@ -37,6 +37,14 @@ return function(source)
     test("ground following adapts to walking onto higher terrain",function()
         local f=fixture();f.API.Resolve(f.Mob,f.Data,0);f.Floor(20);f.Data.Root.Position=vec(5,25,5)
         local p,air=f.API.Resolve(f.Mob,f.Data,.3);assert(not air and p.Y==25)
+    end)
+    test("deleted map cannot leave a stationary enemy permanently airborne against a stale floor",function()
+        local f=fixture();f.API.Resolve(f.Mob,f.Data,0)
+        f.Deleted(true);f.Data.Root.Position=vec(10,35,10)
+        local p,air=f.API.Resolve(f.Mob,f.Data,.3)
+        assert(not air and p.Y==35,"Recompute attack position instead of waiting forever for a deleted floor")
+        f.Data.Root.AssemblyLinearVelocity=vec(0,20,0)
+        p,air=f.API.Resolve(f.Mob,f.Data,.6);assert(air,"Real upward motion still pauses ground following")
     end)
     print("All "..count.." ground-follow scenarios passed")
 end

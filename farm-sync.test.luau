@@ -72,12 +72,12 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
     local force=account({regular})
     assert(force.Select(vec(0),nil,0)==regular)
     force.Add(mini)
-    assert(force.Select(vec(0),regular,1)==regular,"A new mini-boss must wait until the current normal mob dies")
+    assert(force.Select(vec(0),regular,1)==mini,"A mini-boss preempts a living normal mob")
     local main=mob("ZZ distant main boss",20000,"Elite")
     assert(force.Priority.Rank(main)==3)
     main.Children.Entity.Children.Difficulty={Value="Main Boss"}
     force.Add(main)
-    assert(force.Select(vec(0),regular,2)==regular,"A new main boss cannot interrupt the current living enemy")
+    assert(force.Select(vec(0),regular,2)==main,"A main boss preempts a lower-priority fight")
     regular.Children.Entity.Children.Health.Value=0
     assert(force.Select(vec(0),regular,3)==main,"After the current kill, choose the main boss first")
     assert(force.State.TargetPriority==1)
@@ -105,7 +105,7 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         a.State.FarmLockArena=a.State.MultiSpotAnchor
         a.State.FarmTargetLock=i==1 and mainB or globalMini
         local current=a.State.FarmTargetLock
-        assert(a.Select(vec(i*10000),current,0)==current,"Accounts must finish an existing fight before synchronizing the next target")
+        assert(a.Select(vec(i*10000),current,0)==(i==1 and mainB or mainA),"A main boss preempts a mini-boss while same-rank locks stay stable")
         synchronized[i]=a
     end
     mainB.Children.Entity.Children.Health.Value=0;globalMini.Children.Entity.Children.Health.Value=0
@@ -128,5 +128,5 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
     print("PASS Credit target convergence: split living locks across three accounts adopt one boss instead of waiting on each other")
     print("PASS Global boss override: main=1, mini=2, cross-arena priority, different account locks converge after current kills, all priority kills and regular arena scope")
     print("PASS Shared farm targets: three account origins, previous targets, iteration order, boss/name/position ordering, death, late HitLives, invulnerability and trade priority")
-    print("PASS Forced farm priority: main=1, mini=2, regular=3, finish-current-before-switch, native metadata updates and mixed rank markers")
+    print("PASS Forced farm priority: main=1, mini=2, regular=3, higher-rank preemption, stable same-rank locks and native metadata updates")
 end

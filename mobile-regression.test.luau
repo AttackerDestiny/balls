@@ -142,6 +142,11 @@ return function(sources)
         local g=travelFixture();g.Ctx.Wait=function(n)g.Time+=n;g.Root.Position=vec(0,0,0)end
         assert(not pcall(g.Move)and g.Time<=2.2)
     end)
+    test("explicit map deletion can confirm a stable arena hold without deleted floor collision",function()
+        local f=travelFixture();f.Ctx.Surface=function()return nil end;f.Ctx.MapDeleted=function()return true end
+        local landing=f.Move(true)
+        assert(landing.Position.Y==0 and f.Streams==1 and f.Time>=.3,"Use the configured arena height only when map deletion is explicitly enabled")
+    end)
     test("panic/respawn invalidates in-flight arena travel",function()
         for _,respawn in ipairs({false,true})do
             local f=travelFixture();f.Ctx.Stream=function()if respawn then f.Character={}else f.Active=false end end

@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.runtime-recovery-v1.12.54"
-local VERSION="1.12.54"
+local BUILD="2026-11-04.visual-cleanup-memory-v1.12.55"
+local VERSION="1.12.55"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -1874,7 +1874,7 @@ do
     create("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.BoostOptions)
     create("UIPadding",{PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.BoostOptions)
     state.UI.BoostButtons={}
-    for index,name in ipairs({"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}) do
+    for index,name in ipairs({"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}) do
         local button=uiButton("Boost"..index,name,index,28,state.UI.BoostOptions)
         button.Font=Enum.Font.Gotham; button.TextSize=11
         state.UI.BoostButtons[name]=button
@@ -2114,7 +2114,7 @@ end
 -- Source performance options; text is visible unless explicitly hidden.
 return function(ctx)
     local state=ctx.State
-    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}}
+    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}}
     local options,known={},{}
     for _,name in ipairs(api.Names) do known[name]=true; options[name]=ctx.Options and ctx.Options[name]==true end
     state.PerformanceBoosters=options
@@ -2129,7 +2129,8 @@ return function(ctx)
     local oldCap
     local uiVisible=false
     if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS); if ok and type(value)=="number" then oldCap=value end end
-    local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and options[name] end
+    local function wanted(name)return options[name]or options["Remove everything"]end
+    local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and wanted(name) end
     function api.SetUIVisible(visible)
         visible=visible==true
         if disposed or uiVisible==visible then return end
@@ -2206,31 +2207,35 @@ return function(ctx)
     local rootAdded=ctx.Workspace.ChildAdded:Connect(function(instance)
         if instance.Name=="HitEffects" and active("No damage particles") then attachParticles() end
     end)
+    local function apply(name)
+        local all=name=="Remove everything"
+        if name=="Disable rendering"or all then
+            ctx.SetRendering(not wanted("Disable rendering"));renderOwned=wanted("Disable rendering")==true
+        end
+        if name=="Limit FPS"or all then
+            local limited=options["Limit FPS"]and not options["Remove everything"]
+            if limited or fpsOwned then
+                assert(ctx.SetFPS and oldCap~=nil,"FPS cap control is unavailable")
+                ctx.SetFPS(limited and (uiVisible and 60 or 15)or oldCap)
+            end
+            fpsOwned=limited==true
+        end
+        if name=="Hide players"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.Set(wanted("Hide players")==true),"Player visibility is unavailable")end
+        if name=="Hide effects"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.SetEffects(wanted("Hide effects")==true),"Effect visibility is unavailable")end
+        if (name=="Delete map"or all)and state.MapDeletion then state.MapDeletion.Set(wanted("Delete map")==true)end
+        if (name=="Remove animations"or all)and state.AnimationRemoval then state.AnimationRemoval.Set(wanted("Remove animations")==true)end
+        if name=="No damage particles"or all then if wanted("No damage particles")then attachParticles()else detachParticles()end end
+        if name=="Delete dead mobs"or name=="No damage text"or all then
+            if wanted("Delete dead mobs")or wanted("No damage text")then hookGraphics()else unhookGraphics()end
+        end
+        if name=="No vel obtained in chat"or all then if wanted("No vel obtained in chat")then hookUI()else unhookUI()end end
+    end
     function api.Set(name,enabled)
-        if disposed or ctx.Paused or not known[name] or state.StopEverything then return false end
-        enabled=enabled==true
-        if name=="Disable rendering" then
-            local ok,message=pcall(ctx.SetRendering,not enabled)
-            if not ok then state.LastBoostError=tostring(message); return false end
-            renderOwned=enabled
-        elseif name=="Limit FPS" then
-            if not ctx.SetFPS or oldCap==nil then state.LastBoostError="FPS cap control is unavailable"; return false end
-            local ok,message=pcall(ctx.SetFPS,enabled and (uiVisible and 60 or 15)or oldCap)
-            if not ok then state.LastBoostError=tostring(message); return false end
-            fpsOwned=enabled
-        elseif name=="Hide players" then
-            if not ctx.PlayerVisibility or not ctx.PlayerVisibility.Set(enabled) then return false end
-        elseif name=="Hide effects" then
-            if not ctx.PlayerVisibility or not ctx.PlayerVisibility.SetEffects(enabled) then return false end
-        elseif name=="Delete map"and state.MapDeletion then
-            if not state.MapDeletion.Set(enabled)then return false end
-        end
-        options[name]=enabled
-        if name=="No damage particles" then if enabled then attachParticles() else detachParticles() end end
-        if name=="Delete dead mobs" or name=="No damage text" then
-            if options["Delete dead mobs"] or options["No damage text"] then hookGraphics() else unhookGraphics() end
-        end
-        if name=="No vel obtained in chat" then if enabled then hookUI() else unhookUI() end end
+        if disposed or ctx.Paused or not known[name]or state.StopEverything then return false end
+        local previous=options[name]
+        options[name]=enabled==true
+        local ok,message=pcall(apply,name)
+        if not ok then options[name]=previous;pcall(apply,name);state.LastBoostError=tostring(message);return false end
         if ctx.Changed then ctx.Changed() end
         return true
     end
@@ -2239,9 +2244,12 @@ return function(ctx)
         disposed=true
         rootAdded:Disconnect(); detachParticles(); unhookGraphics(); unhookUI()
         if state.MapDeletion then state.MapDeletion.Destroy()end
+        if state.AnimationRemoval then state.AnimationRemoval.Destroy()end
         if ctx.PlayerVisibility then ctx.PlayerVisibility.Destroy() end
         if renderOwned then pcall(ctx.SetRendering,true); renderOwned=false end
         if fpsOwned then pcall(ctx.SetFPS,oldCap); fpsOwned=false end
+        -- External wrappers may still reference ours; release the retired runtime.
+        ctx.State=nil;ctx.Changed=nil;ctx.PlayerVisibility=nil;state=nil
     end
     if not ctx.Paused and not state.StopEverything then
         for _,name in ipairs(api.Names) do
@@ -2364,6 +2372,7 @@ return function(ctx)
         local standing=math.max(data.BodyBelow or root.Size.Y*.5,
             root.Size.Y*.5+(humanoid and humanoid.HipHeight or 0))
         local floor=record.Floor
+        if ctx.MapDeleted and ctx.MapDeleted()then floor=nil;record.Floor=nil end
         local position=root.Position
         local elevated=floor and position.Y-floor>standing+7
         local rising=root.AssemblyLinearVelocity.Y>10
@@ -2385,6 +2394,7 @@ end
     local enemy=services:FindFirstChild("EnemySkills")
     state.NativeEnemySkills=enemy and require(enemy)
     state.GroundFollow=make({
+        MapDeleted=function()return state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"]end,
         Floor=function(mob,data)
             local params=RaycastParams.new()
             params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
@@ -2764,10 +2774,6 @@ function state.GetFarmPriorityTarget(now)
         local focus=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
         if focus then return focus end
     end
-    if state.IsFarmEnemyAlive()then
-        local locked=state.FarmTargetLock or state.FollowTarget
-        return targetPriority.Rank(locked)<=2 and locked or nil
-    end
     local cached=state.FarmPriorityTarget
     if now<(state.FarmPriorityScanAt or 0)and cached and validMob(cached,mobs)then return cached end
     if now<(state.FarmPriorityScanAt or 0)and not cached then return nil end
@@ -2776,6 +2782,10 @@ function state.GetFarmPriorityTarget(now)
     for mob in pairs(trackedMobs)do
         if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
             and (not best or targetPriority.FarmLess(mob,best))then best=mob end
+    end
+    if state.IsFarmEnemyAlive()then
+        local locked=state.FarmTargetLock or state.FollowTarget
+        if targetPriority.Rank(locked)<=2 and (not best or targetPriority.Rank(locked)<=targetPriority.Rank(best))then best=locked end
     end
     -- A temporary invulnerability/streaming gap is not a kill and must not
     -- downgrade an already observed main boss to a mini-boss or normal mob.
@@ -3460,6 +3470,9 @@ return function(ctx)
         params.RespectCanCollide = true
         local hit=workspace:Raycast(Vector3.new(point.X,reference+8,point.Z),Vector3.new(0,-math.max(180,offset+160),0),params)
         if hit and hit.Normal.Y > 0.6 then cachedFloor = hit.Position.Y end
+        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then
+            return point.Y+20 -- Missing deleted geometry must not accumulate vertical drift.
+        end
         return cachedFloor or reference
     end
     function api.BlackoutPoint(point)
@@ -3960,7 +3973,7 @@ do
 -- BEGIN BUNDLED MAP DELETION
 -- Client-only static geometry removal; never delete gameplay containers/models.
 return function(ctx)
-    local api={Removed=0}
+    local api={Removed=0,Pending=0,MaxQueued=0}
     local enabled,disposed,worker=false,false,false
     local generation=0
     local added
@@ -3997,29 +4010,39 @@ return function(ctx)
             if token~=generation or disposed or not ctx.State.Running then return end
             local scan=needsScan and ctx.Root:QueryDescendants("BasePart")or {}
             needsScan=false
-            local index=1
+            local index,scanTail=1,#scan
+            if ctx.ClearTerrain then
+                local ok,reason=pcall(ctx.ClearTerrain)
+                api.TerrainCleared=ok
+                if not ok then api.LastError=tostring(reason)end
+            end
             while token==generation and enabled and not disposed and ctx.State.Running do
                 if ctx.State.StopEverything then ctx.Wait(.25)
                 else
-                    local deadline=ctx.Now()+.001
+                    local deadline=ctx.Now()+.0015
                     local count=0
-                    while count<32 and ctx.Now()<deadline and token==generation and enabled do
+                    while count<128 and ctx.Now()<deadline and token==generation and enabled do
                         local part
-                        if index<=#scan then part=scan[index];index+=1
+                        if index<=scanTail then part=scan[index];scan[index]=nil;index+=1
                         elseif head<=tail then part=queue[head];queue[head]=nil;head+=1;queued[part]=nil
                         else break end
-                        if removable(part)then
+                        local checked,canRemove=pcall(removable,part)
+                        if checked and canRemove then
                             local ok=pcall(function()part:Destroy()end)
                             if ok then api.Removed+=1 end
                         end
                         count+=1
                     end
-                    if index>#scan and head>tail then break end
+                    api.Pending=math.max(0,scanTail-index+1)+math.max(0,tail-head+1)
+                    if index>scanTail and head>tail then
+                        if needsScan then scan=ctx.Root:QueryDescendants("BasePart");index=1;scanTail=#scan;needsScan=false
+                        else break end
+                    end
                     ctx.Wait()
                 end
             end
             if token==generation then
-                table.clear(queue);table.clear(queued);head,tail=1,0;worker=false
+                table.clear(queue);table.clear(queued);head,tail=1,0;worker=false;api.Pending=0
             end
         end)
     end
@@ -4029,12 +4052,14 @@ return function(ctx)
         if value==enabled then return true end
         enabled=value;generation+=1
         if added then added:Disconnect();added=nil end
-        table.clear(queue);table.clear(queued);head,tail=1,0;worker=false
+        table.clear(queue);table.clear(queued);head,tail=1,0;worker=false;api.Pending=0
         if enabled then
             needsScan=true
             added=ctx.Root.DescendantAdded:Connect(function(part)
                 if not enabled or not part:IsA("BasePart")or queued[part]then return end
+                if tail-head+1>=8192 then needsScan=true;return end
                 tail+=1;queue[tail]=part;queued[part]=true
+                api.MaxQueued=math.max(api.MaxQueued,tail-head+1)
                 start()
             end)
             start()
@@ -4051,8 +4076,57 @@ end
 -- END BUNDLED MAP DELETION
     end)()
     state.MapDeletion=makeDeletion({State=state,Root=workspace,Players=Players,Now=os.clock,Defer=task.defer,Wait=task.wait,
+        ClearTerrain=function()workspace.Terrain:Clear()end,
         Protected=function(part)return not mapPart(part)end})
-    state.MapDeletion.Set(state.PerformanceBoosters["Delete map"]==true)
+    state.MapDeletion.Set(state.PerformanceBoosters["Delete map"]==true or state.PerformanceBoosters["Remove everything"]==true)
+    local makeAnimations=(function()
+-- BEGIN BUNDLED ANIMATION REMOVAL
+-- Stop local animation playback without retaining tracks or destroying rigs.
+return function(ctx)
+    local api={Stopped=0}
+    local enabled,disposed=false,false
+    local added,removed
+    local connections={}
+    local function stop(track)
+        if not enabled or disposed or ctx.State.StopEverything then return end
+        local ok=pcall(function()track:Stop(0)end)
+        if ok then api.Stopped+=1 end
+    end
+    local function attach(animator)
+        if not enabled or not animator:IsA("Animator")or connections[animator]then return end
+        connections[animator]=animator.AnimationPlayed:Connect(stop)
+        for _,track in ipairs(animator:GetPlayingAnimationTracks())do stop(track)end
+    end
+    local function detach(animator)
+        local connection=connections[animator]
+        if connection then connection:Disconnect();connections[animator]=nil end
+    end
+    function api.Set(value)
+        if disposed then return false end
+        value=value==true
+        if enabled==value then return true end
+        enabled=value;ctx.State.RemovingAnimations=enabled
+        if added then added:Disconnect();added=nil end
+        if removed then removed:Disconnect();removed=nil end
+        for animator in pairs(connections)do detach(animator)end
+        if enabled then
+            added=ctx.Root.DescendantAdded:Connect(attach)
+            removed=ctx.Root.DescendantRemoving:Connect(detach)
+            for _,animator in ipairs(ctx.Root:QueryDescendants("Animator"))do attach(animator)end
+        end
+        return true
+    end
+    function api.Destroy()
+        if disposed then return end
+        api.Set(false);disposed=true
+    end
+    return api
+end
+
+-- END BUNDLED ANIMATION REMOVAL
+    end)()
+    state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
+    state.AnimationRemoval.Set(state.PerformanceBoosters["Remove animations"]==true or state.PerformanceBoosters["Remove everything"]==true)
     state.SetTransparentMap(restore.TransparentMap)
 end
 
@@ -4781,6 +4855,7 @@ return function(ctx)
             if ctx.Stream then pcall(ctx.Stream,point,attempt==1 and 2 or .5) end
             check()
             surface=ctx.Surface(point)
+            if not surface and ctx.MapDeleted and ctx.MapDeleted()then surface=point end
             if surface then break end
             ctx.Wait(.15)
         end
@@ -4810,6 +4885,7 @@ end
 -- END BUNDLED ARENA TRAVEL
     end)()
     state.ArenaTravel=make({Clock=os.clock,Wait=task.wait,
+        MapDeleted=function()return state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"]end,
         Character=function()
             local character=player.Character
             return character,character and character:FindFirstChild("HumanoidRootPart"),character and character:FindFirstChildOfClass("Humanoid")
@@ -5157,6 +5233,10 @@ local function updateMovement()
         if not state.AccountProgression and state.CreditController then
             locked=state.CreditController.FarmTarget(locked,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
         end
+        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
+            local priority=state.GetFarmPriorityTarget(now)
+            if priority and targetPriority.Rank(priority)<targetPriority.Rank(locked)then locked=priority end
+        end
         if locked then
             state.FarmTargetLock=locked
             state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
@@ -5327,7 +5407,7 @@ function state.SetAutoSwing(enabled)
     requestSave()
 end
 local function playBurstSwing()
-    if not state.Running or not state.Enabled or not state.AutoSwing or state.StopEverything then return end
+    if not state.Running or not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations then return end
     local now=os.clock()
     if now<nextSwingAt then return end
     local character=player.Character
@@ -5349,7 +5429,7 @@ local function playBurstSwing()
     state.SwingMode="Continuous visuals"
 end
 local function updateAutoSwing()
-    if not state.Enabled or not state.AutoSwing or state.StopEverything then stopSword(true); return end
+    if not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations then stopSword(true); return end
     playBurstSwing()
 end
 
@@ -25981,6 +26061,8 @@ return function(ctx)
     local lastTab
     local choiceCursor=1
     local visibilityApplied=false
+    local memory=ctx.Memory or {Pruned=0,Update=function()end}
+    api.Memory=memory
     local function yieldBuild()
         if disposed or s.Running==false then error("UI initialization cancelled")end
         if ctx.Yield then ctx.Yield()end
@@ -26250,7 +26332,7 @@ return function(ctx)
     toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
     toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
 
-    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}
+    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
     local function applyBoost(values)
         local picked={};for _,name in ipairs(values or {})do picked[name]=true end
         for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
@@ -26259,7 +26341,14 @@ return function(ctx)
     dropdown("PerformanceBoosters","Utility","Performance boosters",function()
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
-    end,applyBoost,true,"Delete map removes local scenery/floors in batches. OFF stops deletion; rejoin to restore. Gameplay objects and terrain stay.")
+    end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+    paragraph("PerformanceCleanupStatus","Utility","Cleanup status",function()
+        local map=s.MapDeletion
+        local animations=s.AnimationRemoval
+        return "Map: "..tostring(map and map.Removed or 0).." removed · "..tostring(map and map.Pending or 0).." pending"
+            .." · Animations stopped: "..tostring(animations and animations.Stopped or 0)
+            ..(map and map.LastError and (" · "..map.LastError)or "")
+    end)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()
@@ -26326,6 +26415,7 @@ return function(ctx)
     function api.Update(now)
         if disposed or s.Running==false or now<nextUpdate then return end
         nextUpdate=now+.25
+        memory.Update();s.UIReferencesPruned=memory.Pruned
         local tab=window.CurrentTab and tabs[window.CurrentTab]
         if tab then s.UI.ActiveTab=tab end
         if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end
@@ -26427,8 +26517,56 @@ end
         local size=camera and camera.ViewportSize or Vector2.new(1280,720)
         state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
         state.WindUIPosition=preference("WindUIPosition",nil)
+        local makeMemory=(function()
+-- BEGIN BUNDLED UI MEMORY
+-- Remove destroyed UI references and disconnect every owned signal on shutdown.
+return function(creator)
+    local api={Pruned=0}
+    if not creator then function api.Update()end;return api end
+    local cursors={}
+    local function array(name,dead)
+        local list=creator[name]
+        if type(list)~="table"then return end
+        local index=cursors[name]or 1
+        for _=1,128 do
+            if index>#list then index=1;break end
+            if dead(list[index])then list[index]=list[#list];list[#list]=nil;api.Pruned+=1
+            else index+=1 end
+        end
+        cursors[name]=index
+    end
+    local objectCursor
+    function api.Update()
+        array("Signals",function(connection)return connection.Connected==false end)
+        array("FontObjects",function(object)return object.Parent==nil end)
+        array("LocalizationObjects",function(record)return not record.Object or record.Object.Parent==nil end)
+        local objects=creator.Objects
+        if type(objects)=="table"then
+            for _=1,128 do
+                local ok,key=pcall(next,objects,objectCursor)
+                if not ok then key=next(objects)end
+                if not key then objectCursor=nil;break end
+                objectCursor=key
+                if key.Parent==nil then objects[key]=nil;api.Pruned+=1 end
+            end
+        end
+    end
+    creator.DisconnectAll=function()
+        for i=#creator.Signals,1,-1 do
+            pcall(function()creator.Signals[i]:Disconnect()end)
+            creator.Signals[i]=nil
+        end
+        for _,name in ipairs({"Objects","FontObjects","LocalizationObjects"})do
+            if type(creator[name])=="table"then table.clear(creator[name])end
+        end
+    end
+    return api
+end
+
+-- END BUNDLED UI MEMORY
+        end)()
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        local controller=make({State=state,WindUI=library,PlaceId=game.PlaceId,Yield=state.YieldStartup,Defer=task.defer,
+        local controller=make({Memory=makeMemory(library.Creator),State=state,WindUI=library,PlaceId=game.PlaceId,Yield=state.YieldStartup,Defer=task.defer,
             FriendPresent=function(name)
                 if name==""then return false end
                 for _,person in ipairs(Players:GetPlayers())do

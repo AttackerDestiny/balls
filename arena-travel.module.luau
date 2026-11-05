@@ -22,6 +22,7 @@ return function(ctx)
             if ctx.Stream then pcall(ctx.Stream,point,attempt==1 and 2 or .5) end
             check()
             surface=ctx.Surface(point)
+            if not surface and ctx.MapDeleted and ctx.MapDeleted()then surface=point end
             if surface then break end
             ctx.Wait(.15)
         end

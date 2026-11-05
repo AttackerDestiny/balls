@@ -1,7 +1,7 @@
 return function(source)
     local make=assert(loadstring(source))()
     local jobs,connection={},nil
-    local now,chunk,peak,scans=0,0,0,0
+    local now,chunk,peak,scans,terrainClears=0,0,0,0,0
     local state={Running=true}
     local root={Name="Workspace"}
     local parts={}
@@ -28,19 +28,25 @@ return function(source)
     root.DescendantAdded={Connect=function(_,fn)
         connection={Callback=fn,Disconnect=function(self)self.Disconnected=true end};return connection
     end}
-    function root:QueryDescendants(selector)assert(selector=="BasePart");scans+=1;return parts end
+    function root:QueryDescendants(selector)assert(selector=="BasePart");scans+=1;return table.clone(parts)end
     local api=make({State=state,Root=root,Players={GetPlayerFromCharacter=function(_,value)return value==character end},
-        Protected=function(part)return part.Protected end,Now=function()return now end,
+        Protected=function(part)return part.Protected end,ClearTerrain=function()terrainClears+=1 end,Now=function()return now end,
         Defer=function(fn)jobs[#jobs+1]=fn end,Wait=function()peak=math.max(peak,chunk);chunk=0 end})
     assert(scans==0 and #jobs==0,"Default OFF does no map work")
     api.Set(true);assert(api.Removed==0 and #jobs==1,"Enabling never destroys map synchronously")
     table.remove(jobs,1)()
+    assert(terrainClears==1 and api.TerrainCleared and api.Pending==0,"Terrain cleanup is deferred and pending references are released")
     assert(api.Removed==200 and peak<=32,"Initial map deletion is spread across bounded slices")
     for _,part in ipairs(protected)do assert(not part.Deleted,"Gameplay objects and terrain must survive")end
     local streamed=node("NewWall","Part",root)
     connection.Callback(streamed);connection.Callback(streamed)
     assert(#jobs==1 and not streamed.Deleted,"Streaming bursts share one deferred worker")
     table.remove(jobs,1)();assert(streamed.Deleted and scans==1,"Streaming never rescans the whole workspace")
+    for i=1,8300 do
+        local part=node("BurstWall","Part",root);parts[#parts+1]=part;connection.Callback(part)
+    end
+    assert(api.MaxQueued<=8192 and #jobs==1,"Stream bursts have a bounded retained queue")
+    table.remove(jobs,1)();assert(api.Pending==0 and api.Removed==8501,"Overflow is recovered with one deferred rescan")
     local cancelled=node("LaterWall","Part",root)
     connection.Callback(cancelled);api.Set(false);table.remove(jobs,1)()
     assert(not cancelled.Deleted and connection.Disconnected,"OFF cancels pending destruction and disconnects streaming")

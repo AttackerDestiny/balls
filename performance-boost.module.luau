@@ -1,7 +1,7 @@
 -- Source performance options; text is visible unless explicitly hidden.
 return function(ctx)
     local state=ctx.State
-    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Disable rendering","Limit FPS"}}
+    local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}}
     local options,known={},{}
     for _,name in ipairs(api.Names) do known[name]=true; options[name]=ctx.Options and ctx.Options[name]==true end
     state.PerformanceBoosters=options
@@ -16,7 +16,8 @@ return function(ctx)
     local oldCap
     local uiVisible=false
     if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS); if ok and type(value)=="number" then oldCap=value end end
-    local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and options[name] end
+    local function wanted(name)return options[name]or options["Remove everything"]end
+    local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and wanted(name) end
     function api.SetUIVisible(visible)
         visible=visible==true
         if disposed or uiVisible==visible then return end
@@ -93,31 +94,35 @@ return function(ctx)
     local rootAdded=ctx.Workspace.ChildAdded:Connect(function(instance)
         if instance.Name=="HitEffects" and active("No damage particles") then attachParticles() end
     end)
+    local function apply(name)
+        local all=name=="Remove everything"
+        if name=="Disable rendering"or all then
+            ctx.SetRendering(not wanted("Disable rendering"));renderOwned=wanted("Disable rendering")==true
+        end
+        if name=="Limit FPS"or all then
+            local limited=options["Limit FPS"]and not options["Remove everything"]
+            if limited or fpsOwned then
+                assert(ctx.SetFPS and oldCap~=nil,"FPS cap control is unavailable")
+                ctx.SetFPS(limited and (uiVisible and 60 or 15)or oldCap)
+            end
+            fpsOwned=limited==true
+        end
+        if name=="Hide players"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.Set(wanted("Hide players")==true),"Player visibility is unavailable")end
+        if name=="Hide effects"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.SetEffects(wanted("Hide effects")==true),"Effect visibility is unavailable")end
+        if (name=="Delete map"or all)and state.MapDeletion then state.MapDeletion.Set(wanted("Delete map")==true)end
+        if (name=="Remove animations"or all)and state.AnimationRemoval then state.AnimationRemoval.Set(wanted("Remove animations")==true)end
+        if name=="No damage particles"or all then if wanted("No damage particles")then attachParticles()else detachParticles()end end
+        if name=="Delete dead mobs"or name=="No damage text"or all then
+            if wanted("Delete dead mobs")or wanted("No damage text")then hookGraphics()else unhookGraphics()end
+        end
+        if name=="No vel obtained in chat"or all then if wanted("No vel obtained in chat")then hookUI()else unhookUI()end end
+    end
     function api.Set(name,enabled)
-        if disposed or ctx.Paused or not known[name] or state.StopEverything then return false end
-        enabled=enabled==true
-        if name=="Disable rendering" then
-            local ok,message=pcall(ctx.SetRendering,not enabled)
-            if not ok then state.LastBoostError=tostring(message); return false end
-            renderOwned=enabled
-        elseif name=="Limit FPS" then
-            if not ctx.SetFPS or oldCap==nil then state.LastBoostError="FPS cap control is unavailable"; return false end
-            local ok,message=pcall(ctx.SetFPS,enabled and (uiVisible and 60 or 15)or oldCap)
-            if not ok then state.LastBoostError=tostring(message); return false end
-            fpsOwned=enabled
-        elseif name=="Hide players" then
-            if not ctx.PlayerVisibility or not ctx.PlayerVisibility.Set(enabled) then return false end
-        elseif name=="Hide effects" then
-            if not ctx.PlayerVisibility or not ctx.PlayerVisibility.SetEffects(enabled) then return false end
-        elseif name=="Delete map"and state.MapDeletion then
-            if not state.MapDeletion.Set(enabled)then return false end
-        end
-        options[name]=enabled
-        if name=="No damage particles" then if enabled then attachParticles() else detachParticles() end end
-        if name=="Delete dead mobs" or name=="No damage text" then
-            if options["Delete dead mobs"] or options["No damage text"] then hookGraphics() else unhookGraphics() end
-        end
-        if name=="No vel obtained in chat" then if enabled then hookUI() else unhookUI() end end
+        if disposed or ctx.Paused or not known[name]or state.StopEverything then return false end
+        local previous=options[name]
+        options[name]=enabled==true
+        local ok,message=pcall(apply,name)
+        if not ok then options[name]=previous;pcall(apply,name);state.LastBoostError=tostring(message);return false end
         if ctx.Changed then ctx.Changed() end
         return true
     end
@@ -126,9 +131,12 @@ return function(ctx)
         disposed=true
         rootAdded:Disconnect(); detachParticles(); unhookGraphics(); unhookUI()
         if state.MapDeletion then state.MapDeletion.Destroy()end
+        if state.AnimationRemoval then state.AnimationRemoval.Destroy()end
         if ctx.PlayerVisibility then ctx.PlayerVisibility.Destroy() end
         if renderOwned then pcall(ctx.SetRendering,true); renderOwned=false end
         if fpsOwned then pcall(ctx.SetFPS,oldCap); fpsOwned=false end
+        -- External wrappers may still reference ours; release the retired runtime.
+        ctx.State=nil;ctx.Changed=nil;ctx.PlayerVisibility=nil;state=nil
     end
     if not ctx.Paused and not state.StopEverything then
         for _,name in ipairs(api.Names) do

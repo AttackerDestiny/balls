@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.54**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.55**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -119,7 +119,7 @@ Rotation uses the supplied **90s/45s respawn times** for the timed built-in aren
 
 Timers begin at the observed boss death, not at arrival or after clearing adds. Actual living spawns override predictions. An already-dead body or streaming disappearance does not fabricate a new kill. Timers belong to the current runtime/server; a rejoin does not import another server's spawn predictions. Untimed/custom spots receive periodic spawn checks instead of an invented timer.
 
-The current living enemy is normally finished before changing target or spot, including when a higher-priority spot becomes ready. An active complete Credit Check group instead converges on one common loaded boss order, overriding conflicting living locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must also be cleared before normal rotation leaves. With Boss Only ON, ordinary adds are excluded. Outside-arena bosses can be selected after the current fight; rotation resumes afterward.
+Higher-priority loaded enemies can interrupt lower-priority fights: main boss → mini-boss → regular mob. Same-rank fights remain locked. An active complete Credit Check group converges on a common loaded boss order, overriding conflicting locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must still be cleared before normal arena rotation leaves; boss priority can temporarily interrupt that clearing. With Boss Only ON, ordinary adds are excluded.
 
 After five seconds without a target, empty arenas can return to their selected anchor. Travel failures automatically retry with increasing cooldowns capped at 60 seconds; success clears the backoff. Explicit protection/controller pauses are separate from travel-retry cooldowns.
 
@@ -147,7 +147,7 @@ Offline users, full servers, locked floors, and native join permissions can prev
 
 ### Target selection and movement
 
-Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. The current living target normally stays locked even if something higher priority spawns. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
+Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank fights stay locked. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
@@ -235,11 +235,19 @@ Multi-select from these eight saved options:
 | **No vel obtained in chat** | Hides Vel-obtained notifications |
 | **Hide players** | Hides supported other-player visuals locally |
 | **Hide effects** | Hides supported effects through the visual controller |
-| **Delete map** | Default OFF. Locally deletes static map parts, including floors, in bounded batches and handles newly streamed scenery. Preserves character/enemy models, gameplay effects, hazards, interaction objects, teleport/spawn objects, and terrain. OFF stops further deletion; rejoin to restore deleted geometry. Missing floors can prevent ordinary walking, travel, and floor-based dodge probes. |
+| **Delete map** | Default OFF. Clears terrain and deletes static scenery/floors in bounded batches, including newly streamed parts. Preserves character/enemy rigs, gameplay effects, hazards, interaction objects and teleport/spawn objects. OFF stops further deletion; rejoin to restore geometry. |
+| **Remove animations** | Default OFF. Stops existing and newly played local animations on characters/enemies. Disconnects hooks when OFF; subsequent native animations can play again. Native animation markers may be affected. |
 | **Disable rendering** | Disables 3D rendering when its API is supported |
 | **Limit FPS** | Caps hidden farming at 15 FPS; allows 60 FPS while the UI is open; restores the previous cap when released |
+| **Remove everything** | Default OFF. Combines map deletion, animation removal, visual suppression and disabled 3D rendering. Keeps UI/combat controllers, releases the farming FPS limiter, and restores individual booster selections when OFF. Deleted map geometry still requires a rejoin. |
 
 Options are explicitly selected. A lower FPS cap reduces resource use; it is not an FPS increase. Unsupported APIs report failure rather than being assumed available.
+
+**Cleanup status** reports removed map parts, pending work and stopped animations. Map processing releases each consumed instance reference immediately and caps the streaming queue at 8,192 entries, with a deferred rescan after overflow. Explicit map deletion permits arena travel to confirm its configured height without a deleted floor; idle holding avoids cumulative height drift. Ordinary walking and floor-dependent dodges can still need geometry.
+
+Ground-following discards cached floor heights while map deletion is active. This prevents a stationary enemy from remaining permanently classified as airborne above deleted geometry, which previously could leave the farming position outside attack range. Real upward velocity and supported native attack hints still pause ground following.
+
+UI maintenance prunes disconnected signals and destroyed theme/font/localization references in bounded slices, including while hidden. Shutdown disconnects every recorded signal. Retired performance wrappers release their runtime references even when another wrapper still calls them. These address specific retention paths; engine asset caches and multiple Roblox clients also consume RAM, and short tests do not establish long-term memory stability.
 
 ### Auto Dismantle
 

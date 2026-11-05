@@ -63,6 +63,11 @@ return function(source)
         state.MapDeletion={Set=function(value)mapEnabled=value;return true end,Destroy=function()mapDestroyed=true end}
         assert(api.Set("Delete map",true)and mapEnabled,"The map option must reach its controller")
         assert(api.Set("Delete map",false)and mapEnabled==false,"OFF must stop map deletion")
+        local animations
+        state.AnimationRemoval={Set=function(value)animations=value;return true end,Destroy=function()end}
+        api.Set("Disable rendering",false);api.Set("Hide players",false);api.Set("Hide effects",false)
+        assert(api.Set("Remove everything",true)and not rendering and mapEnabled and animations and playersHidden and effectsHidden and cap==60,"Maximum cleanup combines visuals and removes the background FPS cap")
+        assert(api.Set("Remove everything",false)and rendering and not mapEnabled and not animations and not playersHidden and not effectsHidden and cap==15,"Disabling aggregate mode restores individual selections")
         state.StopEverything=true
         assert(not api.Set("Limit FPS",false),"Respect master pause")
         api.Destroy(); api.Destroy()
