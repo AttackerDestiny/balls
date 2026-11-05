@@ -7,6 +7,7 @@ return function(ctx)
     function api.Update(now)
         if not ctx.State.Running or not ctx.State.AtheonUnlock or ctx.Busy()or now<nextAttempt then return end
         nextAttempt=now+.5
+        if ctx.Unlocked()then ctx.State.AtheonUnlockStatus="Atheon is already unlocked";return end
         local portal=ctx.Find()
         if not portal then ctx.State.AtheonUnlockStatus="Waiting for workspace.AtheonPortal";return end
         local root=ctx.Root()

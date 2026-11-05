@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.atheon-unlock-v2.0.1"
-local VERSION="2.0.1"
+local BUILD="2026-11-05.atheon-unlock-guard-v2.0.2"
+local VERSION="2.0.2"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -10271,6 +10271,7 @@ return function(ctx)
     function api.Update(now)
         if not ctx.State.Running or not ctx.State.AtheonUnlock or ctx.Busy()or now<nextAttempt then return end
         nextAttempt=now+.5
+        if ctx.Unlocked()then ctx.State.AtheonUnlockStatus="Atheon is already unlocked";return end
         local portal=ctx.Find()
         if not portal then ctx.State.AtheonUnlockStatus="Waiting for workspace.AtheonPortal";return end
         local root=ctx.Root()
@@ -10290,6 +10291,10 @@ end
 -- END BUNDLED ATHEON UNLOCK
     end)()
     state.AtheonUnlockController=make({State=state,
+        Unlocked=function()
+            return game.PlaceId==13965775911 or (state.IsAutomationFloorUnlocked
+                and state.IsAutomationFloorUnlocked(13965775911))==true
+        end,
         Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
             or state.AutoTradeBusy or state.AutomationTeleporting or state.TravelBusy or state.AutoJoinFriendHolding
             or state.Dodging or state.Recovering end,

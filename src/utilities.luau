@@ -326,6 +326,10 @@ do
 -- END BUNDLED ATHEON UNLOCK
     end)()
     state.AtheonUnlockController=make({State=state,
+        Unlocked=function()
+            return game.PlaceId==13965775911 or (state.IsAutomationFloorUnlocked
+                and state.IsAutomationFloorUnlocked(13965775911))==true
+        end,
         Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
             or state.AutoTradeBusy or state.AutomationTeleporting or state.TravelBusy or state.AutoJoinFriendHolding
             or state.Dodging or state.Recovering end,
