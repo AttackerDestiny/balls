@@ -146,6 +146,9 @@ def main():
     can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
     fixture += "assert(loadstring(" + quote(read("farm-coordination.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(can_move) + ")\n"
     fixture += "assert(loadstring(" + quote(read("performance-budget.test.luau")) + "))()(" + quote(read("performance-budget.module.luau")) + ")\n"
+    cleanup_start = script.index("local function clearStaleFarmControllers(root)")
+    cleanup = script[cleanup_start:script.index("local function ensureMovementController", cleanup_start)]
+    fixture += "assert(loadstring(" + quote(read("farm-hold-cleanup.test.luau")) + "))()(" + quote(cleanup) + ")\n"
     fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"

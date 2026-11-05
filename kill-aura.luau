@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.farm-spacing-credit-v1.12.50"
-local VERSION="1.12.50"
+local BUILD="2026-11-04.farm-hold-cleanup-v1.12.51"
+local VERSION="1.12.51"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2786,9 +2786,17 @@ local function pauseHold(message)
     holdPaused = true
     movementStatus(message)
 end
+local function clearStaleFarmControllers(root)
+    for _,child in ipairs(root:GetChildren())do
+        if (child.Name=="SB2FarmPosition"and child:IsA("AlignPosition"))
+            or (child.Name=="SB2FarmOrientation"and child:IsA("AlignOrientation"))
+            or (child.Name=="SB2FarmAttachment"and child:IsA("Attachment"))then child:Destroy()end
+    end
+end
 local function ensureMovementController(character, root, humanoid, destination)
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release() end
     if movementRoot and positionAlign and positionAlign.Parent then return end
+    clearStaleFarmControllers(root)
     movementRoot, movementHumanoid = root, humanoid
     previousAutoRotate, previousPlatformStand = humanoid.AutoRotate, humanoid.PlatformStand
     humanoid.AutoRotate = false

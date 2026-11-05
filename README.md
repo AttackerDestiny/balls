@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.50**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.51**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -148,6 +148,8 @@ Next-target order is **main boss = 1, mini-boss = 2, regular = 3**, with common 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
 Farming uses common geometry and shared server-clock pacing, with separate account positions around each enemy. Slots follow the server's sorted user IDs, refreshed at most once per second. The position controller holds the slot, ignores movement under 0.75 studs, and retains it during boss jumps. Joining/leaving players can reassign slots. Update every farming account to use this behavior.
+
+Creating a farm hold removes stale Feather position/orientation constraints and attachments on that character root, preventing abandoned controllers from pulling toward an old destination.
 
 Normal target spacing stays inside the calculated attack sphere and preserves vertical body clearance; tight reach or very large groups can reduce separation. **Suspended Unborn is an exception:** slots surround the fixed **(-2439, 70, 5389)** arena anchor at the supplied +10 height, with a horizontal radius capped at 12 studs, instead of following its moving body. This fixed override does not infer attack range from the boss position.
 
