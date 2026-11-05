@@ -15,8 +15,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.map-credit-convergence-v1.12.53"
-local VERSION="1.12.53"
+local BUILD="2026-11-04.runtime-recovery-v1.12.54"
+local VERSION="1.12.54"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -4907,6 +4907,7 @@ function state.TeleportToDestination(id,urgent,automatic)
     state.TravelSerial=(state.TravelSerial or 0)+1
     local serial=state.TravelSerial
     state.TravelBusy=true;state.MultiSpotTravelPending=automatic==true
+    state.TravelStartedAt=os.clock()
     state.LastTravelDestination=nil;state.LastTravelPosition=nil
     state.TravelError=nil
     setTravelOpen(false)
@@ -4914,6 +4915,7 @@ function state.TeleportToDestination(id,urgent,automatic)
     if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena") end
     stopMovement("Travelling · farming will resume",true)
     task.spawn(function()
+        state.TravelWorker=coroutine.running()
         local function current()return state.Running and not state.SafeModePanic and not state.StopEverything and state.TravelSerial==serial end
         local ok,message=pcall(function()
             local deadline=os.clock()+4
@@ -4943,7 +4945,7 @@ function state.TeleportToDestination(id,urgent,automatic)
         end)
         if state.TravelSerial~=serial then return end
         if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(message);setTravelStatus(state.TravelError) end
-        state.TravelBusy=false;state.MultiSpotTravelPending=false
+        state.TravelBusy=false;state.MultiSpotTravelPending=false;state.TravelStartedAt=nil;state.TravelWorker=nil
         if ok and automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
             local confirmed,reason=pcall(state.MultiSpotController.Update,state.FarmClock())
             if not confirmed then state.MultiSpotController.Pause(tostring(reason)) end
@@ -5554,7 +5556,8 @@ local function updateSkillAura()
     if not normalScheduler.Ready(target,now)then return end
     state.SkillPreparing=false; state.SkillCastRunning=true
     skillCastSerial+=1
-    local cast={Id=skillCastSerial,Name=name,Version=weapons.Version,Character=character,Cancelled=false}
+    local cast={Id=skillCastSerial,Name=name,Version=weapons.Version,Character=character,Cancelled=false,
+        RecoveryDeadline=now+math.max(8,(state.SkillActivation.Window(name)or 4)+3)}
     state.ActiveSkillCast=cast
     state.AttackingTarget=target; trackHealth(target)
     state.SkillExecution="Source window"
@@ -5923,6 +5926,7 @@ function state.Destroy(replacing, teleportCleanup)
     stopSword()
     stopMovement(nil,replacing==true)
     if state.FarmNoclip then state.FarmNoclip.Destroy()end
+    if state.RuntimeRecovery then state.RuntimeRecovery.Destroy()end
     if state.AuraTouch then state.AuraTouch.Destroy()end
     if state.MultiSpotHUD then state.MultiSpotHUD.Destroy()end
     healthHUD.Destroy()
@@ -6381,18 +6385,105 @@ local function runFrame()
 end
 
 do
-    local accumulator,busy,lastErrorAt=0,false,0
+    local makeRecovery=(function()
+-- BEGIN BUNDLED RUNTIME RECOVERY
+-- A yielded engine call must not hold the single-frame lease forever.
+return function(ctx)
+    local api={}
+    local state=ctx.State
+    local active,disposed=nil,false
+    local function protected()
+        return state.StopEverything or state.SafeModePanic or state.ModeratorBlocking
+            or state.AutomationTeleporting or state.AutoTradeBusy
+    end
+    function api.CheckTravel(now)
+        if disposed or protected()or not state.TravelBusy or not state.TravelStartedAt then return end
+        if now-state.TravelStartedAt<20 then return end
+        local serial=state.TravelSerial
+        ctx.RecoverTravel(serial)
+        state.TravelRecoveries=(state.TravelRecoveries or 0)+1
+        state.LastTravelRecoveryAt=now
+    end
+    function api.CheckPending(now)
+        api.CheckTravel(now)
+        if disposed or protected()then return end
+        local cast=state.ActiveSkillCast
+        if cast and state.SkillCastRunning and cast.RecoveryDeadline and now>=cast.RecoveryDeadline then
+            ctx.RecoverSkill()
+            state.SkillRecoveries=(state.SkillRecoveries or 0)+1
+            state.LastSkillRecoveryAt=now
+        end
+    end
+    function api.Run(fn)
+        if disposed then return end
+        local now=ctx.Now()
+        if active then
+            if protected()or now-active.At<8 or now<(active.RetryAt or 0)then return end
+            active.RetryAt=now+5
+            local ok,cancelled=pcall(ctx.Cancel,active.Thread)
+            if not ok or cancelled==false then
+                state.LastCoordinatorError="Stalled frame cancellation failed; waiting for its engine call"
+                return -- Never overlap a worker whose cancellation was not confirmed.
+            end
+            active=nil
+            state.CoordinatorRecoveries=(state.CoordinatorRecoveries or 0)+1
+            state.LastCoordinatorRecoveryAt=now
+            local recovered,reason=pcall(ctx.RecoverFrame)
+            if not recovered then state.LastCoordinatorError=tostring(reason)end
+        end
+        local lease={Thread=ctx.Thread(),At=now}
+        active=lease;state.FrameStartedAt=now
+        local ok,result=pcall(fn)
+        if active==lease then active=nil;state.FrameCompletedAt=ctx.Now()end
+        return ok,result
+    end
+    function api.Destroy()
+        if disposed then return end
+        disposed=true
+        if active and active.Thread~=ctx.Thread()then pcall(ctx.Cancel,active.Thread)end
+        if state.TravelWorker and state.TravelWorker~=ctx.Thread()then pcall(ctx.Cancel,state.TravelWorker)end
+        state.TravelWorker=nil;state.TravelStartedAt=nil
+        active=nil
+    end
+    return api
+end
+
+-- END BUNDLED RUNTIME RECOVERY
+    end)()
+    state.RuntimeRecovery=makeRecovery({State=state,Now=os.clock,Thread=coroutine.running,
+        Cancel=function(thread)task.cancel(thread);return true end,
+        RecoverSkill=function()
+            state.CancelSkillAura("Recovering stalled skill activation")
+            state.SkillRetryAt=os.clock()+1
+            state.SkillStatus="Skill timed out · retrying automatically"
+        end,
+        RecoverFrame=function()
+            state.CancelSkillAura("Recovering stalled update")
+            stopMovement("Recovering stalled update",true)
+            state.FollowTarget=nil;state.FarmTargetLock=nil
+            nextTargetRefresh,nextMovementUpdate,nextAcquisition=0,0,0
+            state.FarmPauseUntil=os.clock()+.5
+        end,
+        RecoverTravel=function(serial)
+            if state.TravelSerial~=serial then return end
+            state.TravelSerial=serial+1
+            if state.TravelWorker then pcall(task.cancel,state.TravelWorker)end
+            state.TravelWorker=nil;state.TravelStartedAt=nil;state.TravelBusy=false
+            state.MultiSpotTravelPending=false;state.LastTravelDestination=nil;state.LastTravelPosition=nil
+            state.TravelError="Arena travel timed out · retrying without restarting"
+            stopMovement(state.TravelError,true);setTravelStatus(state.TravelError)
+        end})
+    local accumulator,lastErrorAt=0,0
     bind(RunService.Heartbeat,function(delta)
         frameTiming.Sample(delta,os.clock())
         if not state.Running or state.StopEverything or not gui.Parent then return end
+        state.RuntimeRecovery.CheckPending(os.clock())
         accumulator+=delta
         local period=state.SafeModePanic and .1 or (state.Enabled or state.SkillAura) and 1/60 or (state.AutoDodge and workspace:FindFirstChild("WaveDefenseStuff") and .04 or .1)
-        if busy or accumulator+.0005<period then return end
+        if accumulator+.0005<period then return end
         accumulator=math.min(period,math.max(0,accumulator-period))
-        busy=true
-        local ok,message=pcall(runFrame)
-        busy=false
-        if not ok then
+        local ok,message=state.RuntimeRecovery.Run(runFrame)
+        if ok==false then
             state.LastCoordinatorError=tostring(message)
             state.FarmPauseUntil=os.clock()+.5
             if os.clock()-lastErrorAt>5 then lastErrorAt=os.clock();warn("[SB2 Coordinator] "..tostring(message)) end

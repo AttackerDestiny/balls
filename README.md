@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.53**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.54**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -68,6 +68,8 @@ Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Ut
 Main controls load first, with remaining tabs populated in background batches. If WindUI initialization fails, the older compatibility window appears and the error is recorded. This alternate layout is a fallback, not another script version.
 
 Show/hide preserves the window's size and skips the full-window resize animation. Visible dropdown refreshes process one control per update instead of rebuilding an entire tab on the opening frame. Reopening an unchanged tab does not force a new refresh.
+
+Runtime recovery cancels a main update that remains suspended for eight seconds before allowing another update to run. If cancellation fails, it waits and retries rather than starting duplicate workers. Script-owned skill casts have a bounded recovery deadline, and arena trips expire after 20 seconds so existing travel retries/farming can resume. Recovery respects master pause, safety, trade, and native floor-transfer ownership. Ordinary spawn and credit waits remain intentional. Diagnostics expose frame completion times and separate coordinator, skill, and travel recovery counters.
 
 ## Main
 
