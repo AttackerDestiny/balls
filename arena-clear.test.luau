@@ -89,5 +89,15 @@ return function(encounterSource,validSource)
         f.Spot.EncounterNames={Atheon=true}
         assert(f.Read(0)==1 and f.Valid(mob))
     end)
+    test("repeated spawns cannot retain removed arena models during a long hold",function()
+        local f=fixture()
+        for i=1,300 do
+            local mob=f.Add(10,100,"Boss")
+            assert(f.Read(i*2)==1)
+            mob.Parent=nil
+            local alive,seen=f.Read(i*2+.1)
+            assert(alive==0 and seen and next(f.State.MultiSpotEncounter)==nil,"Arena tracking releases removed models after observing their departure")
+        end
+    end)
     print("All "..passed.." arena-clear scenarios passed")
 end

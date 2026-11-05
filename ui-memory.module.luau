@@ -1,7 +1,8 @@
 -- Remove destroyed UI references and disconnect every owned signal on shutdown.
 return function(creator)
     local api={Pruned=0}
-    if not creator then function api.Update()end;return api end
+    if not creator then function api.Update()end;function api.Destroy()end;return api end
+    local disposed=false
     local cursors={}
     local function array(name,dead)
         local list=creator[name]
@@ -16,6 +17,7 @@ return function(creator)
     end
     local objectCursor
     function api.Update()
+        if disposed then return end
         array("Signals",function(connection)return connection.Connected==false end)
         array("FontObjects",function(object)return object.Parent==nil end)
         array("LocalizationObjects",function(record)return not record.Object or record.Object.Parent==nil end)
@@ -38,6 +40,10 @@ return function(creator)
         for _,name in ipairs({"Objects","FontObjects","LocalizationObjects"})do
             if type(creator[name])=="table"then table.clear(creator[name])end
         end
+    end
+    function api.Destroy()
+        if disposed then return end
+        disposed=true;creator.DisconnectAll();table.clear(cursors);objectCursor=nil
     end
     return api
 end

@@ -150,17 +150,21 @@ return function(ctx)
     function api.Finish()
         if record.ObservationFinished then return end
         record.ObservationFinished=true
+        -- Release engine listeners first: a missing counter or changed native
+        -- profile must never strand the entire completed cast in a callback.
+        for _,connection in ipairs(observers)do pcall(function()connection:Disconnect()end)end
+        table.clear(observers)
         record.After,record.Damage=0,0
         for _,item in ipairs(record.Targets) do
-            item.After=item.Health.Value
-            item.HealthDamage=math.max(0,item.Before-item.After)
-            local credited=ctx.Contribution and ctx.Contribution(item.Health,item.Counter)
-            item.Damage=credited~=nil and math.max(0,credited-(item.BeforeContribution or 0)) or item.HealthDamage
-            record.After+=item.After
-            record.Damage+=item.Damage
+            local ok,reason=pcall(function()
+                item.After=item.Health.Value
+                item.HealthDamage=math.max(0,item.Before-item.After)
+                local credited=ctx.Contribution and ctx.Contribution(item.Health,item.Counter)
+                item.Damage=credited~=nil and math.max(0,credited-(item.BeforeContribution or 0))or item.HealthDamage
+                record.After+=item.After;record.Damage+=item.Damage
+            end)
+            if not ok then record.ObservationError=tostring(reason)end
         end
-        for _,connection in ipairs(observers) do connection:Disconnect() end
-        table.clear(observers)
     end
     function api.Cancel(reason)
         cancelled=true

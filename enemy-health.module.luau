@@ -133,9 +133,9 @@ return function(ctx)
         render(); layout()
     end
     function api.Focus(mob) primary=mob end
-    function api.Update()
+    function api.Update(time)
         if disposed or not root.Parent then return end
-        local time=now()
+        time=time or now()
         if time<nextUpdate then return end
         nextUpdate=time+.12
         local refreshRanks=time>=nextRankCheck

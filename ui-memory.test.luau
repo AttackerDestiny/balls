@@ -15,7 +15,7 @@ return function(source)
     local count=0;for object in pairs(creator.Objects)do assert(object.Parent);count+=1 end
     assert(count==1 and api.Pruned>=2000,"Theme registries must release destroyed objects")
     local connections=table.clone(creator.Signals)
-    creator.DisconnectAll()
+    api.Destroy();api.Destroy();api.Update()
     for _,connection in ipairs(connections)do assert(not connection.Connected,"Shutdown must not skip alternating entries")end
     assert(#creator.Signals==0 and #creator.FontObjects==0 and next(creator.Objects)==nil)
     print("PASS UI memory: repeated stale-control cleanup, bounded scans, live references retained and complete signal disposal")

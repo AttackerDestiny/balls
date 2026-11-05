@@ -1,0 +1,20 @@
+return function(source)
+    local make=assert(loadstring(source))()
+    local now=0
+    local errors,combat,visual=0,0,0
+    local api=make({Now=function()return now end,Error=function()errors+=1 end})
+    api.Add("Combat",.3,function()combat+=1;return "sent"end)
+    api.Add("Visual",.1,function()visual+=1;error("missing visual")end)
+    assert(api.Step("Combat",0));api.Step("Combat",.2);assert(combat==1)
+    api.Step("Visual",0);api.Step("Combat",.31)
+    assert(combat==2 and errors==1,"A failed presentation task cannot disable combat")
+    api.Step("Combat",100);api.Step("Combat",100)
+    assert(combat==3,"Long stalls produce no catch-up request burst")
+    api.Wake("Combat");api.Step("Combat",100);assert(combat==4,"Detection changes wake target work")
+    now=1;api.Step("Visual",1);assert(api.Tasks.Visual.ConsecutiveFailures==2)
+    local calls=0;api.Add("Disabled",.1,function()calls+=1 end,{Enabled=function()return false end})
+    api.Step("Disabled",1);assert(calls==0)
+    api.Destroy();api.Step("Combat",200);assert(combat==4 and next(api.Tasks)==nil)
+    assert(not pcall(api.Add,"AfterClose",1,function()end),"A closed runtime cannot register new workers")
+    print("PASS Work scheduler: independent failure recovery, rate limits, no catch-up bursts, wakeup and cleanup")
+end

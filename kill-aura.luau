@@ -1,4 +1,5 @@
 local SB2_SOURCE=[============[
+-- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
 if not game:IsLoaded()then game.Loaded:Wait()end
 -- Swordburst 2: automation controllers with the modern WindUI interface.
@@ -14,9 +15,46 @@ local player = Players.LocalPlayer
 while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
-local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.ui-load-without-fallback-v1.12.60"
-local VERSION="1.12.60"
+local previous=(function()
+-- BEGIN BUNDLED SETTINGS SNAPSHOT
+-- A reload retains settings, never the previous runtime's instances or closures.
+return function(previous,userId)
+    if not previous or previous.UserId~=userId then return nil end
+    local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+        "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
+        "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
+        "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
+        "MultiSpotPending","MultiSpotSelected","OffsetProfiles","PerformanceBoosters","ProgressionBossCleared",
+        "ProgressionBossClearedName","ProgressionComplete","ProgressionFloor","ProgressionRestore","ResumeFeatures",
+        "ResumeRequested","SafeFloorId","SafeMode","SafeWhitelistIds","SafeWhitelistText","SelectedMiscSkill",
+        "SelectedPlayerId","SelectedSkill","SkillAura","SkillPerWeapon","SkillPerWeaponVersion","StopEverything",
+        "Theme","TradeItems","TradeMode","UnsafeOffsetProfiles","UserId","ViewingPlayer","ViewingPlayerInventory","WindUIPosition"}
+    local count=0
+    local function copy(value,depth,seen)
+        local kind=type(value)
+        if kind=="boolean"or kind=="string"or kind=="number"then return value end
+        if kind~="table"or depth>8 or seen[value]then return nil end
+        local result={};seen[value]=true
+        for key,item in pairs(value)do
+            if count>=4096 then break end
+            if type(key)=="number"or type(key)=="string"then
+                count+=1
+                result[key]=copy(item,depth+1,seen)
+            end
+        end
+        seen[value]=nil
+        return result
+    end
+    local snapshot={}
+    for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
+    snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
+    return snapshot
+end
+
+-- END BUNDLED SETTINGS SNAPSHOT
+end)()(previousRuntime,player.UserId)
+local BUILD="2026-11-05.runtime-rewrite-v2.0.0"
+local VERSION="2.0.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -386,6 +424,7 @@ if previousRuntime and previousRuntime.Destroy then
         warn("[SB2] Previous runtime cleanup failed; continuing replacement: "..tostring(reason))
     end
 end
+previousRuntime=nil
 runtimeOwner.Retire()
 if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
     task.wait(math.min(3, env.SB2FarmRecoveryUntil - os.clock()))
@@ -816,17 +855,21 @@ return function(ctx)
     function api.Finish()
         if record.ObservationFinished then return end
         record.ObservationFinished=true
+        -- Release engine listeners first: a missing counter or changed native
+        -- profile must never strand the entire completed cast in a callback.
+        for _,connection in ipairs(observers)do pcall(function()connection:Disconnect()end)end
+        table.clear(observers)
         record.After,record.Damage=0,0
         for _,item in ipairs(record.Targets) do
-            item.After=item.Health.Value
-            item.HealthDamage=math.max(0,item.Before-item.After)
-            local credited=ctx.Contribution and ctx.Contribution(item.Health,item.Counter)
-            item.Damage=credited~=nil and math.max(0,credited-(item.BeforeContribution or 0)) or item.HealthDamage
-            record.After+=item.After
-            record.Damage+=item.Damage
+            local ok,reason=pcall(function()
+                item.After=item.Health.Value
+                item.HealthDamage=math.max(0,item.Before-item.After)
+                local credited=ctx.Contribution and ctx.Contribution(item.Health,item.Counter)
+                item.Damage=credited~=nil and math.max(0,credited-(item.BeforeContribution or 0))or item.HealthDamage
+                record.After+=item.After;record.Damage+=item.Damage
+            end)
+            if not ok then record.ObservationError=tostring(reason)end
         end
-        for _,connection in ipairs(observers) do connection:Disconnect() end
-        table.clear(observers)
     end
     function api.Cancel(reason)
         cancelled=true
@@ -906,10 +949,112 @@ end
 end)()()
 local pendingDamage = setmetatable({}, { __mode = "k" })
 local stopMovement = function() end
-local trackedMobs = {}
-local indexedMobFolder, mobAddedConnection, mobRemovedConnection
-local nextMobReconcile = 0
-local mobCache = setmetatable({}, { __mode = "k" })
+local enemyRegistry=(function()
+-- BEGIN BUNDLED ENEMY REGISTRY
+-- One streamed-enemy index and data cache shared by every controller.
+return function(ctx)
+    local api={Models={},Revision=0,Count=0}
+    local cache=setmetatable({}, {__mode="k"})
+    local missing={}
+    local folder,added,removed
+    local disposed,nextReconcile=false,0
+    local function forgetMissing(mob)
+        local record=missing[mob]
+        if not record then return end
+        missing[mob]=nil
+        for _,connection in ipairs(record.Connections)do connection:Disconnect()end
+    end
+    local function changed(mob,present)
+        if present then
+            if not mob:IsA("Model")or api.Models[mob]then return end
+            api.Models[mob]=true;api.Count+=1
+        else
+            if not api.Models[mob]then return end
+            api.Models[mob]=nil;cache[mob]=nil;forgetMissing(mob);api.Count-=1
+        end
+        api.Revision+=1
+        if ctx.Changed then ctx.Changed(mob,present)end
+    end
+    function api.Refresh()
+        if disposed then return nil end
+        local current=ctx.Folder()
+        if current~=folder then
+            if added then added:Disconnect();added=nil end
+            if removed then removed:Disconnect();removed=nil end
+            for mob in pairs(missing)do forgetMissing(mob)end
+            table.clear(api.Models);table.clear(cache);api.Count=0;api.Revision+=1
+            folder=current;api.Folder=folder;nextReconcile=0
+            if folder then
+                added=folder.ChildAdded:Connect(function(mob)changed(mob,true)end)
+                removed=folder.ChildRemoved:Connect(function(mob)changed(mob,false)end)
+            end
+        end
+        local now=ctx.Now()
+        if folder and now>=nextReconcile then
+            nextReconcile=now+10
+            for mob in pairs(api.Models)do if mob.Parent~=folder then changed(mob,false)end end
+            for _,mob in ipairs(folder:GetChildren())do changed(mob,true)end
+        end
+        return folder
+    end
+    function api.Data(mob)
+        if disposed or not mob then return nil end
+        if not mob.Parent then forgetMissing(mob);cache[mob]=nil;return nil end
+        local data=cache[mob]
+        local now=ctx.Now()
+        if data and data.Root and data.Root.Parent and data.Entity.Parent==mob and data.Health.Parent==data.Entity then
+            -- HitLives can replicate independently, including during a fight.
+            data.HitLives=data.Entity:FindFirstChild("HitLives")
+            if now>=(data.MetaAt or 0)then
+                data.Motion=data.Root:FindFirstChild("BodyVelocity")or (data.Root.FindFirstChildOfClass and data.Root:FindFirstChildOfClass("LinearVelocity"))
+                data.MetaAt=now+.5
+            end
+            return data
+        end
+        local incomplete=missing[mob]
+        if incomplete and now<incomplete.RetryAt then return nil end
+        local root=mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+        local entity=mob:FindFirstChild("Entity")
+        local health=entity and entity:FindFirstChild("Health")
+        if not root or not root:IsA("BasePart")or not health then
+            cache[mob]=nil
+            if not incomplete and mob.DescendantAdded and mob.DescendantRemoving then
+                incomplete={RetryAt=0,Connections={}}
+                missing[mob]=incomplete
+                local function invalidate()incomplete.RetryAt=0 end
+                incomplete.Connections[1]=mob.DescendantAdded:Connect(invalidate)
+                incomplete.Connections[2]=mob.DescendantRemoving:Connect(invalidate)
+            end
+            if incomplete then incomplete.RetryAt=now+.1 end
+            return nil
+        end
+        forgetMissing(mob)
+        data={Root=root,Entity=entity,Health=health,HitLives=entity:FindFirstChild("HitLives"),
+            Motion=root:FindFirstChild("BodyVelocity")or (root.FindFirstChildOfClass and root:FindFirstChildOfClass("LinearVelocity")),MetaAt=now+.5}
+        cache[mob]=data
+        return data
+    end
+    function api.Destroy()
+        if disposed then return end
+        disposed=true
+        if added then added:Disconnect();added=nil end
+        if removed then removed:Disconnect();removed=nil end
+        for mob in pairs(missing)do forgetMissing(mob)end
+        table.clear(api.Models);table.clear(cache);api.Count=0;folder=nil;api.Folder=nil
+    end
+    return api
+end
+
+-- END BUNDLED ENEMY REGISTRY
+end)()({Now=os.clock,Folder=function()return workspace:FindFirstChild("Mobs")end,
+    Changed=function()
+        state.MultiSpotNextScan=0
+        if state.WorkScheduler then state.WorkScheduler.Wake("Movement");state.WorkScheduler.Wake("Combat");state.WorkScheduler.Wake("Skill")end
+        if state.WakeSkillAura then state.WakeSkillAura()end
+    end})
+state.EnemyRegistry=enemyRegistry
+local trackedMobs=enemyRegistry.Models
+local indexedMobFolder
 local combatStatus = "Paused"
 local candidatePrimary
 local configReady = false
@@ -917,51 +1062,11 @@ local requestSave = function() end
 local enemyHUD
 
 local function refreshMobIndex()
-    local folder = indexedMobFolder and indexedMobFolder.Parent == workspace and indexedMobFolder or workspace:FindFirstChild("Mobs")
-    if folder ~= indexedMobFolder then
-        if mobAddedConnection then mobAddedConnection:Disconnect() end
-        if mobRemovedConnection then mobRemovedConnection:Disconnect() end
-        table.clear(trackedMobs)
-        table.clear(mobCache)
-        indexedMobFolder = folder
-        nextMobReconcile = 0
-        if folder then
-            mobAddedConnection = folder.ChildAdded:Connect(function(mob)
-                if state.StopEverything then return end
-                if mob:IsA("Model") then trackedMobs[mob] = true;state.MultiSpotNextScan=0;if state.WakeSkillAura then state.WakeSkillAura() end end
-            end)
-            mobRemovedConnection = folder.ChildRemoved:Connect(function(mob) trackedMobs[mob] = nil; mobCache[mob] = nil end)
-        end
-    end
-    if folder and os.clock() >= nextMobReconcile then
-        nextMobReconcile = os.clock() + 5
-        for mob in pairs(trackedMobs) do if mob.Parent ~= folder then trackedMobs[mob] = nil end end
-        for _, mob in ipairs(folder:GetChildren()) do
-            if mob:IsA("Model") then trackedMobs[mob] = true end
-        end
-    end
-    return folder
+    indexedMobFolder=enemyRegistry.Refresh()
+    return indexedMobFolder
 end
 local function getMobData(mob)
-    local cached = mobCache[mob]
-    if cached and cached.Root and cached.Root.Parent and cached.Entity.Parent == mob and cached.Health.Parent == cached.Entity then
-        -- HitLives can arrive or disappear independently of cached geometry.
-        cached.HitLives=cached.Entity:FindFirstChild("HitLives")
-        if os.clock()>=(cached.MetaAt or 0) then cached.Motion=cached.Root:FindFirstChild("BodyVelocity"); cached.MetaAt=os.clock()+.5 end
-        return cached
-    end
-    local now = os.clock()
-    if cached and cached.RetryAt and now < cached.RetryAt then return nil end
-    local root = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-    local entity = mob:FindFirstChild("Entity")
-    local health = entity and entity:FindFirstChild("Health")
-    if root and root:IsA("BasePart") and health then
-        cached = { Root = root, Entity = entity, Health = health, HitLives=entity:FindFirstChild("HitLives"), Motion=root:FindFirstChild("BodyVelocity"), MetaAt=now+.5 }
-        mobCache[mob] = cached
-        return cached
-    end
-    mobCache[mob] = { RetryAt = now + 0.4 }
-    return nil
+    return enemyRegistry.Data(mob)
 end
 function state.ReadOwnDamage(health,counter)
     counter=counter or health:FindFirstChild(player.Name)
@@ -1583,9 +1688,9 @@ return function(ctx)
         render(); layout()
     end
     function api.Focus(mob) primary=mob end
-    function api.Update()
+    function api.Update(time)
         if disposed or not root.Parent then return end
-        local time=now()
+        time=time or now()
         if time<nextUpdate then return end
         nextUpdate=time+.12
         local refreshRanks=time>=nextRankCheck
@@ -1649,204 +1754,70 @@ end)()({State=state,Parent=gui,Create=create,Corner=corner,GetData=getMobData,
 enemyHUD=healthHUD.Root
 local function trackHealth(mob) healthHUD.Focus(mob) end
 
-uiLabel("SkillHeading","SKILL AURA",50,16,true)
-local skillToggle=uiButton("SkillAura","Skill aura · OFF",60,34)
-local skillDropdown=uiButton("SkillDropdown",state.SelectedSkill.."  v",70,32)
-skillDropdown.Font=Enum.Font.Gotham
-local skillList=create("ScrollingFrame",{Name="SkillOptions",Visible=false,LayoutOrder=80,Size=UDim2.new(1,0,0,138),
-    BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,ScrollBarThickness=3,
-    CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},content)
-corner(skillList,8)
-create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},skillList)
-create("UIPadding",{PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},skillList)
+local skillToggle=uiButton("SkillAura","")
+local skillDropdown=uiButton("SkillDropdown",state.SelectedSkill)
+local skillList=controllerViews.New({Name="SkillOptions"})
+local AttackStats=require(ReplicatedStorage.Shared.Library.AttackStats)
 function state.SetSkillRange(value)
-    state.SkillRange=math.clamp(math.floor(tonumber(value) or state.SkillRange),20,120)
+    state.SkillRange=math.clamp(math.floor(tonumber(value)or state.SkillRange),20,120)
 end
-local AttackStats = require(ReplicatedStorage.Shared.Library.AttackStats)
 local function refreshSkillChoices()
-    local choices=state.WeaponSkills and state.WeaponSkills.Choices() or {}
-    state.SkillChoices=choices
-    for _,child in ipairs(skillList:GetChildren()) do if child:IsA("GuiObject") then child:Destroy() end end
-    for index,name in ipairs(choices) do
-        local option=uiButton("Option"..index,name,index,28,skillList)
-        option.Font=Enum.Font.Gotham
-        option.BackgroundColor3=name==state.SelectedSkill and Color3.fromRGB(91,72,164) or Color3.fromRGB(41,44,59)
-        option.Activated:Connect(function() state.SetSelectedSkill(name) end)
-    end
-    if #choices==0 then
-        create("TextLabel",{Name="Empty",Text="Equip a compatible weapon",Size=UDim2.new(1,0,0,28),BackgroundTransparency=1,
-            Font=Enum.Font.Gotham,TextSize=11,TextColor3=Color3.fromRGB(153,161,187)},skillList)
-    end
+    state.SkillChoices=state.WeaponSkills and state.WeaponSkills.Choices()or {}
 end
 function state.SetSelectedSkill(name)
-    if not state.WeaponSkills or not state.WeaponSkills.Select(name) then return false end
-    skillList.Visible=false
-    return true
+    return state.WeaponSkills and state.WeaponSkills.Select(name)or false
 end
 function state.SetSkillAura(enabled)
     if state.StopEverything and enabled==true then return false end
-    state.SkillAura = enabled == true
+    state.SkillAura=enabled==true
     if state.AuraTouch then state.AuraTouch.Update()end
-    if state.WakeSkillAura then state.WakeSkillAura() end
-    if not state.SkillAura and state.CancelSkillAura then state.CancelSkillAura("Skill aura disabled") end
-    skillToggle.Text = state.SkillAura and "Skill aura · ON" or "Skill aura · OFF"
-    skillToggle.BackgroundColor3 = state.SkillAura and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
-    state.SkillStatus = state.SkillAura and "Waiting for a nearby enemy" or "Skill aura is off"
+    if state.WakeSkillAura then state.WakeSkillAura()end
+    if not state.SkillAura and state.CancelSkillAura then state.CancelSkillAura("Skill aura disabled")end
+    state.SkillStatus=state.SkillAura and "Waiting for a nearby enemy"or "Skill aura is off"
     requestSave()
 end
-bind(skillToggle.Activated, function() state.SetSkillAura(not state.SkillAura) end)
-bind(skillDropdown.Activated, function()
-    if state.StopEverything then return end
-    if state.SetTravelOpen then state.SetTravelOpen(false) end
-    if state.UI and state.UI.MiscSkillOptions then state.UI.MiscSkillOptions.Visible=false end
-    if not skillList.Visible then refreshSkillChoices() end
-    skillList.Visible = not skillList.Visible
-    if skillList.Visible then revealOptions(skillList) end
-end)
 refreshSkillChoices()
-
-local travelHeading=uiLabel("TravelHeading","FLOOR TELEPORTS",100,16,true)
-local travelDropdown=uiButton("TeleportDropdown","Teleport",110,32)
-travelDropdown.Font=Enum.Font.Gotham
-local travelList=create("ScrollingFrame",{Name="TeleportOptions",Visible=false,LayoutOrder=120,Size=UDim2.new(1,0,0,180),
-    BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,ScrollBarThickness=3,
-    CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},content)
-corner(travelList,8)
-create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},travelList)
-create("UIPadding",{PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},travelList)
+local travelHeading=uiLabel("TravelHeading","")
+local travelDropdown=uiButton("TeleportDropdown","")
+local travelList=controllerViews.New({Name="TravelOptions"})
 state.TravelStatus=""
-local function setTravelStatus(message)
-    state.TravelStatus=message
-end
-local function setTravelOpen(open)
-    if open and state.StopEverything then return false end
-    travelList.Visible=open
-    if open then skillList.Visible=false; revealOptions(travelList) end
-end
+local function setTravelStatus(message)state.TravelStatus=message end
+local function setTravelOpen()end
 state.SetTravelOpen=setTravelOpen
-state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelList,Pages={Main=content},TabButtons={}}
-do
-    local pages=state.UI.Pages
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"}
-    for _,name in ipairs(tabs) do
-        if name~="Main" then
-            local page=content:Clone()
-            page.Name=name; page.Visible=false
-            for _,child in ipairs(page:GetChildren()) do if child:IsA("GuiObject") then child:Destroy() end end
-            page.CanvasPosition=Vector2.zero; page.Parent=content
-            pages[name]=page
-        end
-    end
-    toggle.Parent=pages.Combat; farmToggle.Parent=pages.Combat
-    local bestSword=uiButton("AutoEquipBestSword","Auto Equip Best Gear",25,34,pages.Combat)
-    state.UI.AutoEquipBestSword=bestSword
-    function state.SetAutoEquipBestSword(on)
-        state.AutoEquipBestSword=on==true
-        bestSword.Text=state.AutoEquipBestSword and "Auto Equip Best Gear · ON" or "Auto Equip Best Gear · OFF"
-        bestSword.BackgroundColor3=state.AutoEquipBestSword and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
-        if state.ProgressionGearController then state.ProgressionGearController.Reset()end
-        requestSave()
-    end
-    bind(bestSword.Activated,function()state.SetAutoEquipBestSword(not state.AutoEquipBestSword)end)
-    state.SetAutoEquipBestSword(restore.AutoEquipBestSword)
-
-    state.UI.AtheonDodge=uiButton("AtheonDodge","Atheon Dodge · OFF",30,34,pages.Combat)
-    function state.SetAtheonDodge(on)
-        state.AtheonDodge=on==true
-        local button=state.UI.AtheonDodge
-        button.Text=state.AtheonDodge and "Atheon Dodge · ON" or "Atheon Dodge · OFF"
-        button.BackgroundColor3=state.AtheonDodge and Color3.fromRGB(91,72,164) or Color3.fromRGB(38,41,56)
-        if not state.AtheonDodge and state.AtheonDodgeController then state.AtheonDodgeController.Reset() end
-        requestSave()
-    end
-    bind(state.UI.AtheonDodge.Activated,function()state.SetAtheonDodge(not state.AtheonDodge)end)
-    state.SetAtheonDodge(restore.AtheonDodge)
-    dodgeToggle.Parent=pages["Challenge Floors"]
-    for _,child in ipairs(content:GetChildren()) do
-        if child:IsA("GuiObject") and (child.Name=="SkillHeading" or string.sub(child.Name,1,5)=="Skill") then child.Parent=pages["Auto Skill"] end
-    end
-    function state.SetTab(name)
-        state.UI.ActiveTab=name
-    end
-    state.UI.MiscSkillToggle=uiButton("MiscSkillToggle","Misc Skill · OFF",100,34,pages["Auto Skill"])
-    state.UI.MiscSkillDropdown=uiButton("MiscSkillDropdown",state.SelectedMiscSkill.."  v",110,32,pages["Auto Skill"])
-    state.UI.MiscSkillDropdown.Font=Enum.Font.Gotham
-    state.UI.MiscSkillOptions=create("ScrollingFrame",{Name="MiscSkillOptions",Visible=false,LayoutOrder=120,Size=UDim2.new(1,0,0,116),
-        BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.new(),
-        AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},pages["Auto Skill"])
-    corner(state.UI.MiscSkillOptions,8)
-    create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.MiscSkillOptions)
-    create("UIPadding",{PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.MiscSkillOptions)
-    local buttons={Dismantle="openDismantle",Upgrade="openUpgrade",["The Forge"]="openCrystalForge"}
-    state.MiscMenuMethods=buttons
-    function state.OpenGameMenu(name)
-        if state.StopEverything then return false,"Stop Everything is on" end
-        local method=buttons[name]
-        if not method or type(GameUI[method])~="function" then return false,"Menu is unavailable" end
-        local ok,message=pcall(GameUI[method])
-        if not ok then state.LastMenuError=tostring(message) end
-        return ok,message
-    end
-    for index,name in ipairs({"Dismantle","Upgrade","The Forge"}) do
-        local button=uiButton("Open"..name,name,index,36,pages.Misc)
-        bind(button.Activated,function() state.OpenGameMenu(name) end)
-    end
-    state.UI.BoostDropdown=uiButton("PerformanceBoosters","Performance boosters  v",10,34,pages.Utility)
-    state.UI.BoostOptions=create("ScrollingFrame",{Name="BoostOptions",Visible=false,LayoutOrder=20,Size=UDim2.new(1,0,0,206),
-        BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,
-        ScrollBarThickness=3,ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true},pages.Utility)
-    corner(state.UI.BoostOptions,8)
-    create("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.BoostOptions)
-    create("UIPadding",{PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.BoostOptions)
-    state.UI.BoostButtons={}
-    for index,name in ipairs({"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}) do
-        local button=uiButton("Boost"..index,name,index,28,state.UI.BoostOptions)
-        button.Font=Enum.Font.Gotham; button.TextSize=11
-        state.UI.BoostButtons[name]=button
-        bind(button.Activated,function() if state.SetPerformanceBoost then state.SetPerformanceBoost(name,not state.PerformanceBoosters[name]) end end)
-    end
-    bind(state.UI.BoostDropdown.Activated,function()
-        if state.StopEverything then return end
-        state.UI.BoostOptions.Visible=not state.UI.BoostOptions.Visible
-        if state.UI.BoostOptions.Visible then revealOptions(state.UI.BoostOptions) end
-    end)
-    state.UI.PlayerSelector=uiButton("PlayerSelector","Select player",10,32,pages.Player)
-    state.UI.PlayerOptions=create("ScrollingFrame",{Name="PlayerOptions",Visible=false,LayoutOrder=20,Size=UDim2.new(1,0,0,116),
-        BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,ScrollBarThickness=3,
-        CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},pages.Player)
-    corner(state.UI.PlayerOptions,8)
-    create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.PlayerOptions)
-    create("UIPadding",{PaddingTop=UDim.new(0,5),PaddingBottom=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5)},state.UI.PlayerOptions)
-    state.UI.TeleportPlayer=uiButton("TeleportPlayer","TP to player",30,34,pages.Player)
-    state.UI.ViewPlayer=uiButton("ViewPlayer","View player · OFF",40,34,pages.Player)
-    state.UI.ViewInventory=uiButton("ViewInventory","View player inventory · OFF",50,34,pages.Player)
-    state.UI.PlayerInventory=create("ScrollingFrame",{Name="PlayerInventory",Visible=false,LayoutOrder=60,Size=UDim2.new(1,0,0,180),
-        BackgroundColor3=Color3.fromRGB(27,30,43),BorderSizePixel=0,ScrollBarThickness=3,
-        CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},pages.Player)
-    corner(state.UI.PlayerInventory,8)
-    create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},state.UI.PlayerInventory)
-    create("UIPadding",{PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8)},state.UI.PlayerInventory)
-    state.UI.PlayerMessage=create("TextLabel",{Name="PlayerMessage",Text="",Visible=false,LayoutOrder=70,Size=UDim2.new(1,0,0,30),
-        BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextWrapped=true,
-        TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,TextColor3=Color3.fromRGB(179,184,205)},pages.Player)
-    state.SetTab(preference("ActiveTab",previous and previous.UI and previous.UI.ActiveTab or "Main"))
+state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelList,Pages={},TabButtons={}}
+for _,name in ipairs({"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"})do
+    state.UI.Pages[name]=controllerViews.New({Name=name})
 end
-
-
+for _,name in ipairs({"AutoEquipBestSword","AtheonDodge","MiscSkillToggle","MiscSkillDropdown","MiscSkillOptions",
+    "BoostDropdown","BoostOptions","PlayerSelector","PlayerOptions","TeleportPlayer","ViewPlayer","ViewInventory",
+    "PlayerInventory","PlayerMessage"})do state.UI[name]=controllerViews.New({Name=name})end
+state.UI.BoostButtons={}
+function state.SetTab(name)state.UI.ActiveTab=name end
+function state.SetAutoEquipBestSword(on)
+    state.AutoEquipBestSword=on==true
+    if state.ProgressionGearController then state.ProgressionGearController.Reset()end
+    requestSave()
+end
+function state.SetAtheonDodge(on)
+    state.AtheonDodge=on==true
+    if not state.AtheonDodge and state.AtheonDodgeController then state.AtheonDodgeController.Reset()end
+    requestSave()
+end
+state.SetAutoEquipBestSword(restore.AutoEquipBestSword)
+state.SetAtheonDodge(restore.AtheonDodge)
+state.MiscMenuMethods={Dismantle="openDismantle",Upgrade="openUpgrade",["The Forge"]="openCrystalForge"}
+function state.OpenGameMenu(name)
+    if state.StopEverything then return false,"Stop Everything is on"end
+    local method=state.MiscMenuMethods[name]
+    if not method or type(GameUI[method])~="function"then return false,"Menu is unavailable"end
+    local ok,message=pcall(GameUI[method])
+    if not ok then state.LastMenuError=tostring(message)end
+    return ok,message
+end
+state.SetTab(preference("ActiveTab","Main"))
 
 do
-    local function renderBoost()
-        local count=0
-        for name,button in pairs(state.UI.BoostButtons) do
-            local enabled=state.PerformanceBoosters[name]==true
-            if enabled then count+=1 end
-            local label=name=="Limit FPS" and "Limit FPS (15 FPS)" or name=="Disable rendering" and "Disable 3D rendering" or name
-            if name=="No damage text" then label="Hide damage text" elseif name=="No vel obtained in chat" then label="Hide Vel in chat" end
-            button.Text=(enabled and "[ON]  " or "[OFF]  ")..label
-            button.BackgroundColor3=enabled and Color3.fromRGB(93,72,174) or Color3.fromRGB(38,41,56)
-        end
-        state.UI.BoostDropdown.Text="Performance boosters"..(count>0 and " ("..count..")" or "").."  v"
-    end
+    local function renderBoost()end
     local createPlayerVisibility=(function()
 -- BEGIN BUNDLED HIDE PLAYERS
 -- Local rendering only. Never hide the local character or change physics.
@@ -2199,6 +2170,37 @@ end
     renderBoost()
 end
 
+state.MovementOwnership=(function()
+-- BEGIN BUNDLED MOVEMENT OWNER
+-- Resolve ownership from active controller state; no competing persistent leases.
+return function(state)
+    local api={Owner="Manual",ChangedAt=0,Transitions=0}
+    function api.Resolve(now)
+        local owner
+        if state.StopEverything or state.Running==false then owner="Stopped"
+        elseif state.ModeratorBlocking then owner="Moderator"
+        elseif state.SafeModePanic then owner="Safety"
+        elseif state.AutoJoinFriendHolding then owner="Friend"
+        elseif state.AutomationTeleporting then owner="Floor travel"
+        elseif state.AutoTradeBusy then owner="Trade"
+        elseif state.TravelBusy or state.MultiSpotOwnsTravel then owner="Arena travel"
+        elseif state.Dodging then owner="Dodge"
+        elseif state.Recovering or now<(state.FarmPauseUntil or 0)then owner="Recovery"
+        elseif state.AutoFarm then owner="Farm"
+        else owner="Manual"end
+        if owner~=api.Owner then api.Owner=owner;api.ChangedAt=now;api.Transitions+=1 end
+        state.MovementOwner=owner
+        return owner
+    end
+    function api.CanFarm(now)
+        local owner=api.Resolve(now)
+        return owner=="Farm"or owner=="Manual"
+    end
+    return api
+end
+
+-- END BUNDLED MOVEMENT OWNER
+end)()(state)
 local movementRoot, movementHumanoid, previousAutoRotate, previousPlatformStand
 local movementAttachment, positionAlign, orientationAlign
 local collisionParts = {}
@@ -2843,6 +2845,7 @@ return function(ctx)
     api.Destroy=api.Release
     return api
 end
+
 -- END BUNDLED UPRIGHT
 end)()({State=state,Player=player,
     Controlled=function() return state.Running and (state.AutoFarm or state.TravelBusy or state.TravelHold or state.Dodging) end,
@@ -4056,6 +4059,45 @@ end
 end
 
 do
+    local makeQueue=(function()
+-- BEGIN BUNDLED INSTANCE QUEUE
+-- Bounded priority queue with O(1) removal of streamed-out instances.
+return function(capacity)
+    local api={Count=0,Dropped=0,Peak=0}
+    local records,heads,tails={},{},{}
+    local disposed=false
+    function api.Contains(value)return records[value]~=nil end
+    function api.Push(value,priority)
+        if disposed or records[value]then return false end
+        if api.Count>=capacity then api.Dropped+=1;return false end
+        local kind=priority and 1 or 2
+        local node={Value=value,Kind=kind,Previous=tails[kind]}
+        if tails[kind]then tails[kind].Next=node else heads[kind]=node end
+        tails[kind]=node;records[value]=node;api.Count+=1;api.Peak=math.max(api.Peak,api.Count)
+        return true
+    end
+    function api.Remove(value)
+        local node=records[value]
+        if not node then return false end
+        if node.Previous then node.Previous.Next=node.Next else heads[node.Kind]=node.Next end
+        if node.Next then node.Next.Previous=node.Previous else tails[node.Kind]=node.Previous end
+        records[value]=nil;node.Value=nil;node.Next=nil;node.Previous=nil;api.Count-=1
+        return true
+    end
+    function api.Pop()
+        local node=heads[1]or heads[2]
+        if not node then return nil end
+        local value=node.Value;api.Remove(value);return value
+    end
+    function api.Clear()
+        table.clear(records);table.clear(heads);table.clear(tails);api.Count=0
+    end
+    function api.Destroy()api.Clear();disposed=true end
+    return api
+end
+
+-- END BUNDLED INSTANCE QUEUE
+    end)()
     local create=(function()
 -- BEGIN BUNDLED SKILL VISUALS
 -- Suppress rendering while retaining animation timelines, hitboxes and callbacks.
@@ -4064,16 +4106,14 @@ return function(ctx)
     local api={AnimationsHidden=0,EffectsHidden=0}
     local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
     local managed,tracks={},{}
-    local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
+    local maintenance,maintenanceQueued=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
     local maintenanceHead,maintenanceTail=1,0
-    local maintenanceNext,maintenanceNextTail={},0
+    local maintenanceNext,maintenanceNextTail=setmetatable({}, {__mode="v"}),0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
     local animator,played,nextCheck=nil,nil,0
-    local urgent,background={},{ }
-    local urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
-    local queued=setmetatable({}, {__mode="k"})
+    local pendingQueue=assert(ctx.Queue,"Bounded visual queue is required")
     local invisible=NumberSequence.new(1)
     local hiddenWeight=0.0001 -- A zero-weight track can stop before its damage markers.
     local gunUntil,gunOrigin=0,nil
@@ -4166,6 +4206,7 @@ return function(ctx)
     local function suppress(instance)
         if disposed or state.StopEverything then return end
         if managed[instance] or not effect(instance) then return end
+        if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
         local properties
         if instance:IsA("BasePart") then
             if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
@@ -4223,29 +4264,22 @@ return function(ctx)
         if math.abs(track.WeightTarget-hiddenWeight)>0.00001 or track.WeightCurrent>0.001 then track:AdjustWeight(hiddenWeight,0) end
     end
     local function enqueue(instance,priority)
-        if disposed or state.StopEverything or queued[instance] or managed[instance] then return end
+        if disposed or state.StopEverything or pendingQueue.Contains(instance)or managed[instance]then return end
         local name=instance.ClassName
         if not (instance:IsA("BasePart") or instance:IsA("Light") or name=="ParticleEmitter" or name=="Beam" or name=="Trail"
             or name=="Smoke" or name=="Fire" or name=="Sparkles" or name=="Texture" or name=="Sound" or name=="Decal" or name=="BillboardGui" or name=="SurfaceGui" or name=="Highlight") then return end
-        queued[instance]=true
-        if priority then urgentTail+=1; urgent[urgentTail]=instance
-        else backgroundTail+=1; background[backgroundTail]=instance end
+        pendingQueue.Push(instance,priority)
     end
     function api.ProcessPending()
         local deadline=os.clock()+.0006
         local count=0
         while count<64 and (count==0 or os.clock()<deadline) do
-            local instance
-            if urgentHead<=urgentTail then instance=urgent[urgentHead]; urgent[urgentHead]=nil; urgentHead+=1
-            elseif backgroundHead<=backgroundTail then instance=background[backgroundHead]; background[backgroundHead]=nil; backgroundHead+=1
-            else break end
-            queued[instance]=nil
+            local instance=pendingQueue.Pop()
+            if not instance then break end
             if instance.Parent then pcall(suppress,instance) end
             count+=1
         end
-        if urgentHead>urgentTail then table.clear(urgent); urgentHead,urgentTail=1,0 end
-        if backgroundHead>backgroundTail then table.clear(background); backgroundHead,backgroundTail=1,0 end
-        api.Pending=urgentTail-urgentHead+1+backgroundTail-backgroundHead+1
+        api.Pending=pendingQueue.Count
         state.VisualQueueSize=api.Pending
     end
     local immediateCount,immediateSince=0,0
@@ -4283,6 +4317,7 @@ return function(ctx)
     end
     connections[#connections+1]=workspace.DescendantAdded:Connect(added)
     connections[#connections+1]=workspace.DescendantRemoving:Connect(function(instance)
+        pendingQueue.Remove(instance)
         local record=managed[instance]
         if record then restore(instance,record); managed[instance]=nil end
     end)
@@ -4299,8 +4334,9 @@ return function(ctx)
         local count=0
         while count<available and (count==0 or os.clock()<deadline)do
             local instance=maintenance[maintenanceHead]
-            maintenance[maintenanceHead]=nil;maintenanceHead+=1;maintenanceQueued[instance]=nil
-            local record=managed[instance]
+            maintenance[maintenanceHead]=nil;maintenanceHead+=1
+            if instance then maintenanceQueued[instance]=nil end
+            local record=instance and managed[instance]
             if record then
                 pcall(function()
                     if not instance.Parent then managed[instance]=nil
@@ -4371,9 +4407,8 @@ return function(ctx)
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
         table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
-        table.clear(urgent); table.clear(background); table.clear(queued)
+        pendingQueue.Destroy()
         table.clear(gunModels)
-        urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
         api.Pending=0; state.VisualQueueSize=0
     end
     api.Update()
@@ -4382,7 +4417,8 @@ end
 
 -- END BUNDLED SKILL VISUALS
     end)()
-    state.SkillVisuals=create({
+    state.VisualPendingQueue=makeQueue(8192)
+    state.SkillVisuals=create({Queue=state.VisualPendingQueue,
         State=state,Services=services,Actions=Actions,SkillState=Skills,ExcludeMapPart=state.ExcludeMapPart,
         DynamicHazards=function() return waveDodge.Event=="Lava" or waveDodge.Event=="Tempest" or (state.BossDodge and state.BossDodge.HasHazards) end,
         Preserve=function(instance)
@@ -4633,13 +4669,16 @@ function state.ReadAutomationEncounter(spot)
     local function count()
         local alive,seen=0,false
         for mob in pairs(tracked) do
+            if not mob.Parent then
+                tracked[mob]=nil;seen=true
+            else
             if not state.BossOnly or targetPriority.Rank(mob)<=2 then
-            if mob.Parent then
                 local data=getMobData(mob)
                 -- Missing streamed health is not proof that a previously seen mob died.
-                if not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)) then alive=alive+1 end
-            end
+                if not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))then alive+=1
+                else tracked[mob]=nil end
             seen=true
+            end
             end
         end
         return alive,seen
@@ -4648,7 +4687,9 @@ function state.ReadAutomationEncounter(spot)
     if scanned then scan() end
     local alive,seen=count()
     -- A cached zero must never authorize travel without checking for new adds.
-    if alive==0 and not scanned then scan();alive,seen=count() end
+    if alive==0 and not scanned then
+        scan();local refreshed,observed=count();alive=refreshed;seen=seen or observed
+    end
     return alive,seen
 end
 do
@@ -5089,20 +5130,15 @@ local function exploreEmptyArea(character, root, humanoid, now)
     movementStatus("Exploring · moved beyond the previous spawn area")
 end
 
-local function updateMovement()
-    local now = os.clock()
+local function updateMovement(now)
+    now=now or os.clock()
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
-    if state.SafeModePanic or state.AutomationTeleporting or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or now<(state.FarmPauseUntil or 0) then return end
+    if not state.MovementOwnership.CanFarm(now)then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
     end
-    if state.MultiSpot and state.MultiSpotAnchor and not state.AutoFarm then
-        if not state.HoldMultiSpotIdle() then state.FinishMultiSpotArrival() end
-        return
-    end
-    if state.Recovering or not state.AutoFarm then return end
     state.TravelHold=false; state.TravelHoldPosition=nil
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -5859,8 +5895,8 @@ function state.SetRadius(radius)
 end
 local guardHealth, guardConnection, guardLastValue
 local nextGuardRefresh = 0
-local function updateHealthGuard()
-    local now = os.clock()
+local function updateHealthGuard(now)
+    now=now or os.clock()
     if now < nextGuardRefresh then return end
     nextGuardRefresh = now + 0.5
     local character = player.Character
@@ -5894,54 +5930,83 @@ local function updateHealthGuard()
     end
 end
 function state.Destroy(replacing, teleportCleanup)
-    if not state.Running then return end
-    local preserveSearch = teleportCleanup == true and (state.AutomationTeleporting
-        or ((state.SafeMode or state.MultiSpot or state.AccountProgression) and state.ServerTeleportStarted)
+    if not state.Running or state.Destroying then return end
+    state.Destroying=true
+    local preserveSearch=teleportCleanup==true and (state.AutomationTeleporting
+        or ((state.SafeMode or state.MultiSpot or state.AccountProgression)and state.ServerTeleportStarted)
         or (state.SoloServerSearch and state.SoloServerSearch.Active and state.SoloServerSearch.Phase=="Teleporting"))
-    -- Persist the user's choices BEFORE releasing runtime flags. Closing/reloading
-    -- must not silently turn Multi Spot off in the next execution.
-    if configReady and not preserveSearch then state.SaveNow() end
-    state.Enabled = false
-    state.AutoFarm = false
-    state.SkillAura = false
-    state.Running = false
-    if state.WindUI then state.WindUI.Destroy()end
-    if state.AntiAfk then state.AntiAfk.Destroy()end
-    runtimeOwner.Release()
-    if state.SoloServerSearch then state.SoloServerSearch.Destroy(preserveSearch) end
-    if state.SafeController and not preserveSearch then state.SafeController.Destroy() end
-    if state.MultiSpotController then state.MultiSpotController.Destroy() end
-    if state.ProgressionDestroy then state.ProgressionDestroy() end
-    if state.PerformanceBoost then state.PerformanceBoost.Destroy() end
-    if state.CancelSkillAura then state.CancelSkillAura("Script replaced") end
-    if state.WeaponSkillsDestroy then state.WeaponSkillsDestroy() end
-    stopSword(true)
-    if state.CancelMiscSkill then state.CancelMiscSkill() end
-    if state.PlayerTools then state.PlayerTools.Destroy() end
-    if state.ModeratorWatch then state.ModeratorWatch.Destroy() end
-    if state.UprightController then state.UprightController.Destroy() end
-    waveDodge.Destroy()
-    if state.SkillVisuals then state.SkillVisuals.Destroy() end
-    if state.RestoreWorldVisuals then state.RestoreWorldVisuals() end
-    if state.RestoreSkillDamageHook then state.RestoreSkillDamageHook() end
-    if state.SkillActivation then state.SkillActivation.Release() end
-    if state.FinishSkillObservation then state.FinishSkillObservation() end
-    normalScheduler.Destroy()
-    if guardConnection then guardConnection:Disconnect(); guardConnection = nil end
-    stopSword()
-    stopMovement(nil,replacing==true)
-    if state.FarmNoclip then state.FarmNoclip.Destroy()end
-    if state.RuntimeRecovery then state.RuntimeRecovery.Destroy()end
-    if state.AuraTouch then state.AuraTouch.Destroy()end
-    if state.MultiSpotHUD then state.MultiSpotHUD.Destroy()end
-    healthHUD.Destroy()
-    if mobAddedConnection then mobAddedConnection:Disconnect() end
-    if mobRemovedConnection then mobRemovedConnection:Disconnect() end
-    table.clear(trackedMobs)
-    for _, connection in ipairs(connections) do connection:Disconnect() end
-    table.clear(connections)
-    if gui then gui:Destroy() end
-    if env.SB2KillAura == state then env.SB2KillAura = nil end
+    local scope=(function()
+-- BEGIN BUNDLED RUNTIME SCOPE
+-- Every registered cleanup runs exactly once, even after another cleanup fails.
+return function()
+    local api={Errors={}}
+    local entries,disposed={},false
+    function api.Add(name,fn)
+        assert(not disposed,"Runtime scope already closed")
+        entries[#entries+1]={Name=name,Run=fn}
+    end
+    function api.Close()
+        if disposed then return api.Errors end
+        disposed=true
+        for _,entry in ipairs(entries)do
+            local ok,reason=pcall(entry.Run)
+            if not ok then api.Errors[#api.Errors+1]={Name=entry.Name,Error=tostring(reason)}end
+            entry.Run=nil
+        end
+        table.clear(entries)
+        return api.Errors
+    end
+    return api
+end
+
+-- END BUNDLED RUNTIME SCOPE
+    end)()()
+    local function cleanup(name,fn)scope.Add(name,fn)end
+    local function retire(name,object,method,...)
+        if not object then return end
+        local args=table.pack(...)
+        cleanup(name,function()if object[method]then object[method](table.unpack(args,1,args.n))end end)
+    end
+    cleanup("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
+    cleanup("Stop",function()state.Enabled=false;state.AutoFarm=false;state.SkillAura=false;state.Running=false end)
+    retire("UI",state.WindUI,"Destroy")
+    retire("AntiAFK",state.AntiAfk,"Destroy")
+    retire("Ownership",runtimeOwner,"Release")
+    retire("Search",state.SoloServerSearch,"Destroy",preserveSearch)
+    if not preserveSearch then retire("Safe",state.SafeController,"Destroy")end
+    retire("MultiSpot",state.MultiSpotController,"Destroy")
+    cleanup("Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end)
+    retire("Performance",state.PerformanceBoost,"Destroy")
+    cleanup("Skill",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end)
+    cleanup("Weapons",function()if state.WeaponSkillsDestroy then state.WeaponSkillsDestroy()end end)
+    cleanup("Sword",function()stopSword(true)end)
+    cleanup("Support",function()if state.CancelMiscSkill then state.CancelMiscSkill()end end)
+    retire("Players",state.PlayerTools,"Destroy")
+    retire("Moderator",state.ModeratorWatch,"Destroy")
+    retire("Upright",state.UprightController,"Destroy")
+    retire("Dodge",waveDodge,"Destroy")
+    retire("Visuals",state.SkillVisuals,"Destroy")
+    cleanup("World",function()if state.RestoreWorldVisuals then state.RestoreWorldVisuals()end end)
+    cleanup("DamageHook",function()if state.RestoreSkillDamageHook then state.RestoreSkillDamageHook()end end)
+    retire("Activation",state.SkillActivation,"Release")
+    cleanup("Observation",function()if state.FinishSkillObservation then state.FinishSkillObservation()end end)
+    retire("Attacks",normalScheduler,"Destroy")
+    cleanup("HealthObserver",function()if guardConnection then guardConnection:Disconnect();guardConnection=nil end end)
+    cleanup("Movement",function()stopMovement(nil,replacing==true)end)
+    retire("Collision",state.FarmNoclip,"Destroy")
+    retire("Recovery",state.RuntimeRecovery,"Destroy")
+    retire("Touch",state.AuraTouch,"Destroy")
+    retire("SpotHUD",state.MultiSpotHUD,"Destroy")
+    retire("HealthHUD",healthHUD,"Destroy")
+    retire("Scheduler",state.WorkScheduler,"Destroy")
+    retire("Enemies",state.EnemyRegistry,"Destroy")
+    cleanup("Connections",function()
+        for _,connection in ipairs(connections)do pcall(function()connection:Disconnect()end)end
+        table.clear(connections)
+    end)
+    cleanup("Root",function()if gui then gui:Destroy()end end)
+    cleanup("Singleton",function()if env.SB2KillAura==state then env.SB2KillAura=nil end end)
+    state.CleanupErrors=scope.Close()
 end
 bind(toggle.Activated, function() state.SetEnabled(not state.Enabled) end)
 bind(gui.Destroying, function() state.Destroy(false, true) end)
@@ -6034,8 +6099,8 @@ return function(ctx)
         end
         if limit~=value.Limit then value.Limit=limit; value.NextProbe=now+6 end
     end
-    function api.Update()
-        local now=clock()
+    function api.Update(now)
+        now=now or clock()
         if now<nextUpdate then return end
         nextUpdate=now+.5
         local data=ctx.PrimaryData and ctx.PrimaryData()
@@ -6281,89 +6346,120 @@ end
         Release=function()stopMovement("Trade ended · resuming farming",true);nextMovementUpdate=0;nextAcquisition=0 end})
 end
 
-local nextPresentationUpdate=0
-local function runFrame()
-        if state.TradeHold then state.TradeHold.Update()end
-        if state.AuraTouch then state.AuraTouch.Update()end
-        if state.StopEverything then return end
-        if state.ModeratorBlocking then
-            if state.PanicToSpawn then state.PanicToSpawn()end
-            return
-        end
-        if state.AutoJoinFriendHolding then
-            if state.PanicToSpawn then state.PanicToSpawn()end
-            return
-        end
-        if state.SafeModePanic then
-            if state.SafePanicHoldHere then state.PanicInPlace()else state.PanicToSpawn()end
-            return
-        end
-        if state.AutoTradeBusy then return end
-        local started = os.clock()
-        if state.ArenaFloat then state.ArenaFloat.Update(started) end
-        state.PerformanceBudget.Update(started)
-        if state.UpdateBestSword then state.UpdateBestSword(started)end
-        if state.WeaponSkills then state.WeaponSkills.Update(started) end
-        local swingOK,swingError=pcall(updateAutoSwing)
-        if not swingOK then state.LastSwingError=tostring(swingError) end
-        local dodgeOK,dodgeError=pcall(waveDodge.Update)
-        if not dodgeOK then state.LastDodgeError=tostring(dodgeError) end
-        updateHealthGuard()
-        local updatePresentation=started>=nextPresentationUpdate
-        if updatePresentation then
-            nextPresentationUpdate=started+math.max(.05,math.min(.15,state.AverageFrameTime or 1/60))
-            local healthOK,healthError=pcall(healthHUD.Update)
-            if not healthOK then state.LastHealthHUDError=tostring(healthError) end
-        end
-        if state.AutoRanges then state.AutoRanges.Update() end
-        if updatePresentation and state.SkillVisuals then
-            local visualOK,visualError=pcall(state.SkillVisuals.Update)
-            if not visualOK then state.LastVisualError=tostring(visualError) end
-        end
-        if started >= nextAreaDiscovery then
-            nextAreaDiscovery = started + 5
-            pcall(discoverDestinations, true)
-        end
-        local movementOK, movementError = pcall(updateMovement)
-        if not movementOK then
-            state.FarmPauseUntil = os.clock() + 1
-            state.FollowTarget = nil
-            state.LastMovementError = tostring(movementError)
-            movementStatus("Paused · movement error")
-            warn("[SB2 Auto Farm] " .. tostring(movementError))
-        end
-        local uprightOK,uprightError=pcall(state.UprightController.Update)
-        if not uprightOK then state.LastUprightError=tostring(uprightError) end
-        if state.MiscController then
-            local miscOK,miscError=pcall(state.MiscController.Update,started)
-            if not miscOK then state.LastMiscSkillError=tostring(miscError); state.MiscReserveStamina=false end
-        end
-        local skillOK, skillError = pcall(updateSkillAura)
-        if not skillOK then
-            state.SkillRetryAt=os.clock()+1.5
-            state.LastSkillError = tostring(skillError)
-            state.SkillStatus = "Skill retry · waiting for game state"
-            warn("[SB2 Skill Aura] " .. tostring(skillError))
-        end
-        local ok, message = pcall(scan)
-        if not state.Running then return end
-        if ok then
-            consecutiveErrors = 0
-            if not state.LastError then combatStatus = message end
+local workScheduler=(function()
+-- BEGIN BUNDLED WORK SCHEDULER
+-- Independent wall-clock tasks: no catch-up bursts or shared failure latch.
+return function(ctx)
+    local api={Tasks={},Failures=0}
+    local disposed=false
+    function api.Add(name,interval,run,options)
+        assert(not disposed,"Scheduler already closed")
+        assert(not api.Tasks[name],"Duplicate task: "..name)
+        local task={Name=name,Interval=interval,Run=run,Options=options or {},Due=0,Calls=0,Failures=0}
+        api.Tasks[name]=task
+        return task
+    end
+    function api.Step(name,now,...)
+        if disposed then return end
+        local task=assert(api.Tasks[name],"Unknown task: "..name)
+        now=now or ctx.Now()
+        if now<task.Due then return end
+        task.Due=now+(type(task.Interval)=="function"and task.Interval()or task.Interval)
+        if task.Options.Enabled and not task.Options.Enabled()then return end
+        task.Calls+=1
+        local started=ctx.Now()
+        local ok,result=pcall(task.Run,now,...)
+        task.Cost=ctx.Now()-started
+        if ok then task.LastError=nil;task.ConsecutiveFailures=0
         else
-            consecutiveErrors += 1
-            state.Backoff = math.min(8, state.Backoff * 2)
-            stopSword()
-            if consecutiveErrors >= 3 then
-                state.FarmPauseUntil = os.clock()+1
-                consecutiveErrors = 0
-                state.LastError = tostring(message)
-                combatStatus = "Recovering combat · auto farm stays enabled"
-                warn("[SB2 Kill Aura] " .. tostring(message))
-            end
+            task.LastError=tostring(result);task.Failures+=1;api.Failures+=1
+            task.ConsecutiveFailures=(task.ConsecutiveFailures or 0)+1
+            task.Due=now+math.min(2,.1*2^math.min(4,task.ConsecutiveFailures-1))
+            if ctx.Error then ctx.Error(name,task.LastError,task)end
         end
-        local now = os.clock()
-        state.AverageLoopCost += ((os.clock() - started) - state.AverageLoopCost) * 0.08
+        return ok,result
+    end
+    function api.Wake(name)
+        local task=api.Tasks[name]
+        if task then task.Due=0 end
+    end
+    function api.Destroy()
+        if disposed then return end
+        disposed=true
+        for _,task in pairs(api.Tasks)do task.Run=nil;task.Options={}end
+        table.clear(api.Tasks)
+    end
+    return api
+end
+
+-- END BUNDLED WORK SCHEDULER
+end)()({Now=os.clock,Error=function(name,reason)
+    state["Last"..name.."Error"]=reason
+    if name=="Movement"then
+        state.FarmPauseUntil=os.clock()+1;state.FollowTarget=nil
+        movementStatus("Recovering movement · retrying")
+    elseif name=="Skill"then
+        state.SkillRetryAt=os.clock()+1.5
+        state.SkillStatus="Skill retry · waiting for game state"
+    elseif name=="MiscSkill"then
+        state.MiscReserveStamina=false
+    end
+end})
+state.WorkScheduler=workScheduler
+local function taskController(name,interval,fn)
+    workScheduler.Add(name,interval,fn)
+end
+taskController("TradeHold",.05,function()if state.TradeHold then state.TradeHold.Update()end end)
+taskController("AuraTouch",.1,function()if state.AuraTouch then state.AuraTouch.Update()end end)
+taskController("Float",.1,function(now)if state.ArenaFloat then state.ArenaFloat.Update(now)end end)
+taskController("Performance",1,function(now)state.PerformanceBudget.Update(now)end)
+taskController("Gear",.5,function(now)if state.UpdateBestSword then state.UpdateBestSword(now)end end)
+taskController("Weapon",.25,function(now)if state.WeaponSkills then state.WeaponSkills.Update(now)end end)
+taskController("Swing",.05,function()updateAutoSwing()end)
+taskController("Dodge",.03,function()waveDodge.Update()end)
+taskController("HealthGuard",.5,function(now)updateHealthGuard(now)end)
+taskController("HealthHUD",.12,function(now)healthHUD.Update(now)end)
+taskController("Ranges",.5,function(now)if state.AutoRanges then state.AutoRanges.Update(now)end end)
+taskController("Visual",.08,function()if state.SkillVisuals then state.SkillVisuals.Update()end end)
+taskController("Discovery",5,function()discoverDestinations(true)end)
+taskController("Movement",.08,function(now)updateMovement(now)end)
+taskController("Upright",.08,function()state.UprightController.Update()end)
+taskController("MiscSkill",.1,function(now)if state.MiscController then state.MiscController.Update(now)end end)
+taskController("Skill",0,function()updateSkillAura()end)
+taskController("Combat",.03,function()return scan()end)
+local frameOrder={"Float","Performance","Gear","Weapon","Swing","Dodge","HealthGuard","HealthHUD",
+    "Ranges","Visual","Discovery","Movement","Upright","MiscSkill","Skill"}
+local function runFrame()
+    local now=os.clock()
+    workScheduler.Step("TradeHold",now)
+    workScheduler.Step("AuraTouch",now)
+    if state.StopEverything then return end
+    if state.ModeratorBlocking or state.AutoJoinFriendHolding then
+        if state.PanicToSpawn then state.PanicToSpawn()end
+        return
+    end
+    if state.SafeModePanic then
+        if state.SafePanicHoldHere then state.PanicInPlace()else state.PanicToSpawn()end
+        return
+    end
+    if state.AutoTradeBusy then return end
+    for _,name in ipairs(frameOrder)do
+        if not state.Running then return end
+        workScheduler.Step(name,now)
+    end
+    local ok,message=workScheduler.Step("Combat",now)
+    if ok==true then
+        consecutiveErrors=0;state.LastError=nil;combatStatus=message
+    elseif ok==false then
+        consecutiveErrors+=1;state.LastError=tostring(message)
+        state.Backoff=math.min(8,state.Backoff*2)
+        if consecutiveErrors>=3 then
+            state.FarmPauseUntil=now+1;consecutiveErrors=0
+            combatStatus="Recovering combat · auto farm stays enabled"
+            stopSword()
+        end
+    end
+    state.AverageLoopCost+=((os.clock()-now)-state.AverageLoopCost)*.08
 end
 
 do
@@ -8099,126 +8195,22 @@ end
     end)()
     local makeUI=(function()
 -- BEGIN BUNDLED AUTOMATION UI
+-- Controller status bridge. Modern WindUI is the only interactive interface.
 return function(ctx)
-    local s,catalog=ctx.State,ctx.Catalog
-    local safe=ctx.Button("SafeMode","Safe Mode · OFF",200,34)
-    local floor=ctx.Button("SafeFloor","Safe Mode floor",210,32)
-    local lists={}
-    local function list(name,order,height)
-        local frame=ctx.Create("ScrollingFrame",{Name=name,Visible=false,LayoutOrder=order,Size=UDim2.new(1,0,0,height),
-            BackgroundColor3=Color3.fromRGB(31,33,46),BorderSizePixel=0,ScrollBarThickness=3,
-            CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ClipsDescendants=true},ctx.Parent)
-        ctx.Corner(frame,8)
-        ctx.Create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},frame)
-        lists[#lists+1]=frame;return frame
-    end
-    local floors=list("SafeFloorOptions",211,170)
-    local whiteLabel=ctx.Label("SafeWhitelistHeading","WHITELIST · USERNAMES OR USER IDS",220,16,true)
-    local white=ctx.Create("TextBox",{Name="SafeWhitelist",LayoutOrder=230,Size=UDim2.new(1,0,0,40),
-        Text=s.SafeWhitelistText,PlaceholderText="username, another_username, 123456",
-        ClearTextOnFocus=false,MultiLine=true,TextWrapped=true,Font=Enum.Font.Gotham,TextSize=11,
-        TextColor3=Color3.fromRGB(225,228,241),PlaceholderColor3=Color3.fromRGB(125,132,153),
-        BackgroundColor3=Color3.fromRGB(38,41,56),BorderSizePixel=0},ctx.Parent)
-    ctx.Corner(white,8)
-    local safeStatus=ctx.Label("SafeModeStatus","Safe Mode is off",240,40)
-    safeStatus.TextWrapped=true;safeStatus.TextTruncate=Enum.TextTruncate.None
-    local multi=ctx.Button("MultiSpot","Multi Spot · OFF",300,34)
-    local spots=ctx.Button("MultiSpotDropdown","Select boss / mini-boss arenas",310,32)
-    local arenas=list("MultiSpotOptions",311,200)
-    local multiStatus=ctx.Label("MultiSpotStatus","Multi Spot is off",320,38)
-    multiStatus.TextWrapped=true;multiStatus.TextTruncate=Enum.TextTruncate.None
-    local hint=ctx.Label("AutomationHint","Multi Spot moves after every mob in the arena is cleared, including regular mobs. Safe Mode limits it to the selected safe floor. Other players may be blocked unless whitelisted.",330,70)
-    hint.TextWrapped=true;hint.TextTruncate=Enum.TextTruncate.None
-    s.UI.SafeMode=safe;s.UI.SafeFloor=floor;s.UI.SafeFloorOptions=floors;s.UI.SafeWhitelist=white
-    s.UI.SafeModeStatus=safeStatus;s.UI.MultiSpot=multi;s.UI.MultiSpotDropdown=spots;s.UI.MultiSpotOptions=arenas
-    s.UI.MultiSpotStatus=multiStatus
-    local join=ctx.Button("AutoJoinFriend","Auto Join Friend · OFF",340,34)
-    local username=ctx.Create("TextBox",{Name="JoinFriendUsername",LayoutOrder=350,Size=UDim2.new(1,0,0,34),
-        Text=s.JoinFriendUsername or "",PlaceholderText="Friend's Roblox username",ClearTextOnFocus=false,
-        Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(225,228,241),
-        PlaceholderColor3=Color3.fromRGB(125,132,153),BackgroundColor3=Color3.fromRGB(38,41,56),BorderSizePixel=0},ctx.Parent)
-    ctx.Corner(username,8)
-    local joinStatus=ctx.Label("AutoJoinFriendStatus","Auto Join Friend is off",360,48)
-    joinStatus.TextWrapped=true;joinStatus.TextTruncate=Enum.TextTruncate.None
-    s.UI.AutoJoinFriend=join;s.UI.JoinFriendUsername=username;s.UI.AutoJoinFriendStatus=joinStatus
-    ctx.Bind(join.Activated,function()s.SetJoinFriendUsername(username.Text);s.SetAutoJoinFriend(not s.AutoJoinFriend)end)
-    ctx.Bind(username.FocusLost,function()s.SetJoinFriendUsername(username.Text)end)
+    local state=ctx.State
     local api={}
-    local lastView
-    local floorButtons={}
-    local function floorLabel(item)
-        return (item.Id==s.SafeFloorId and "[x] " or "")..item.Label..(item.Unlocked and "" or " · locked")
+    local fields={"SafeMode","SafeFloor","SafeWhitelist","SafeModeStatus","MultiSpot","MultiSpotDropdown",
+        "MultiSpotStatus","AutoJoinFriend","JoinFriendUsername","AutoJoinFriendStatus"}
+    for _,name in ipairs(fields)do
+        state.UI[name]=ctx.Create("TextBox",{Name=name,Text=""},ctx.Parent)
     end
-    function s.CloseAutomationMenus(except)
-        for _,item in ipairs(lists) do if item~=except then item.Visible=false end end
-    end
-    local function open(frame)
-        local nextOpen=not frame.Visible
-        s.CloseAutomationMenus(frame)
-        if s.SetTravelOpen then s.SetTravelOpen(false) end
-        if s.UI.SkillOptions then s.UI.SkillOptions.Visible=false end
-        frame.Visible=nextOpen
-        if nextOpen then ctx.Reveal(frame) end
-    end
+    state.UI.SafeWhitelist.Text=state.SafeWhitelistText or ""
+    function state.CloseAutomationMenus()end
     function api.Refresh()
-        local count=0;for id,on in pairs(s.MultiSpotSelected) do if on and catalog.SpotById[id] and catalog.SpotById[id].PlaceId==game.PlaceId then count=count+1 end end
-        local view=table.concat({tostring(s.SafeMode),tostring(s.MultiSpot),tostring(s.SafeFloorId),
-            tostring(s.AutoJoinFriend),tostring(s.AutoJoinFriendStatus),tostring(s.SafeModeStatus),tostring(s.MultiSpotStatus),tostring(count),
-            tostring(s.AutomationFloorUnlockVersion)},"|")
-        if view==lastView then return end
-        lastView=view
-        join.Text=s.AutoJoinFriend and "Auto Join Friend · ON" or "Auto Join Friend · OFF"
-        join.BackgroundColor3=s.AutoJoinFriend and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
-        joinStatus.Text=s.AutoJoinFriendStatus or "Auto Join Friend is off"
-        safe.Text=s.SafeMode and "Safe Mode · ON" or "Safe Mode · OFF"
-        multi.Text=s.MultiSpot and "Multi Spot · ON" or "Multi Spot · OFF"
-        safe.BackgroundColor3=s.SafeMode and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
-        multi.BackgroundColor3=s.MultiSpot and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
-        local selected=catalog.FloorById[s.SafeFloorId]
-        floor.Text="Safe floor · "..(selected and selected.Label or "Select floor")
-        safeStatus.Text=s.SafeModeStatus or (s.SafeMode and "Checking server..." or "Safe Mode is off")
-        multiStatus.Text=s.MultiSpotStatus or (s.MultiSpot and "Starting arena rotation..." or "Multi Spot is off")
-        spots.Text=count>0 and ("Arenas · "..count.." selected") or "Select boss / mini-boss arenas"
-        for _,item in ipairs(catalog.Floors)do
-            local button=floorButtons[item.Id]
-            if button then
-                local text=floorLabel(item)
-                if button.Text~=text then button.Text=text end
-            end
-        end
+        state.UI.SafeModeStatus.Text=state.SafeModeStatus or "Safe Mode is off"
+        state.UI.MultiSpotStatus.Text=state.MultiSpotStatus or "Multi Spot is off"
+        state.UI.AutoJoinFriendStatus.Text=state.AutoJoinFriendStatus or "Auto Join Friend is off"
     end
-    local function refreshFloors()
-        for _,child in ipairs(floors:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
-        floorButtons={}
-        for i,item in ipairs(catalog.Floors) do
-            s.IsAutomationFloorUnlocked(item.Id)
-            local button=ctx.Button("SafeFloor"..i,floorLabel(item),i,30,floors)
-            floorButtons[item.Id]=button
-            button.Font=Enum.Font.Gotham;button.TextSize=11
-            ctx.Bind(button.Activated,function() s.SetSafeFloor(item.Id);floors.Visible=false;api.Refresh() end)
-        end
-    end
-    local function refreshSpots()
-        catalog.AddCurrent(s.FloorDestinations,game.PlaceId);catalog.Sort()
-        s.MultiSpotSelected=catalog.NormalizeSelection(s.MultiSpotSelected)
-        for _,child in ipairs(arenas:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
-        for i,item in ipairs(catalog.Spots) do
-            if item.PlaceId==game.PlaceId then
-            local label=item.Kind.." · "..item.Name
-            local button=ctx.Button("MultiSpot"..i,(s.MultiSpotSelected[item.Id] and "[x] " or "[ ] ")..label,i,30,arenas)
-            button.Font=Enum.Font.Gotham;button.TextSize=11
-            ctx.Bind(button.Activated,function()
-                s.SetMultiSpotSelection(item.Id,not s.MultiSpotSelected[item.Id])
-                button.Text=(s.MultiSpotSelected[item.Id] and "[x] " or "[ ] ")..label;api.Refresh()
-            end)
-            end
-        end
-    end
-    ctx.Bind(safe.Activated,function()s.SetSafeMode(not s.SafeMode)end)
-    ctx.Bind(multi.Activated,function()s.SetMultiSpot(not s.MultiSpot)end)
-    ctx.Bind(floor.Activated,function()refreshFloors();open(floors)end)
-    ctx.Bind(spots.Activated,function()refreshSpots();open(arenas)end)
-    ctx.Bind(white.FocusLost,function()s.SetSafeWhitelist(white.Text)end)
     api.Refresh()
     return api
 end
@@ -28087,8 +28079,16 @@ return function(ctx)
     function api.Destroy()
         if disposed then return end
         disposed=true;api.Ready=false
-        ctx.Visibility(false)
-        window:Destroy()
+        local failures={}
+        local function cleanup(fn,...)
+            local ok,reason=pcall(fn,...)
+            if not ok then failures[#failures+1]=tostring(reason)end
+        end
+        cleanup(ctx.Visibility,false)
+        cleanup(function()window:Destroy()end)
+        if memory.Destroy then cleanup(memory.Destroy)end
+        if ctx.DestroyRoots then cleanup(ctx.DestroyRoots)end
+        if #failures>0 then s.UICleanupErrors=failures end
     end
     -- Restore values after all controls exist; initialization never runs actions.
     if ctx.Defer then
@@ -28115,7 +28115,7 @@ end
     local parent=gui.Parent
     local retryVisibility=state.SetUIVisible
     local before={};for _,child in ipairs(parent:GetChildren())do before[child]=true end
-    local library
+    local library,uiMemory
     local ownedNames={WindUI=true,["WindUI/Notifications"]=true,["WindUI/Dropdowns"]=true,["WindUI/Tooltips"]=true}
     local function roots(fn)
         if library then
@@ -28156,7 +28156,8 @@ end
 -- Remove destroyed UI references and disconnect every owned signal on shutdown.
 return function(creator)
     local api={Pruned=0}
-    if not creator then function api.Update()end;return api end
+    if not creator then function api.Update()end;function api.Destroy()end;return api end
+    local disposed=false
     local cursors={}
     local function array(name,dead)
         local list=creator[name]
@@ -28171,6 +28172,7 @@ return function(creator)
     end
     local objectCursor
     function api.Update()
+        if disposed then return end
         array("Signals",function(connection)return connection.Connected==false end)
         array("FontObjects",function(object)return object.Parent==nil end)
         array("LocalizationObjects",function(record)return not record.Object or record.Object.Parent==nil end)
@@ -28194,13 +28196,19 @@ return function(creator)
             if type(creator[name])=="table"then table.clear(creator[name])end
         end
     end
+    function api.Destroy()
+        if disposed then return end
+        disposed=true;creator.DisconnectAll();table.clear(cursors);objectCursor=nil
+    end
     return api
 end
 
 -- END BUNDLED UI MEMORY
         end)()
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        local controller=make({Memory=makeMemory(library.Creator),State=state,WindUI=library,PlaceId=game.PlaceId,Defer=task.defer,
+        uiMemory=makeMemory(library.Creator)
+        local controller=make({Memory=uiMemory,State=state,WindUI=library,PlaceId=game.PlaceId,Defer=task.defer,
+            DestroyRoots=function()roots(function(root)root:Destroy()end)end,
             FriendPresent=function(name)
                 if name==""then return false end
                 for _,person in ipairs(Players:GetPlayers())do
@@ -28268,18 +28276,24 @@ end
             end
         end)
     end)
-    if not ok and state.Running and env.SB2LoadToken==loadToken and runtimeOwner.Alive()then
-        state.WindUIError=tostring(result)
+    -- BEGIN MODERN UI FAILURE
+    if not ok then
+        local current=state.Running and env.SB2LoadToken==loadToken and runtimeOwner.Alive()
         if state.WindUI then pcall(state.WindUI.Destroy);state.WindUI=nil end
         if library and library.Window then pcall(function()library.Window:Destroy()end)end
-        state.SetUIVisible=retryVisibility
+        if uiMemory then pcall(uiMemory.Destroy)
+        elseif library and library.Creator and library.Creator.DisconnectAll then pcall(library.Creator.DisconnectAll)end
         roots(function(root)root:Destroy()end)
-        for _,child in ipairs(parent:GetChildren())do
-            if not before[child]and child:IsA("ScreenGui")and ownedNames[child.Name]then child:Destroy()end
+        if current then
+            state.WindUIError=tostring(result);state.SetUIVisible=retryVisibility
+            for _,child in ipairs(parent:GetChildren())do
+                if not before[child]and child:IsA("ScreenGui")and ownedNames[child.Name]then child:Destroy()end
+            end
+            showUI.Visible=true;state.UIHidden=true
+            warn("[SB2 WindUI] Modern UI unavailable; use the feather button to reload: "..state.WindUIError)
         end
-        showUI.Visible=true;state.UIHidden=true
-        warn("[SB2 WindUI] Modern UI unavailable; use the feather button to reload: "..state.WindUIError)
     end
+    -- END MODERN UI FAILURE
 end
 
 -- Independent status overlay; hiding WindUI leaves this under the runtime root.

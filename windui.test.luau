@@ -218,5 +218,14 @@ return function(source)
     local cancelled=make({State=s,WindUI=wind,PlaceId=11,Defer=function(fn)deferred=fn end,Visibility=function()end})
     cancelled.Destroy();deferred()
     assert(not cancelled.Controls.Enabled,"Destroyed runtimes must not build more controls")
+    s.Running=true;tabCount=0
+    local memoryClosed,rootsClosed=0,0
+    local broken=make({State=s,WindUI=wind,PlaceId=11,
+        Memory={Pruned=0,Update=function()end,Destroy=function()memoryClosed+=1 end},
+        DestroyRoots=function()rootsClosed+=1 end,
+        Visibility=function(visible)if not visible then error("Missing window root")end end})
+    window.Destroy=function()error("Window already destroyed")end
+    broken.Destroy();broken.Destroy()
+    assert(memoryClosed==1 and rootsClosed==1 and #s.UICleanupErrors==2,"UI signal/root cleanup must run even after native teardown errors")
     print("PASS WindUI: all features, saved defaults without side effects, native callbacks, locked floors, current-floor arenas, batch save, inventory refresh, pause rejection, HUD-safe hide, bounded refresh and cleanup")
 end

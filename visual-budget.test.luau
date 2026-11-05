@@ -20,6 +20,8 @@ return function(source)
     assert(not e.managed[first],"Detached instances retire without a full-table sweep")
     for i=1,20000 do e.api.ProcessManaged()end
     assert(e.maintenanceTail<=1000 and e.maintenanceHead<=1001 and e.maintenanceNextTail<=1000,"Continuous effects must reuse bounded queue indexes over long runs")
+    e.maintenance[e.maintenanceHead]=nil
+    assert(pcall(e.api.ProcessManaged),"Weak maintenance slots may disappear after streamed effects are collected")
     e.os.clock=function()now+=.001;return now end
     assert(e.api.ProcessManaged()==1,"Slow devices obey the time budget and still make progress")
     print("PASS Visual maintenance: 1000 effects, bounded batches, fair progress, protection, removal, elapsed-time limit")

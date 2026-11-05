@@ -2,7 +2,11 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.60**. Saved settings can override fresh-install defaults.
+This guide describes **v2.0.0**. Saved settings can override fresh-install defaults.
+
+Version 2 reorganizes runtime assembly into `src/` and replaces enemy detection, frame scheduling, movement ownership, settings snapshots, and teardown. The game-specific feature modules and their regression coverage remain the compatibility layer for combat, credit, progression, trading, and safety. Existing loader URLs and account settings continue to work.
+
+The distributed entry is one standalone Luau file (Roblox's Lua). It uses the executor's Roblox/Lua capabilities only; Python, Node and MCP are development tools, not runtime dependencies.
 
 ## Contents
 
@@ -447,12 +451,20 @@ Potassium, Arceus X and other executors expose different capabilities. Compatibi
 | --- | --- |
 | [loader.luau](loader.luau) | Stable public loader |
 | [kill-aura.luau](kill-aura.luau) | Generated standalone entry; do not hand-edit |
-| [kill-aura.body.luau](kill-aura.body.luau) | Runtime body and bundle integration |
+| [src/main.luau](src/main.luau) | Runtime assembly and ordered source includes |
+| [src/](src/) | Bootstrap, settings/detection, presentation, movement, combat/lifecycle, scheduling, automation, utilities, UI and background adapters |
+| [kill-aura.body.luau](kill-aura.body.luau) | Generated runtime body; do not hand-edit |
 | `*.module.luau` | Feature/controller implementations |
 | `*.test.luau`, `*.test.lua` | Offline regressions and injected engine doubles |
 | [build-script.py](build-script.py) | Bundles modules and the pinned UI library |
 | [run-offline-tests.py](run-offline-tests.py) | Consistency, regression, encoding and compile checks |
 | [vendor/](vendor/) | Pinned WindUI, provenance and upstream license |
+
+Enemy detection uses one registry across movement, skills, credit, HUD and arena controllers. It retains shared combat observations, notices late health/HitLives without a negative-cache delay, and disconnects the old index on streaming-folder replacement. Named tasks have independent due times, error counters and backoff; missed intervals never produce catch-up request bursts. Movement ownership is recomputed from active safety/trade/travel/dodge/farm states instead of leaving an unbounded lease behind.
+
+Reload snapshots clone configuration fields rather than retaining the previous runtime's controller graph. Cleanup executes every registered operation even if one fails, with errors recorded in `CleanupErrors`. Diagnostics expose `EnemyRegistry.Count`, `EnemyRegistry.Revision`, `WorkScheduler.Tasks` and `MovementOwner`. These describe local script behavior; FPS and total client RAM also depend on scene, streaming, rendering, executor and device load.
+
+Memory checks cover a 20,000-effect burst, 30,000 queue add/remove cycles, 1,000 incomplete-enemy add/remove cycles with listener counts, 300 arena spawn/remove cycles, failed skill observations, failed UI teardown, and runtime reload cleanup. Visual work queues cap retained entries at 8,192 and immediately remove streamed-out objects; maintenance uses weak references. Arena records prune removed/dead models. Skill observers disconnect before reading potentially missing counters, and UI signals are independently disconnected even if window destruction fails. These are targeted retention tests, not proof of zero memory growth in Roblox or the executor over an unlimited session.
 
 Build and verify:
 

@@ -1,13 +1,25 @@
 """Bundle modules and package the standalone self-installing executor entry."""
 from pathlib import Path
 import argparse
+import re
 
 ROOT = Path(__file__).resolve().parent
 BODY = ROOT / "kill-aura.body.luau"
 ENTRY = ROOT / "kill-aura.luau"
+SOURCE = ROOT / "src/main.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "INSTANCE QUEUE": "instance-queue.module.luau",
+    "SETTINGS SNAPSHOT": "settings-snapshot.module.luau",
+    "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",
+    "UPRIGHT": "upright.module.luau",
+    "BOSS DODGE": "boss-dodge.module.luau",
+    "HIDE PLAYERS": "hide-players.module.luau",
+    "MOVEMENT OWNER": "movement-owner.module.luau",
+    "ENEMY REGISTRY": "enemy-registry.module.luau",
+    "WORK SCHEDULER": "work-scheduler.module.luau",
+    "RUNTIME SCOPE": "runtime-scope.module.luau",
     "CONTROLLER VIEW": "controller-view.module.luau",
     "WEAPON SKILLS": "weapon-skills.module.luau",
     "ANIMATION REMOVAL": "animation-removal.module.luau",
@@ -78,12 +90,24 @@ def package(body):
     return PREFIX + body + SUFFIX
 
 
+def expand_source(path, parents=()):
+    path = path.resolve()
+    source_root = (ROOT / "src").resolve()
+    assert path.is_relative_to(source_root), "Source include leaves src/"
+    assert path not in parents, "Cyclic source include"
+    source = path.read_text(encoding="utf-8")
+    return re.sub(r"(?m)^-- @include (.+)\n", lambda match: expand_source(
+        path.parent / match[1], (*parents, path)), source)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     original = BODY.read_text(encoding="utf-8")
-    body = original
+    body = expand_source(SOURCE)
+    markers = set(re.findall(r"(?m)^-- BEGIN BUNDLED (.+)$", body))
+    assert markers == set(MODULES) | {"WINDUI SOURCE"}, "Unknown or missing bundled module"
     for marker, name in MODULES.items():
         start, end = f"-- BEGIN BUNDLED {marker}\n", f"-- END BUNDLED {marker}\n"
         assert body.count(start) == 1 and body.count(end) == 1, marker

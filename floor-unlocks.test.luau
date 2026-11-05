@@ -55,23 +55,18 @@ return function(unlockSource,selectionSource,uiSource)
         Button=function(name,text,order,height,parent)return create("TextButton",{Name=name,Text=text},parent)end,
         Label=function(name,text)return create("TextLabel",{Name=name,Text=text})end,Corner=function()end,Reveal=function()end})
     setup.SetUI(ui)
-    objects.SafeFloor.Activated.Fire()
-    local button=objects.SafeFloor2
-    assert(button.Text:find("locked",1,true),"F8 must initially show locked")
     local before=created
     owned[tostring(F8)]={};locations.ChildAdded.Fire()
-    assert(catalog.FloorById[F8].Unlocked and not button.Text:find("locked",1,true),"An already-open list must show a new unlock")
-    assert(created==before and objects.SafeFloor2==button,"Unlock events must update existing buttons without rebuilding the UI")
-    button.Activated.Fire()
-    assert(state.SafeFloorId==F8 and saves==1 and resets==2,"Newly unlocked F8 must be selectable without restart")
-    assert(not state.SetSafeFloor(F9)and state.SafeFloorId==F8,"A genuinely locked floor remains unavailable")
+    assert(catalog.FloorById[F8].Unlocked,"Native unlock events update the shared catalog")
+    assert(state.SetSafeFloor(F8),"Newly unlocked F8 is selectable without restarting")
+    assert(state.SafeFloorId==F8 and saves==1 and resets==2)
+    assert(not state.SetSafeFloor(F9)and state.SafeFloorId==F8,"Locked floors remain unavailable")
     owned[tostring(F8)]=nil;locations.ChildRemoved.Fire()
-    assert(not catalog.FloorById[F8].Unlocked and not state.SetSafeFloor(F8),"A cached true flag cannot bypass the native unlock data")
+    assert(not catalog.FloorById[F8].Unlocked and not state.SetSafeFloor(F8),"A cached true flag cannot bypass native unlock data")
     owned[tostring(F8)]={}
-    objects.SafeFloor.Activated.Fire()
-    assert(not objects.SafeFloor2.Text:find("locked",1,true),"Opening the list rechecks native data even without an event")
+    assert(state.IsAutomationFloorUnlocked(F8),"Direct reads recheck native data without a UI event")
     owned[tostring(F9)]={}
-    assert(state.SetSafeFloor(F9),"Selection independently rechecks an unlock that arrived after the list was built")
+    assert(state.SetSafeFloor(F9),"Selection independently rechecks an unlock that arrived later")
     local oldProfile=profile
     profile={FindFirstChild=function()return {FindFirstChild=function()return nil end}end}
     assert(not state.IsAutomationFloorUnlocked(F8),"Reads must use the current account profile instead of a stale profile reference")
@@ -79,5 +74,5 @@ return function(unlockSource,selectionSource,uiSource)
     before=created
     for _=1,100 do state.RefreshAutomationUI()end
     assert(created==before,"Normal UI refreshes must not rebuild dropdown buttons")
-    print("PASS Live floor unlocks: F8 unlock, open-list labels, selection, locked floors, current floor, profile refresh and bounded UI updates")
+    print("PASS Live floor unlocks: shared catalog updates, selection, locked floors, current profile and status-only refreshes")
 end

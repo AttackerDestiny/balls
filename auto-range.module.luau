@@ -69,8 +69,8 @@ return function(ctx)
         end
         if limit~=value.Limit then value.Limit=limit; value.NextProbe=now+6 end
     end
-    function api.Update()
-        local now=clock()
+    function api.Update(now)
+        now=now or clock()
         if now<nextUpdate then return end
         nextUpdate=now+.5
         local data=ctx.PrimaryData and ctx.PrimaryData()

@@ -4,16 +4,14 @@ return function(ctx)
     local api={AnimationsHidden=0,EffectsHidden=0}
     local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
     local managed,tracks={},{}
-    local maintenance,maintenanceQueued={},setmetatable({}, {__mode="k"})
+    local maintenance,maintenanceQueued=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
     local maintenanceHead,maintenanceTail=1,0
-    local maintenanceNext,maintenanceNextTail={},0
+    local maintenanceNext,maintenanceNextTail=setmetatable({}, {__mode="v"}),0
     local ordinaryTracks=setmetatable({}, {__mode="k"})
     local connections={}
     local disposed=false
     local animator,played,nextCheck=nil,nil,0
-    local urgent,background={},{ }
-    local urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
-    local queued=setmetatable({}, {__mode="k"})
+    local pendingQueue=assert(ctx.Queue,"Bounded visual queue is required")
     local invisible=NumberSequence.new(1)
     local hiddenWeight=0.0001 -- A zero-weight track can stop before its damage markers.
     local gunUntil,gunOrigin=0,nil
@@ -106,6 +104,7 @@ return function(ctx)
     local function suppress(instance)
         if disposed or state.StopEverything then return end
         if managed[instance] or not effect(instance) then return end
+        if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
         local properties
         if instance:IsA("BasePart") then
             if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
@@ -163,29 +162,22 @@ return function(ctx)
         if math.abs(track.WeightTarget-hiddenWeight)>0.00001 or track.WeightCurrent>0.001 then track:AdjustWeight(hiddenWeight,0) end
     end
     local function enqueue(instance,priority)
-        if disposed or state.StopEverything or queued[instance] or managed[instance] then return end
+        if disposed or state.StopEverything or pendingQueue.Contains(instance)or managed[instance]then return end
         local name=instance.ClassName
         if not (instance:IsA("BasePart") or instance:IsA("Light") or name=="ParticleEmitter" or name=="Beam" or name=="Trail"
             or name=="Smoke" or name=="Fire" or name=="Sparkles" or name=="Texture" or name=="Sound" or name=="Decal" or name=="BillboardGui" or name=="SurfaceGui" or name=="Highlight") then return end
-        queued[instance]=true
-        if priority then urgentTail+=1; urgent[urgentTail]=instance
-        else backgroundTail+=1; background[backgroundTail]=instance end
+        pendingQueue.Push(instance,priority)
     end
     function api.ProcessPending()
         local deadline=os.clock()+.0006
         local count=0
         while count<64 and (count==0 or os.clock()<deadline) do
-            local instance
-            if urgentHead<=urgentTail then instance=urgent[urgentHead]; urgent[urgentHead]=nil; urgentHead+=1
-            elseif backgroundHead<=backgroundTail then instance=background[backgroundHead]; background[backgroundHead]=nil; backgroundHead+=1
-            else break end
-            queued[instance]=nil
+            local instance=pendingQueue.Pop()
+            if not instance then break end
             if instance.Parent then pcall(suppress,instance) end
             count+=1
         end
-        if urgentHead>urgentTail then table.clear(urgent); urgentHead,urgentTail=1,0 end
-        if backgroundHead>backgroundTail then table.clear(background); backgroundHead,backgroundTail=1,0 end
-        api.Pending=urgentTail-urgentHead+1+backgroundTail-backgroundHead+1
+        api.Pending=pendingQueue.Count
         state.VisualQueueSize=api.Pending
     end
     local immediateCount,immediateSince=0,0
@@ -223,6 +215,7 @@ return function(ctx)
     end
     connections[#connections+1]=workspace.DescendantAdded:Connect(added)
     connections[#connections+1]=workspace.DescendantRemoving:Connect(function(instance)
+        pendingQueue.Remove(instance)
         local record=managed[instance]
         if record then restore(instance,record); managed[instance]=nil end
     end)
@@ -239,8 +232,9 @@ return function(ctx)
         local count=0
         while count<available and (count==0 or os.clock()<deadline)do
             local instance=maintenance[maintenanceHead]
-            maintenance[maintenanceHead]=nil;maintenanceHead+=1;maintenanceQueued[instance]=nil
-            local record=managed[instance]
+            maintenance[maintenanceHead]=nil;maintenanceHead+=1
+            if instance then maintenanceQueued[instance]=nil end
+            local record=instance and managed[instance]
             if record then
                 pcall(function()
                     if not instance.Parent then managed[instance]=nil
@@ -311,9 +305,8 @@ return function(ctx)
         for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
         table.clear(managed); table.clear(tracks)
         table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
-        table.clear(urgent); table.clear(background); table.clear(queued)
+        pendingQueue.Destroy()
         table.clear(gunModels)
-        urgentHead,urgentTail,backgroundHead,backgroundTail=1,0,1,0
         api.Pending=0; state.VisualQueueSize=0
     end
     api.Update()

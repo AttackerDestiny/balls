@@ -398,8 +398,16 @@ return function(ctx)
     function api.Destroy()
         if disposed then return end
         disposed=true;api.Ready=false
-        ctx.Visibility(false)
-        window:Destroy()
+        local failures={}
+        local function cleanup(fn,...)
+            local ok,reason=pcall(fn,...)
+            if not ok then failures[#failures+1]=tostring(reason)end
+        end
+        cleanup(ctx.Visibility,false)
+        cleanup(function()window:Destroy()end)
+        if memory.Destroy then cleanup(memory.Destroy)end
+        if ctx.DestroyRoots then cleanup(ctx.DestroyRoots)end
+        if #failures>0 then s.UICleanupErrors=failures end
     end
     -- Restore values after all controls exist; initialization never runs actions.
     if ctx.Defer then

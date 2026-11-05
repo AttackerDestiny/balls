@@ -1,0 +1,11 @@
+-- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
+-- @include bootstrap.luau
+-- @include state-and-detection.luau
+-- @include presentation-and-performance.luau
+-- @include movement.luau
+-- @include combat-and-lifecycle.luau
+-- @include coordinator.luau
+-- @include automation.luau
+-- @include utilities.luau
+-- @include modern-ui.luau
+-- @include background.luau

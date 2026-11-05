@@ -46,6 +46,12 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("INSTANCE QUEUE", "instance-queue.module.luau"),
+        ("SETTINGS SNAPSHOT", "settings-snapshot.module.luau"),
+        ("MOVEMENT OWNER", "movement-owner.module.luau"),
+        ("ENEMY REGISTRY", "enemy-registry.module.luau"),
+        ("WORK SCHEDULER", "work-scheduler.module.luau"),
+        ("RUNTIME SCOPE", "runtime-scope.module.luau"),
         ("CONTROLLER VIEW", "controller-view.module.luau"),
         ("WEAPON SKILLS", "weapon-skills.module.luau"),
         ("ANIMATION REMOVAL", "animation-removal.module.luau"),
@@ -113,13 +119,13 @@ def main():
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    for name in ("enemy-registry", "work-scheduler", "runtime-scope", "movement-owner", "settings-snapshot", "instance-queue"):
+        fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("mobile-regression.test.luau")) + "))()(sources)\n"
     replacement_start=script.index("if previousRuntime and previousRuntime.Destroy then")
     replacement=script[replacement_start:script.index("if env.SB2FarmRecoveryUntil",replacement_start)]
     fixture += "assert(loadstring(" + quote(read("replacement-failure.test.luau")) + "))()(" + quote(replacement) + ")\n"
-    fallback_start=script.index("    if not ok and state.Running and env.SB2LoadToken==loadToken")
-    fallback=script[fallback_start:script.index("-- Independent status overlay",fallback_start)]
-    fallback=fallback[:fallback.rfind("end")]
+    fallback=script.split("    -- BEGIN MODERN UI FAILURE\n",1)[1].split("    -- END MODERN UI FAILURE",1)[0]
     fixture += "assert(loadstring(" + quote(read("cancelled-ui-fallback.test.luau")) + "))()(" + quote(fallback) + ")\n"
     visibility_start=script.index("function state.SetUIVisible(visible)")
     visibility=script[visibility_start:script.index("bind(showUI.Activated",visibility_start)]
@@ -142,6 +148,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + ")\n"
     data_start = script.index("local function getMobData(mob)")
     data = script[data_start:script.index("function state.ReadOwnDamage", data_start)]
+    data = "local enemyRegistry=(function()\n" + read("enemy-registry.module.luau") + "\nend)()({Now=os.clock})\n" + data
     farm_start = script.index("    if now>=nextAcquisition and")
     farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
     # The arena fixture needs validMob returned; the selection fixture embeds its definition.
@@ -159,6 +166,7 @@ def main():
     activity = script[activity_start:script.index("local function pauseHold", activity_start)]
     fixture += "assert(loadstring(" + quote(read("combat-activity.test.luau")) + "))()(" + quote(activity) + ")\n"
     fixture += "assert(loadstring(" + quote(read("skill-burst-timing.test.luau")) + "))()(" + quote(read("skill-burst.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("skill-burst-observer.test.luau")) + "))()(" + quote(read("skill-burst.module.luau")) + ")\n"
     skill_start = script.index("local function updateSkillAura()")
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"

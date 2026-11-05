@@ -195,6 +195,21 @@ return function(sources)
         assert(state.MultiSpot and not state.Running)
         assert(ctx.env.SB2KillAura==nil)
     end)
+    test("runtime cleanup continues after a controller fails",function()
+        local state={Running=true,SaveNow=function()return true end}
+        local root=instance("ScreenGui")
+        local disconnected,indexClosed=false,false
+        local noop=function()end
+        local ctx={state=state,configReady=true,env={SB2KillAura=state},gui=root,
+            connections={{Disconnect=function()disconnected=true end}},
+            waveDodge={Destroy=noop},healthHUD={Destroy=function()error("Broken HUD")end},
+            normalScheduler={Destroy=noop},stopSword=noop,stopMovement=noop,runtimeOwner={Release=noop}}
+        state.EnemyRegistry={Destroy=function()indexClosed=true end}
+        load(sources.Destroy.."\nreturn true",ctx)
+        state.Destroy(true);state.Destroy(true)
+        assert(indexClosed and disconnected and root.Dead and ctx.env.SB2KillAura==nil,"A HUD error cannot strand the index, root or input connections")
+        assert(#state.CleanupErrors==1 and state.CleanupErrors[1].Name=="HealthHUD")
+    end)
     local function ownerFixture()
         local f={Parent=instance("PlayerGui"),Time=10,Pulse=signal(),Created=0}
         f.Factory=load(sources.Owner)
