@@ -8,6 +8,7 @@ ENTRY = ROOT / "kill-aura.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "CONTROLLER VIEW": "controller-view.module.luau",
     "WEAPON SKILLS": "weapon-skills.module.luau",
     "ANIMATION REMOVAL": "animation-removal.module.luau",
     "UI MEMORY": "ui-memory.module.luau",
@@ -94,6 +95,16 @@ def main():
     before, rest = body.split(start, 1)
     _, after = rest.split(end, 1)
     library = (ROOT / "vendor/WindUI-1.6.66.lua").read_text(encoding="utf-8")
+    # Use WindUI's own icon adapter with bundled Lucide data. The upstream
+    # desktop path otherwise downloads Main-v2 and six icon packs on every load.
+    icon_data = (ROOT / "vendor/Lucide-icons.lua").read_text(encoding="utf-8")
+    icon_license = (ROOT / "vendor/Icons-LICENSE.txt").read_text(encoding="utf-8")
+    icon_remote = 'local d=b(game:GetService"ReplicatedStorage":WaitForChild("GetIcons",99999):InvokeServer())'
+    assert library.count(icon_remote) == 1
+    library = library.replace(icon_remote, 'local d={Icons={lucide=(function()\n--[[\n' + icon_license + '\n]]\n' + icon_data + '\nend)()}}')
+    remote_start = library.index('local m\nif d:IsStudio()or not writefile then')
+    remote_end = library.index('m.SetIconsType"lucide"', remote_start)
+    library = library[:remote_start] + "local m=a.load'b'\n\n" + library[remote_end:]
     license_text = (ROOT / "vendor/WindUI-LICENSE.txt").read_text(encoding="utf-8")
     library = "--[[\n" + license_text + "\n]]\n" + library
     library = "\n".join(line.rstrip() for line in library.splitlines()) + "\n"

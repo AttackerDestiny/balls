@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("CONTROLLER VIEW", "controller-view.module.luau"),
         ("WEAPON SKILLS", "weapon-skills.module.luau"),
         ("ANIMATION REMOVAL", "animation-removal.module.luau"),
         ("RUNTIME RECOVERY", "runtime-recovery.module.luau"),
@@ -121,8 +122,14 @@ def main():
     fallback=fallback[:fallback.rfind("end")]
     fixture += "assert(loadstring(" + quote(read("cancelled-ui-fallback.test.luau")) + "))()(" + quote(fallback) + ")\n"
     visibility_start=script.index("function state.SetUIVisible(visible)")
-    visibility=script[visibility_start:script.index("bind(panel:GetPropertyChangedSignal",visibility_start)]
+    visibility=script[visibility_start:script.index("bind(showUI.Activated",visibility_start)]
     fixture += "assert(loadstring(" + quote(read("modern-ui-only.test.luau")) + "))()(" + quote(visibility) + ")\n"
+    views_start=script.index("local controllerViews=(function()")
+    views_binding=script[views_start:script.index("local function create(className",views_start)]
+    fixture += "assert(loadstring(" + quote(read("controller-view.test.luau")) + "))()(" + quote(read("controller-view.module.luau")) + "," + quote(views_binding) + ")\n"
+    assert 'Name="Panel"' not in script and 'legacyVisibility' not in script
+    assert 'local m=a.load\'b\'' in script
+    assert 'WaitForChild("GetIcons",99999)' not in script
     fixture += "local result=assert(loadstring(" + quote(read("continuous-swing.test.luau")) + "))()(" + quote(swing) + ")\n"
     fixture += 'assert(result.Passed)\nprint("PASS Normal swing cadence")\n'
     fixed_start = script.index("function state.ResolveAutoOffset(mob)")

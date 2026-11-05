@@ -15,8 +15,8 @@ return function(ctx)
     api.Memory=memory
     local function yieldBuild()
         if disposed or s.Running==false then error("UI initialization cancelled")end
-        if ctx.Yield then ctx.Yield()end
-        if ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
+        if ctx.Yield then ctx.Yield()
+        elseif ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
         if disposed or s.Running==false then error("UI initialization cancelled")end
     end
     local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
@@ -408,11 +408,12 @@ return function(ctx)
             local ok,reason=pcall(function()
                 buildTabs(2,#tabs)
                 buildOtherTabs()
+                s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil
                 if window.CurrentTab==1 and api.Tabs[restoreTab]then api.Tabs[restoreTab]:Select()end
             end)
             if not ok and not disposed then report(reason)end
         end)
-    else buildOtherTabs()end
+    else buildOtherTabs();s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil end
     api.Ready=true
     local activeTab=api.Tabs[s.UI.ActiveTab or "Main"]or api.Tabs.Main
     activeTab:Select()

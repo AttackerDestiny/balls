@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.59**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.60**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -65,7 +65,9 @@ Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Ut
 | Enemy health HUD | Theme-matched bars for attacked enemies; remains visible when the main window is hidden |
 | Multi Spot HUD | Separate centered, draggable status panel while Multi Spot is enabled; independent of main-window visibility |
 
-Main controls load first, with remaining tabs populated in background batches. Only the modern WindUI window is displayed. If initialization fails, the error is recorded and the feather button reloads the script; the old compatibility panel stays permanently hidden. UI initialization failure does not intentionally stop farming or Safe Mode.
+Main controls load first, with remaining tabs populated in background batches. The legacy panel, navigation, drag listeners and fallback display path are removed. Controller status adapters use plain tables and allocate no hidden GUI instances or input connections. WindUI uses bundled Lucide icon data instead of downloading its icon loader and six packs during startup, and construction uses one yield budget. If initialization fails, the error is recorded and the feather button reloads the modern script. UI initialization failure does not intentionally stop farming or Safe Mode.
+
+Diagnostics record `WindUIMainReadySeconds` and `WindUIReadySeconds` for Main controls and the remaining tabs. These measure UI construction after its library initialization begins; native game loading and the public loader's download are separate.
 
 Runtime replacement tolerates errors from an older build's cleanup, records the error, and retires its GUI before continuing. Enemy-health cleanup handles partially constructed rows so an interrupted HUD build cannot stop the replacement from starting farming and Safe Mode.
 
