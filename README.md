@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.58**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.59**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -65,9 +65,9 @@ Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Ut
 | Enemy health HUD | Theme-matched bars for attacked enemies; remains visible when the main window is hidden |
 | Multi Spot HUD | Separate centered, draggable status panel while Multi Spot is enabled; independent of main-window visibility |
 
-Main controls load first, with remaining tabs populated in background batches. If WindUI initialization fails, the older compatibility window appears and the error is recorded. This alternate layout is a fallback, not another script version.
+Main controls load first, with remaining tabs populated in background batches. Only the modern WindUI window is displayed. If initialization fails, the error is recorded and the feather button reloads the script; the old compatibility panel stays permanently hidden. UI initialization failure does not intentionally stop farming or Safe Mode.
 
-Cancelled or superseded UI initialization does not open a compatibility window. Runtime replacement tolerates errors from an older build's cleanup, records the error, and retires its GUI before continuing. Enemy-health cleanup handles partially constructed rows so an interrupted HUD build cannot stop the replacement from starting farming and Safe Mode.
+Runtime replacement tolerates errors from an older build's cleanup, records the error, and retires its GUI before continuing. Enemy-health cleanup handles partially constructed rows so an interrupted HUD build cannot stop the replacement from starting farming and Safe Mode.
 
 Show/hide preserves the window's size and skips the full-window resize animation. Visible dropdown refreshes process one control per update instead of rebuilding an entire tab on the opening frame. Reopening an unchanged tab does not force a new refresh.
 

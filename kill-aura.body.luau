@@ -14,8 +14,8 @@ while not player do task.wait(.1);player=Players.LocalPlayer end
 local env = getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=previousRuntime and previousRuntime.UserId==player.UserId and previousRuntime or nil
-local BUILD="2026-11-04.cancelled-runtime-cleanup-v1.12.58"
-local VERSION="1.12.58"
+local BUILD="2026-11-04.modern-ui-only-v1.12.59"
+local VERSION="1.12.59"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -1351,10 +1351,12 @@ local showUI=create("TextButton",{Name="ShowUI",Text="🪶",Visible=false,Font=E
 corner(showUI,22)
 create("UIStroke",{Color=Color3.fromRGB(255,255,255),Transparency=.8,Thickness=1},showUI)
 function state.SetUIVisible(visible)
-    panel.Visible=visible==true
-    showUI.Visible=not panel.Visible
-    state.UIHidden=not panel.Visible
+    panel.Visible=false
+    showUI.Visible=state.Running==true
+    state.UIHidden=true
+    if visible and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
+bind(panel:GetPropertyChangedSignal("Visible"),function()if panel.Visible then panel.Visible=false end end)
 bind(hideUI.Activated,function()state.SetUIVisible(false)end)
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
 local content=create("ScrollingFrame",{Name="Content",Position=UDim2.fromOffset(0,178),Size=UDim2.new(1,0,1,-202),
@@ -26641,8 +26643,8 @@ end
         for _,child in ipairs(parent:GetChildren())do
             if not before[child]and child:IsA("ScreenGui")and ownedNames[child.Name]then child:Destroy()end
         end
-        panel.Visible=true;showUI.Visible=false;state.UIHidden=false
-        warn("[SB2 WindUI] Using the compatibility window: "..state.WindUIError)
+        panel.Visible=false;showUI.Visible=true;state.UIHidden=true
+        warn("[SB2 WindUI] Modern UI unavailable; use the feather button to reload: "..state.WindUIError)
     end
 end
 

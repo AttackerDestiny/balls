@@ -16,6 +16,6 @@ return function(source)
     assert(not run(true,false,true),"A superseded load cannot resurrect old UI")
     assert(not run(true,true,false),"A retired GUI owner cannot display fallback")
     local visible,warned=run(true,true,true)
-    assert(visible and warned,"A current live initialization failure retains compatibility UI")
-    print("PASS Cancelled UI initialization cannot resurrect stopped or superseded compatibility windows")
+    assert(not visible and warned,"A current live initialization failure must never display compatibility UI")
+    print("PASS Modern UI only: cancelled, superseded and failed initialization never display the legacy panel")
 end

@@ -1,7 +1,9 @@
 -- Native-style WindUI doubles deliberately replay asynchronous refresh callbacks.
 -- No game, remote, input, block, trade, dismantle or teleport is used.
 return function(source)
-    local make=assert(loadstring(source))()
+    local chunk=assert(loadstring(source))
+    setfenv(chunk,setmetatable({task={wait=function()end}},{__index=getfenv()}))
+    local make=chunk()
     local queue,calls={},{}
     local frame={Size="final",Background={},Main={}}
     local window={CurrentTab=1,Closed=false,Size="final",UIElements={Main=frame}}

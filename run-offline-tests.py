@@ -120,6 +120,9 @@ def main():
     fallback=script[fallback_start:script.index("-- Independent status overlay",fallback_start)]
     fallback=fallback[:fallback.rfind("end")]
     fixture += "assert(loadstring(" + quote(read("cancelled-ui-fallback.test.luau")) + "))()(" + quote(fallback) + ")\n"
+    visibility_start=script.index("function state.SetUIVisible(visible)")
+    visibility=script[visibility_start:script.index("bind(panel:GetPropertyChangedSignal",visibility_start)]
+    fixture += "assert(loadstring(" + quote(read("modern-ui-only.test.luau")) + "))()(" + quote(visibility) + ")\n"
     fixture += "local result=assert(loadstring(" + quote(read("continuous-swing.test.luau")) + "))()(" + quote(swing) + ")\n"
     fixture += 'assert(result.Passed)\nprint("PASS Normal swing cadence")\n'
     fixed_start = script.index("function state.ResolveAutoOffset(mob)")
