@@ -12,6 +12,7 @@ SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURC
 MODULES = {
     "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "PAD SLOT": "pad-slot.module.luau",
+    "SELECTED FARM SPOTS": "selected-farm-spots.module.luau",
     "INSTANCE QUEUE": "instance-queue.module.luau",
     "SETTINGS SNAPSHOT": "settings-snapshot.module.luau",
     "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",

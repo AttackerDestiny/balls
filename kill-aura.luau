@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.friend-pad-spacing-v2.0.6"
-local VERSION="2.0.6"
+local BUILD="2026-11-05.selected-farm-spots-v2.0.7"
+local VERSION="2.0.7"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2674,6 +2674,36 @@ function state.SetBossOnly(on)
     nextAcquisition=0
     requestSave()
 end
+local selectedFarmSpot=(function()
+-- BEGIN BUNDLED SELECTED FARM SPOTS
+-- Match bosses by encounter identity, and arena adds/custom spots by proximity.
+return function(state,name,position,rank,placeId)
+    if not state.MultiSpot or state.AccountProgression then return true end
+    local catalog=state.AutomationCatalog
+    if not catalog then return false end
+    for id,on in pairs(state.MultiSpotSelected or {})do
+        local spot=on and catalog.SpotById[id]
+        if spot and spot.PlaceId==placeId then
+            local named=spot.EncounterNames
+            if named and rank<=2 then
+                if named[name]then return true end
+                for expected in pairs(named)do if expected:lower()==name:lower()then return true end end
+            elseif position and spot.Position then
+                local dx,dy,dz=position.X-spot.Position.X,position.Y-spot.Position.Y,position.Z-spot.Position.Z
+                if dx*dx+dy*dy+dz*dz<=220^2 then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- END BUNDLED SELECTED FARM SPOTS
+end)()
+function state.IsSelectedFarmMob(mob,data)
+    if not state.MultiSpot or state.AccountProgression then return true end
+    local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+    return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
+end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     if not mob or mob.Parent ~= mobs then return nil end
@@ -2681,6 +2711,7 @@ local function validMob(mob, mobs)
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
         or mob~=state.ProgressionBossMob)then return nil end
     local data = getMobData(mob)
+    if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
     if state.MultiSpotAnchor and data and not (state.AutoFarm and targetPriority.Rank(mob)<=2) and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
     if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
     return nil
@@ -2690,6 +2721,7 @@ function state.IsFarmEnemyAlive()
     local mob=state.FarmTargetLock or state.FollowTarget
     if not mob or mob.Parent~=refreshMobIndex()then return false end
     local data=getMobData(mob)
+    if state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return false end
     return not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))
 end
 -- Share one paced, position-independent boss choice across movement and arena rotation.
@@ -2716,7 +2748,8 @@ function state.GetFarmPriorityTarget(now)
     end
     -- A temporary invulnerability/streaming gap is not a kill and must not
     -- downgrade an already observed main boss to a mini-boss or normal mob.
-    if cached and cached.Parent==mobs and targetPriority.Rank(cached)<=2 then
+    if cached and cached.Parent==mobs and targetPriority.Rank(cached)<=2
+        and (not state.MultiSpot or state.IsSelectedFarmMob(cached))then
         local data=getMobData(cached)
         if (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)))
             and (not best or targetPriority.Rank(cached)<targetPriority.Rank(best))then best=cached end
@@ -5190,6 +5223,7 @@ local function updateMovement(now)
     if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
         nextAcquisition=now+0.15
         local locked=state.FarmTargetLock
+        if locked and state.MultiSpot and not state.IsSelectedFarmMob(locked)then locked=nil end
         if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
         if locked and locked.Parent==mobs then
             local data=getMobData(locked)

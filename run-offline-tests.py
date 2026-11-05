@@ -69,6 +69,7 @@ def main():
         ("AUTO CRAFT", "auto-craft.module.luau"),
         ("ATHEON UNLOCK", "atheon-unlock.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
+        ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
         ("INVENTORY VIEW", "inventory-view.module.luau"),
         ("PLAYER TOOLS", "player-tools.module.luau"),
         ("MULTI SPOT HUD", "multi-spot-hud.module.luau"),
@@ -154,12 +155,13 @@ def main():
     farm_start = script.index("    if now>=nextAcquisition and")
     farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
     # The arena fixture needs validMob returned; the selection fixture embeds its definition.
-    valid_definition = valid.removesuffix("\nreturn validMob")
+    valid_definition = script[script.index("local selectedFarmSpot=(function()"):valid_start] + valid.removesuffix("\nreturn validMob")
     fixture += "assert(loadstring(" + quote(read("farm-sync.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("target-priority.module.luau"), data, valid_definition, farm_selection, read("credit-check.module.luau"))) + ")\n"
     fixture += "assert(loadstring(" + quote(read("map-deletion.test.luau")) + "))()(" + quote(read("map-deletion.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("animation-removal.test.luau")) + "))()(" + quote(read("animation-removal.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ui-memory.test.luau")) + "))()(" + quote(read("ui-memory.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("runtime-recovery.test.luau")) + "))()(" + quote(read("runtime-recovery.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("selected-farm-spots.test.luau")) + "))()(" + quote(read("selected-farm-spots.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("pad-slot.test.luau")) + "))()(" + quote(read("pad-slot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-unlock.test.luau")) + "))()(" + quote(read("atheon-unlock.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-dodge.test.luau")) + "))()(" + quote(read("atheon-dodge.module.luau")) + ")\n"

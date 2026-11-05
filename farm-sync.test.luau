@@ -31,7 +31,7 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         local source=dataSource.."\n"..validSource.."\nreturn {GetData=getMobData,Select=function(origin,previous,now)\n"
             .."local root={Position=origin}\nlocal mobs=folder\nlocal targetRoot=previous and validMob(previous,mobs)\n"
             .."local nextAcquisition=0\nstate.FollowTarget=previous\n"..selectionSource.."\nreturn state.FollowTarget\nend}"
-        local result=load(source,{state=state,targetPriority=api,folder=folder,trackedMobs=tracked,refreshMobIndex=function()return folder end,
+        local result=load(source,{state=state,game={PlaceId=1},targetPriority=api,folder=folder,trackedMobs=tracked,refreshMobIndex=function()return folder end,
             mobCache=setmetatable({}, {__mode="k"}),os={clock=function()return 0 end}})
         result.State=state;result.Priority=api
         function result.Add(mob)tracked[mob]=true end
@@ -102,6 +102,9 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
     for i=1,3 do
         local a=account({globalMini,mainB,localAdd,mainA})
         a.State.MultiSpot=true;a.State.MultiSpotAnchor=vec(i*1000);a.State.MultiSpotEncounter={}
+        a.State.MultiSpotSelected={All=true}
+        a.State.AutomationCatalog={SpotById={All={PlaceId=1,EncounterNames={
+            [mainA.Name]=true,[mainB.Name]=true,[globalMini.Name]=true}}}}
         a.State.FarmLockArena=a.State.MultiSpotAnchor
         a.State.FarmTargetLock=i==1 and mainB or globalMini
         local current=a.State.FarmTargetLock
@@ -117,6 +120,14 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
     for _,a in ipairs(synchronized)do assert(a.Select(vec(0),mainB,3)==globalMini,"After main bosses, all accounts choose the same out-of-arena mini-boss")end
     globalMini.Children.Entity.Children.Health.Value=0
     for _,a in ipairs(synchronized)do assert(a.Select(vec(0),globalMini,4)==nil,"Regular mobs outside the selected arena remain excluded")end
+    mainA.Children.Entity.Children.Health.Value=100;globalMini.Children.Entity.Children.Health.Value=100
+    local restricted=account({mainA,globalMini})
+    restricted.State.MultiSpot=true;restricted.State.MultiSpotSelected={Mini=true}
+    restricted.State.AutomationCatalog={SpotById={Mini={PlaceId=1,EncounterNames={[globalMini.Name]=true}}}}
+    restricted.State.FarmTargetLock=mainA
+    assert(restricted.Select(vec(0),mainA,5)==globalMini,"Deselected living main boss must release its lock and never override a selected mini")
+    restricted.State.MultiSpotSelected={}
+    assert(restricted.Select(vec(0),globalMini,6)==nil,"No selections means no global target fallback")
     local creditFactory=assert(loadstring(creditSource))()
     mainA.Children.Entity.Children.Health.Value=100;mainB.Children.Entity.Children.Health.Value=100
     for i=1,3 do
