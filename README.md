@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v1.12.56**. Saved settings can override fresh-install defaults.
+This guide describes **v1.12.57**. Saved settings can override fresh-install defaults.
 
 ## Contents
 
@@ -192,6 +192,8 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 **Transparent map** runs by default; its former toggle is removed. Characters, mobs, and identified hazards/effects are excluded from ordinary map treatment. Extended camera zoom is also applied while the runtime owns it.
 
 ## Auto Skill
+
+Skill Aura re-resolves usable skills after weapon changes. **Summon Pistol takes automatic priority whenever it is unlocked and compatible**, ahead of saved class selections and weapon defaults. Unlocks are rechecked every two seconds without a restart. When Pistol is unavailable, the resolver uses the saved compatible skill or the weapon's default. Automatic Pistol selection preserves saved class preferences for that fallback.
 
 - **Skill Aura + Skill:** selects an offensive skill compatible with the current weapon and uses its supported native activation route. Default OFF.
 - **Misc Skill + Skill:** selects an available support skill. Default OFF.

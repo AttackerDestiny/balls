@@ -46,6 +46,7 @@ def main():
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
     for marker, name in [
+        ("WEAPON SKILLS", "weapon-skills.module.luau"),
         ("ANIMATION REMOVAL", "animation-removal.module.luau"),
         ("RUNTIME RECOVERY", "runtime-recovery.module.luau"),
         ("MAP DELETION", "map-deletion.module.luau"),
@@ -135,6 +136,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("runtime-recovery.test.luau")) + "))()(" + quote(read("runtime-recovery.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-dodge.test.luau")) + "))()(" + quote(read("atheon-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ground-follow.test.luau")) + "))()(" + quote(read("ground-follow.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("weapon-skills.test.luau")) + "))()(" + quote(read("weapon-skills.module.luau")) + ")\n"
     fixture += "local misc=assert(loadstring(" + quote(read("misc-skill.test.luau")) + "))()(" + quote(read("misc-skill.module.luau")) + ")\nassert(misc.Passed)\nprint('PASS Combat-only Cursed Enhancement and support skills')\n"
     activity_start = script.index("function state.IsAttackingEnemy()")
     activity = script[activity_start:script.index("local function pauseHold", activity_start)]

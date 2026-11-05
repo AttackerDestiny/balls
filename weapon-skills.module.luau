@@ -54,7 +54,7 @@ return function(ctx)
             if skill.Allowed then allowed[skill.Name]=skill; api.Skills[#api.Skills+1]=skill.Name end
         end
         table.sort(api.Skills)
-        local selected=preferred[api.Style]
+        local selected=allowed["Summon Pistol"]and "Summon Pistol"or preferred[api.Style]
         if not allowed[selected] then
             selected=(previousStyle=="" or previousStyle==api.Style) and allowed[state.SelectedSkill] and state.SelectedSkill or nil
         end
@@ -63,7 +63,7 @@ return function(ctx)
         state.SelectedSkill=selected or ""
         state.SkillWeaponStyle=api.Style
         api.Ready=true; dirty=false; nextRecheck=now+2
-        if selected and previousStyle=="" then preferred[api.Style]=selected end
+        if selected and previousStyle==""and not allowed["Summon Pistol"]then preferred[api.Style]=selected end
         if ctx.Changed then ctx.Changed(state.SelectedSkill,api.Skills) end
     end
     return api
