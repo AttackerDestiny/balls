@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.hidden-block-dialog-v2.0.8"
-local VERSION="2.0.8"
+local BUILD="2026-11-05.safe-immediate-rejoin-v2.0.9"
+local VERSION="2.0.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP

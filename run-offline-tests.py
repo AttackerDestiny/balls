@@ -261,9 +261,7 @@ def main():
     plan_start=script.index("    local function plan()")
     trade_plan=script[plan_start:script.index("    local nativeTrade=",plan_start)]
     fixture += "assert(loadstring(" + quote(read("auto-trade-plan.test.luau")) + "))()(" + quote(trade_plan) + "," + quote(read("auto-trade.module.luau")) + ")\n"
-    away_start=script.index("function state.EscapeSafeRejoin()")
-    away=script[away_start:script.index("function state.ReleaseSafePanic()",away_start)]
-    fixture += "assert(loadstring(" + quote(read("safe-rejoin-away.test.luau")) + "))()(" + quote(away) + ")\n"
+    assert "EscapeSafeRejoin" not in script and "escapeAfterRejoin" not in adapter
     helper_start=adapter.index("    local function clearRejoinAway()")
     away_helpers=adapter[helper_start:adapter.index("    local function fail(",helper_start)]
     hop_start=adapter.index("        Hop=function()")

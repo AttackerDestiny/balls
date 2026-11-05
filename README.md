@@ -96,8 +96,8 @@ At startup, the floor runtime makes a one-time placement at the current characte
 - Detects unlisted arrivals and pauses ordinary farming/movement during protection.
 - Uses native block confirmation before requesting another server.
 - Same-floor rejoining uses the place ID without a teleport-pad detour. Native floor changes still use their required pad staging.
-- After dispatching the rejoin, moves the waiting character 10,000 studs horizontally away at the same height. This changes the waiting position, not Roblox's loading time.
-- If an outsider remains and the search has not rejoined after eight seconds, the fallback confirms blocking, prepares recovery, then kicks and attempts rejoining. It does not intentionally kick through this fallback without confirmed blocking.
+- Startup still places the character 20 studs below ground once. Same-floor searches and outsider arrivals then block and dispatch rejoin from the current position, without pad staging or the old 10,000-stud escape.
+- After a confirmed-block rejoin request, the fallback checks on the next scheduler turn. If Roblox has not reported teleport starting, it re-verifies blocking and queued recovery before kicking the local account and retrying rejoin. The old eight-second wait is removed. Native teleport-start events cancel the fallback; retries remain bounded and use elapsed time rather than frame counts.
 - Uses bounded transient retries, **12-hop / 15-minute** search limits, and bounded same-server return recovery.
 - Continues monitoring after reaching a protected server. Status exposes failed/unverified operations.
 

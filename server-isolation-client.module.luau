@@ -278,11 +278,6 @@ end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
     end
-    local function escapeAfterRejoin()
-        if not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
-            if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
-        end
-    end
     local function fail(message)
         clearRejoinAway()
         state.AutomationTeleporting=false
@@ -324,6 +319,7 @@ end
         if not ok then fail(message) end
         return ok,state.LastFloorTravelError
     end
+    local kickFallback
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,
@@ -347,15 +343,13 @@ end
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
             state.SafeRejoinRequested=true
-            local dispatch={};state.SafeRejoinDispatch=dispatch
-            -- Defer runs after the native call is entered (or returns), so a
-            -- yielding Teleport call cannot hold the character at spawn.
-            task.defer(function()
-                if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end
-            end)
+            state.ServerTeleportStarted=false
+            local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
+            -- Arm before a potentially yielding native call; the fallback yields
+            -- once so this request and OnTeleport can run before any kick.
+            if kickFallback and ticket then kickFallback.Requested(ticket.LastBlockedUserId)end
             local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not sent then clearRejoinAway();error(message)end
-            escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
@@ -597,7 +591,11 @@ end
         task.defer(function()workerIdentity();if state.Running then safe.Update();refresh() end end)
     end)
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,message)
-        if who==player then state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name) end
+        if who==player then
+            local safeRejoin=state.SafeRejoinRequested
+            state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name)
+            if safeRejoin and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     local function fallbackTicket()
         local ticket=api.Ticket
@@ -612,12 +610,12 @@ end
         end
         return ticket
     end
-    local kickFallback
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
             Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,
             Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Started=function()return state.ServerTeleportStarted==true end,
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true
                 api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
@@ -629,7 +627,7 @@ end
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
                 assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
-                ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
+                ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId
                 save(ticket)
                 state.QueueAutomation()
@@ -644,11 +642,14 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
-        elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
+        elseif stage==Enum.TeleportState.Failed then
+            local safeRejoin=state.SafeRejoinRequested
+            clearRejoinAway();state.AutomationTeleporting=false
+            if safeRejoin and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()

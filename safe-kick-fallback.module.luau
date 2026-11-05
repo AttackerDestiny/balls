@@ -1,40 +1,43 @@
--- Eight seconds with a present outsider in this job triggers one confirmed-block kick.
+-- After a confirmed-block rejoin request, allow one scheduler turn for Started.
 return function(ctx)
     local api={Armed=false,Attempts=0}
-    local seen,busy,retryAt,failures={},false,0,0
+    local pendingId,busy,retryAt,failures=nil,false,0,0
     local generation=0
-    function api.Reset()generation=generation+1;seen={};retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
+    function api.Reset()generation=generation+1;pendingId=nil;retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
     local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
-    function api.MarkStarted()if api.Armed and api.Attempts>0 then api.Started=true end end
+    function api.MarkStarted()api.Started=true end
+    function api.Requested(userId)
+        if busy or api.Armed then return end
+        pendingId=userId;api.Started=false;api.Update(ctx.Now())
+    end
+    function api.TeleportFailed()
+        if pendingId and not api.Armed then api.Started=false;api.Update(ctx.Now())end
+    end
     function api.Update(now)
         if api.Armed then return end
-        if not enabled()then seen={};return end
-        local present,target,oldest={}
+        if not enabled()or api.Started or not pendingId then return end
+        local target
         for _,person in ipairs(ctx.Players())do
-            if not ctx.Allowed(person)then
-                present[person.UserId]=true
-                seen[person.UserId]=seen[person.UserId]or now
-                if not oldest or seen[person.UserId]<oldest then target,oldest=person,seen[person.UserId]end
-            end
+            if person.UserId==pendingId and not ctx.Allowed(person)then target=person;break end
         end
-        for id in pairs(seen)do if not present[id]then seen[id]=nil end end
-        if not target then failures=0;retryAt=0;return end
-        if busy or failures>=3 or now<retryAt or now-oldest<8 then return end
+        if not target then pendingId=nil;failures=0;retryAt=0;return end
+        if busy or failures>=3 or now<retryAt then return end
         busy=true
         local token=generation
         local function active()return token==generation and enabled()and not ctx.Allowed(target)and ctx.Present(target)end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
-                if not active()then return end
+                ctx.Sleep(0) -- wall-clock/task scheduling, never eight seconds or a frame count.
+                if not active()or api.Started or (ctx.Started and ctx.Started())then return end
                 if ctx.CheckLimits then ctx.CheckLimits()end
                 ctx.Pause()
                 if not active()then return end
                 assert(ctx.Block(target,active)==true,"Native block was not confirmed · no kick")
                 if not active()then return end
                 ctx.Prepare(target)
-                if not active()then return end
+                if not active()or api.Started or (ctx.Started and ctx.Started())then return end
                 api.Armed=true
-                ctx.Status("Outsider still present after 8s · blocked · kicking and rejoining")
+                ctx.Status("Blocked · rejoin not started · kicking and rejoining")
                 -- Arm recovery before Kick: it may throw or return after disconnect.
                 ctx.Spawn(function()
                     ctx.Sleep(.2)

@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.hidden-block-dialog-v2.0.8"
-local VERSION="2.0.8"
+local BUILD="2026-11-05.safe-immediate-rejoin-v2.0.9"
+local VERSION="2.0.9"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -7394,7 +7394,7 @@ function state.PanicToSpawn(inPlace)
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health<=0 then return false end
-    local position=state.AutomationTeleporting and not state.ModeratorBlocking and state.SafeRejoinAway or nil
+    local position
     if not position and holdHere then
         if state.SafePanicHereRoot~=root or not state.SafePanicHerePosition then
             state.SafePanicHereRoot=root;state.SafePanicHerePosition=root.Position
@@ -7431,16 +7431,6 @@ function state.PanicToSpawn(inPlace)
     return true
 end
 function state.PanicInPlace()return state.PanicToSpawn(true)end
-function state.EscapeSafeRejoin()
-    if not state.SafeRejoinRequested or not state.AutomationTeleporting or state.StopEverything or state.ModeratorBlocking then return false end
-    if not state.SafeRejoinAway then
-        local c=player.Character;local root=c and c:FindFirstChild("HumanoidRootPart")
-        local origin=state.SafePanicPosition or (root and root.Position)
-        if not origin then return false end
-        state.SafeRejoinAway=origin+Vector3.new(10000,0,0)
-    end
-    return state.PanicToSpawn(state.SafePanicHoldHere==true)
-end
 function state.ReleaseSafePanic()
     state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil
     if not state.SafeModePanic then return end
@@ -8571,11 +8561,6 @@ end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
     end
-    local function escapeAfterRejoin()
-        if not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
-            if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
-        end
-    end
     local function fail(message)
         clearRejoinAway()
         state.AutomationTeleporting=false
@@ -8617,6 +8602,7 @@ end
         if not ok then fail(message) end
         return ok,state.LastFloorTravelError
     end
+    local kickFallback
     local api=ctx.Make({
         UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,
@@ -8640,15 +8626,13 @@ end
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
             state.SafeRejoinRequested=true
-            local dispatch={};state.SafeRejoinDispatch=dispatch
-            -- Defer runs after the native call is entered (or returns), so a
-            -- yielding Teleport call cannot hold the character at spawn.
-            task.defer(function()
-                if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end
-            end)
+            state.ServerTeleportStarted=false
+            local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
+            -- Arm before a potentially yielding native call; the fallback yields
+            -- once so this request and OnTeleport can run before any kick.
+            if kickFallback and ticket then kickFallback.Requested(ticket.LastBlockedUserId)end
             local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not sent then clearRejoinAway();error(message)end
-            escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
@@ -8890,7 +8874,11 @@ end
         task.defer(function()workerIdentity();if state.Running then safe.Update();refresh() end end)
     end)
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,message)
-        if who==player then state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name) end
+        if who==player then
+            local safeRejoin=state.SafeRejoinRequested
+            state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name)
+            if safeRejoin and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     local function fallbackTicket()
         local ticket=api.Ticket
@@ -8905,12 +8893,12 @@ end
         end
         return ticket
     end
-    local kickFallback
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
             Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,
             Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Started=function()return state.ServerTeleportStarted==true end,
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true
                 api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
@@ -8922,7 +8910,7 @@ end
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
                 assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
-                ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
+                ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId
                 save(ticket)
                 state.QueueAutomation()
@@ -8937,11 +8925,14 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            escapeAfterRejoin()
             if state.SafeMode or state.MultiSpot or state.AccountProgression then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
-        elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
+        elseif stage==Enum.TeleportState.Failed then
+            local safeRejoin=state.SafeRejoinRequested
+            clearRejoinAway();state.AutomationTeleporting=false
+            if safeRejoin and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()
@@ -9165,43 +9156,46 @@ end
     end)()
     local makeKickFallback=(function()
 -- BEGIN BUNDLED SAFE KICK FALLBACK
--- Eight seconds with a present outsider in this job triggers one confirmed-block kick.
+-- After a confirmed-block rejoin request, allow one scheduler turn for Started.
 return function(ctx)
     local api={Armed=false,Attempts=0}
-    local seen,busy,retryAt,failures={},false,0,0
+    local pendingId,busy,retryAt,failures=nil,false,0,0
     local generation=0
-    function api.Reset()generation=generation+1;seen={};retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
+    function api.Reset()generation=generation+1;pendingId=nil;retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
     local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
-    function api.MarkStarted()if api.Armed and api.Attempts>0 then api.Started=true end end
+    function api.MarkStarted()api.Started=true end
+    function api.Requested(userId)
+        if busy or api.Armed then return end
+        pendingId=userId;api.Started=false;api.Update(ctx.Now())
+    end
+    function api.TeleportFailed()
+        if pendingId and not api.Armed then api.Started=false;api.Update(ctx.Now())end
+    end
     function api.Update(now)
         if api.Armed then return end
-        if not enabled()then seen={};return end
-        local present,target,oldest={}
+        if not enabled()or api.Started or not pendingId then return end
+        local target
         for _,person in ipairs(ctx.Players())do
-            if not ctx.Allowed(person)then
-                present[person.UserId]=true
-                seen[person.UserId]=seen[person.UserId]or now
-                if not oldest or seen[person.UserId]<oldest then target,oldest=person,seen[person.UserId]end
-            end
+            if person.UserId==pendingId and not ctx.Allowed(person)then target=person;break end
         end
-        for id in pairs(seen)do if not present[id]then seen[id]=nil end end
-        if not target then failures=0;retryAt=0;return end
-        if busy or failures>=3 or now<retryAt or now-oldest<8 then return end
+        if not target then pendingId=nil;failures=0;retryAt=0;return end
+        if busy or failures>=3 or now<retryAt then return end
         busy=true
         local token=generation
         local function active()return token==generation and enabled()and not ctx.Allowed(target)and ctx.Present(target)end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
-                if not active()then return end
+                ctx.Sleep(0) -- wall-clock/task scheduling, never eight seconds or a frame count.
+                if not active()or api.Started or (ctx.Started and ctx.Started())then return end
                 if ctx.CheckLimits then ctx.CheckLimits()end
                 ctx.Pause()
                 if not active()then return end
                 assert(ctx.Block(target,active)==true,"Native block was not confirmed · no kick")
                 if not active()then return end
                 ctx.Prepare(target)
-                if not active()then return end
+                if not active()or api.Started or (ctx.Started and ctx.Started())then return end
                 api.Armed=true
-                ctx.Status("Outsider still present after 8s · blocked · kicking and rejoining")
+                ctx.Status("Blocked · rejoin not started · kicking and rejoining")
                 -- Arm recovery before Kick: it may throw or return after disconnect.
                 ctx.Spawn(function()
                     ctx.Sleep(.2)
