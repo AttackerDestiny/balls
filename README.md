@@ -367,7 +367,9 @@ These are embedded **source positions**, before the normal Multi Spot **Y − 20
 | F12 | C-618 Uriotol, The Forgotten Hunter | `1685, 288, 3749` | 45s |
 | F12 | Warlord | `1031, 108, 5474` | 45s |
 | Atheon | Atheon arena | `840, 798, 336` | No supplied timer |
-| Atlantis | Leviathan | `15.89453125, 1320.01953125, -797.10546875` | No supplied timer |
+| Atlantis | Aeganatos, The Sunken Sovereign | `1500, 792, 127` | ~60s; server delays may increase it |
+| Atlantis | Leviathan | `12, 1313, -823` | 45s |
+| Atlantis | Kraken | `353, -319, 120` | 45s |
 
 DA/RA/KA share one selected arena but track observed member death clocks; the arena can become due at the earliest member respawn. Suspended Unborn's separate **farming** exception is `-2439, 70, 5389`. Custom spots do not automatically receive a guessed respawn duration.
 

@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.atheon-arrival-retry-v2.0.4"
-local VERSION="2.0.4"
+local BUILD="2026-11-05.atlantis-arenas-v2.0.5"
+local VERSION="2.0.5"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -8016,7 +8016,11 @@ return function(ctx)
             ["Warlord"]=Vector3.new(1031,108,5474),
         },
         [13965775911]={["Atheon arena"]=Vector3.new(840,798,336)},
-        [134019705603409]={Leviathan=Vector3.new(15.89453125,1320.01953125,-797.10546875)},
+        [134019705603409]={
+            ["Aeganatos, The Sunken Sovereign"]=Vector3.new(1500,792,127),
+            Leviathan=Vector3.new(12,1313,-823),
+            Kraken=Vector3.new(353,-319,120),
+        },
     }
     local supplied = {
         [542351431]={
@@ -8062,6 +8066,11 @@ return function(ctx)
             ["Suspended Unborn"]={Name="Suspended Unborn",Kind="Boss",RespawnSeconds=90,EncounterNames={["Suspended Unborn"]=true}},
             ["C-618 Uriotol, The Forgotten Hunter"]={Name="C-618 Uriotol, The Forgotten Hunter",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["C-618 Uriotol, The Forgotten Hunter"]=true}},
             ["Warlord"]={Name="Warlord",Kind="Mini boss",RespawnSeconds=45,EncounterNames={["Warlord"]=true}},
+        },
+        [134019705603409]={
+            ["Aeganatos, The Sunken Sovereign"]={Name="Aeganatos, The Sunken Sovereign",Kind="Boss",RespawnSeconds=60,EncounterNames={["Aeganatos, The Sunken Sovereign"]=true}},
+            Leviathan={Name="Leviathan",Kind="Boss",RespawnSeconds=45,EncounterNames={Leviathan=true}},
+            Kraken={Name="Kraken",Kind="Boss",RespawnSeconds=45,EncounterNames={Kraken=true}},
         },
     }
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
