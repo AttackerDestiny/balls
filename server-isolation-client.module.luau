@@ -210,6 +210,8 @@ return function(ctx)
     end
     end
     local blockBusy=false
+    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender})
+    state.BlockDialogMask=blockMask
     local function performBlock(target,active)
         local deadline=os.clock()+10
         while blockBusy do
@@ -219,7 +221,18 @@ return function(ctx)
         end
         if not active()then return false end
         blockBusy=true
-        local ok,result=pcall(block,target,active)
+        local ok,result=pcall(function()
+            if blockMask then blockMask.Begin()end
+            return block(target,active)
+        end)
+        if blockMask then
+            -- Dismiss an unsuccessful owned prompt before restoring its visuals.
+            if not ok or result~=true then
+                pcall(function()local _,cancel=findPrompt(target);if cancel then click(cancel)end end)
+            end
+            task.wait(.1)
+            blockMask.End()
+        end
         blockBusy=false
         if not ok then error(result)end
         return result==true

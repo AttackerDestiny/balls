@@ -70,6 +70,7 @@ def main():
         ("ATHEON UNLOCK", "atheon-unlock.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
         ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
+        ("BLOCK UI MASK", "block-ui-mask.module.luau"),
         ("INVENTORY VIEW", "inventory-view.module.luau"),
         ("PLAYER TOOLS", "player-tools.module.luau"),
         ("MULTI SPOT HUD", "multi-spot-hud.module.luau"),
@@ -161,6 +162,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("animation-removal.test.luau")) + "))()(" + quote(read("animation-removal.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ui-memory.test.luau")) + "))()(" + quote(read("ui-memory.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("runtime-recovery.test.luau")) + "))()(" + quote(read("runtime-recovery.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("block-ui-mask.test.luau")) + "))()(" + quote(read("block-ui-mask.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("selected-farm-spots.test.luau")) + "))()(" + quote(read("selected-farm-spots.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("pad-slot.test.luau")) + "))()(" + quote(read("pad-slot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("atheon-unlock.test.luau")) + "))()(" + quote(read("atheon-unlock.module.luau")) + ")\n"

@@ -429,6 +429,7 @@ function state.Destroy(replacing, teleportCleanup)
     if not preserveSearch then retire("Safe",state.SafeController,"Destroy")end
     retire("MultiSpot",state.MultiSpotController,"Destroy")
     cleanup("Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end)
+    cleanup("Block dialog visuals",function()if state.BlockDialogMask then state.BlockDialogMask.Destroy()end end)
     retire("Performance",state.PerformanceBoost,"Destroy")
     cleanup("Skill",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end)
     cleanup("Weapons",function()if state.WeaponSkillsDestroy then state.WeaponSkillsDestroy()end end)

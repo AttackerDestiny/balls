@@ -103,6 +103,8 @@ At startup, the floor runtime makes a one-time placement at the current characte
 
 **Safe floor** supports the normal floor catalog, Atheon, and Atlantis, subject to native unlocks. Profile unlock changes refresh the available labels. During Account Progression, Safe Mode protects the current progression floor instead of travelling back to the manually selected floor.
 
+Native block confirmations run with the blocking modal's visuals transparent while its controls remain active. The script still requires Roblox's blocked-user acknowledgment before rejoining or moderator disconnects. Only the blocking modal is masked, and visual properties/listeners are restored after each attempt or shutdown. This approach was live-tested on the connected desktop executor; other executors still need device-specific verification.
+
 **Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 
 The inline **X** clears only the editor. The old active/saved list remains until a new non-empty replacement is submitted. Native blocks can remain on the account afterward; the script does not automatically unblock every searched player.

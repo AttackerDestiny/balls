@@ -439,6 +439,10 @@ do
 -- BEGIN BUNDLED BLOCK CONFIRM
 -- END BUNDLED BLOCK CONFIRM
     end)()
+    local makeBlockMask=(function()
+-- BEGIN BUNDLED BLOCK UI MASK
+-- END BUNDLED BLOCK UI MASK
+    end)()
     local makeFriend=(function()
 -- BEGIN BUNDLED AUTO JOIN FRIEND
 -- END BUNDLED AUTO JOIN FRIEND
@@ -447,7 +451,7 @@ do
 -- BEGIN BUNDLED SAFE KICK FALLBACK
 -- END BUNDLED SAFE KICK FALLBACK
     end)()
-    attach({MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end

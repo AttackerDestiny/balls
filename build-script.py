@@ -13,6 +13,7 @@ MODULES = {
     "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "PAD SLOT": "pad-slot.module.luau",
     "SELECTED FARM SPOTS": "selected-farm-spots.module.luau",
+    "BLOCK UI MASK": "block-ui-mask.module.luau",
     "INSTANCE QUEUE": "instance-queue.module.luau",
     "SETTINGS SNAPSHOT": "settings-snapshot.module.luau",
     "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",
