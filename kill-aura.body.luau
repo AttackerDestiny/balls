@@ -19,7 +19,7 @@ local previous=(function()
 -- A reload retains settings, never the previous runtime's instances or closures.
 return function(previous,userId)
     if not previous or previous.UserId~=userId then return nil end
-    local fields={"AtheonUnlock","AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.startup-hold-v2.0.12"
-local VERSION="2.0.12"
+local BUILD="2026-11-06.between-rooms-v2.0.13"
+local VERSION="2.0.13"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -281,7 +281,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -382,6 +382,9 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AtheonUnlock=preference("AtheonUnlock",false)==true,
+    AutoCreateBetween=preference("AutoCreateBetween",false)==true,
+    BetweenAccess=preference("BetweenAccess","Private"),
+    BetweenDifficulty=preference("BetweenDifficulty","Normal"),
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
@@ -543,6 +546,8 @@ local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
 local state = {
     AtheonUnlock=restore.AtheonUnlock,
+    AutoCreateBetween=restore.AutoCreateBetween,
+    BetweenAccess=restore.BetweenAccess,BetweenDifficulty=restore.BetweenDifficulty,
     CreditCheck=restore.CreditCheck,CreditWhitelistText=restore.CreditWhitelistText,
     BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
@@ -1521,7 +1526,7 @@ local function settingsPayload()
     local position = {X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AtheonUnlock=state.AtheonUnlock,AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoCreateBetween=state.AutoCreateBetween,BetweenAccess=state.BetweenAccess,BetweenDifficulty=state.BetweenDifficulty,AtheonUnlock=state.AtheonUnlock,AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
@@ -5241,8 +5246,15 @@ local function updateMovement(now)
         else state.ExploreFailures = 0 end
         state.LastExploreDestination = nil
     end
-    -- Let the active aura cast finish at its origin before following a new position.
-    if state.SkillCastRunning then return end
+    local previousTarget=state.FarmTargetLock or state.FollowTarget
+    local previousData=previousTarget and getMobData(previousTarget)
+    local targetDefeated=previousData and (previousData.Health.Value<=0
+        or (previousData.HitLives and previousData.HitLives.Value<=0))
+    -- A confirmed kill can hand off immediately, even during an aura cast.
+    if state.SkillCastRunning then
+        if not targetDefeated then return end
+        state.CancelSkillAura("Farm target defeated")
+    end
     if Skills.usingSkill ~= "none" then
         if positionAlign then positionAlign.Enabled = false end
         if orientationAlign then orientationAlign.Enabled = false end
@@ -5265,7 +5277,8 @@ local function updateMovement(now)
     end
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
-    if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
+    if targetDefeated then nextAcquisition=0 end
+    if now>=nextAcquisition and (targetDefeated or not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
         nextAcquisition=now+0.15
         local locked=state.FarmTargetLock
         if locked and state.MultiSpot and not state.IsSelectedFarmMob(locked)then locked=nil end
@@ -5332,7 +5345,7 @@ local function updateMovement(now)
     state.Exploring = false
     state.LastExploreDestination = nil
     if correctionTarget ~= state.FollowTarget then correctionTarget = state.FollowTarget; correctionStrikes = 0 end
-    if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
+    if state.FarmCoordination and not state.DodgeReturnPending and not targetDefeated and not state.FarmCoordination.Ready("move")then return end
     local autoOffset = state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
     local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)
@@ -10356,9 +10369,9 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
+    for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
     local function plain(value,depth)
         assert(depth<=12,"Config nesting is too deep")
@@ -10553,6 +10566,107 @@ end
     end
     taskController("AtheonUnlock",.5,function(now)state.AtheonUnlockController.Update(now)end)
     table.insert(frameOrder,1,"AtheonUnlock")
+end
+
+do
+    local make=(function()
+-- BEGIN BUNDLED BETWEEN ROOM
+-- Each native toggle cycles one value. Wait for replication before sending another.
+return function(ctx)
+    local api={}
+    local pending,changes,stopped=nil,0,false
+    function api.Reset()
+        pending=nil;changes=0;stopped=false
+    end
+    function api.Update(now)
+        if stopped or not ctx.Active() then return end
+        local room=ctx.Read()
+        if pending then
+            if pending.Field=="Id" and room or room and room[pending.Field]~=pending.Before then
+                pending=nil
+            elseif now>=pending.Deadline then
+                stopped=true
+                ctx.Status("Room request timed out. Toggle Auto Create Room to retry.")
+                return
+            else return end
+        end
+        if room and (not room.Id or room.Host==nil or room.PlaceId==nil) then
+            ctx.Status("Waiting for party details")
+            return
+        end
+        if room and (room.Host~=ctx.UserId or room.PlaceId~=ctx.PlaceId) then
+            ctx.Status("Leave your current party to create a Between room")
+            return
+        end
+        local access,difficulty=ctx.Selection()
+        local action,field
+        if not room then changes=0;action,field="CreateParty","Id"
+        elseif not room.Status or not room.Mode then return
+        elseif room.Mode~=difficulty then action,field="ToggleMode","Mode"
+        elseif room.Status~=access then action,field="ToggleStatus","Status"
+        else
+            changes=0
+            ctx.Status("Room ready · "..access.." · "..difficulty)
+            return
+        end
+        changes+=1
+        if changes>8 then
+            stopped=true
+            ctx.Status("Room settings could not be applied. Check the native party menu.")
+            return
+        end
+        pending={Field=field,Before=room and room[field],Deadline=now+5}
+        ctx.Status(room and "Configuring The Between" or "Creating The Between room")
+        ctx.Send(action)
+    end
+    return api
+end
+
+-- END BUNDLED BETWEEN ROOM
+    end)()
+    local placeId,index=78945654064532,nil
+    local access={Private=true,Friends=true,["Game Party"]=true}
+    local difficulty={Normal=true,Hard=true,Elite=true}
+    state.BetweenAccess=access[state.BetweenAccess] and state.BetweenAccess or "Private"
+    state.BetweenDifficulty=difficulty[state.BetweenDifficulty] and state.BetweenDifficulty or "Normal"
+    local room=make({UserId=player.UserId,PlaceId=placeId,
+        Active=function()
+            return state.Running and state.AutoCreateBetween and game.PlaceId~=placeId
+                and not state.AutomationTeleporting and not state.TravelBusy
+        end,
+        Read=function()
+            local id=player:GetAttribute("PartyID")
+            if not id then return end
+            local list=ReplicatedStorage:FindFirstChild("LobbyParties")
+            local party=list and list:FindFirstChild(tostring(id))
+            return {Id=id,Host=party and party:GetAttribute("Host"),PlaceId=party and party:GetAttribute("PlaceId"),
+                Status=party and party:GetAttribute("Status"),Mode=party and party:GetAttribute("Mode")}
+        end,
+        Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
+        Status=function(message)state.BetweenRoomStatus=message end,
+        Send=function(action)
+            if action=="CreateParty" and not index then
+                for i,location in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
+                    if location.PlaceId==placeId then index=i;break end
+                end
+                assert(index,"The Between is unavailable")
+            end
+            ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty" and index or nil})
+        end,
+    })
+    function state.SetAutoCreateBetween(on)
+        state.AutoCreateBetween=on==true
+        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room" or "Auto Create Room is off"
+        room.Reset();requestSave()
+    end
+    function state.SetBetweenAccess(value)
+        if access[value] then state.BetweenAccess=value;requestSave()end
+    end
+    function state.SetBetweenDifficulty(value)
+        if difficulty[value] then state.BetweenDifficulty=value;requestSave()end
+    end
+    taskController("BetweenRoom",.35,room.Update)
+    table.insert(frameOrder,"BetweenRoom")
 end
 -- WindUI is bundled at a fixed release; queued rejoins need no library download.
 do
@@ -28228,6 +28342,17 @@ return function(ctx)
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
+    api.Controls.BetweenSection=api.Tabs["Challenge Floors"]:Section({Title="The Between",TextSize=17})
+    stateToggle("AutoCreateBetween","Challenge Floors","Auto Create Room","SetAutoCreateBetween")
+    dropdown("BetweenAccess","Challenge Floors","Room Mode",function()
+        return {Options={"Private","Friends","Game Party"},Map={Private="Private",Friends="Friends",["Game Party"]="Game Party"},Value=s.BetweenAccess or "Private"}
+    end,function(value,map)if map[value]then invoke("SetBetweenAccess",map[value])end end)
+    dropdown("BetweenDifficulty","Challenge Floors","Difficulty",function()
+        return {Options={"Normal","Hard","Elite"},Map={Normal="Normal",Hard="Hard",Elite="Elite"},Value=s.BetweenDifficulty or "Normal"}
+    end,function(value,map)if map[value]then invoke("SetBetweenDifficulty",map[value])end end)
+    paragraph("BetweenRoomStatus","Challenge Floors","Room Status",function()
+        return s.BetweenRoomStatus or "Auto Create Room is off"
+    end)
     api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
     dropdown("SelectedSkill","Auto Skill","Skill",function()

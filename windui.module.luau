@@ -254,6 +254,17 @@ return function(ctx)
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
+    api.Controls.BetweenSection=api.Tabs["Challenge Floors"]:Section({Title="The Between",TextSize=17})
+    stateToggle("AutoCreateBetween","Challenge Floors","Auto Create Room","SetAutoCreateBetween")
+    dropdown("BetweenAccess","Challenge Floors","Room Mode",function()
+        return {Options={"Private","Friends","Game Party"},Map={Private="Private",Friends="Friends",["Game Party"]="Game Party"},Value=s.BetweenAccess or "Private"}
+    end,function(value,map)if map[value]then invoke("SetBetweenAccess",map[value])end end)
+    dropdown("BetweenDifficulty","Challenge Floors","Difficulty",function()
+        return {Options={"Normal","Hard","Elite"},Map={Normal="Normal",Hard="Hard",Elite="Elite"},Value=s.BetweenDifficulty or "Normal"}
+    end,function(value,map)if map[value]then invoke("SetBetweenDifficulty",map[value])end end)
+    paragraph("BetweenRoomStatus","Challenge Floors","Room Status",function()
+        return s.BetweenRoomStatus or "Auto Create Room is off"
+    end)
     api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
     stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
     dropdown("SelectedSkill","Auto Skill","Skill",function()

@@ -1,5 +1,7 @@
 local state = {
     AtheonUnlock=restore.AtheonUnlock,
+    AutoCreateBetween=restore.AutoCreateBetween,
+    BetweenAccess=restore.BetweenAccess,BetweenDifficulty=restore.BetweenDifficulty,
     CreditCheck=restore.CreditCheck,CreditWhitelistText=restore.CreditWhitelistText,
     BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
     Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,

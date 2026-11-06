@@ -371,3 +371,53 @@ do
     taskController("AtheonUnlock",.5,function(now)state.AtheonUnlockController.Update(now)end)
     table.insert(frameOrder,1,"AtheonUnlock")
 end
+
+do
+    local make=(function()
+-- BEGIN BUNDLED BETWEEN ROOM
+-- END BUNDLED BETWEEN ROOM
+    end)()
+    local placeId,index=78945654064532,nil
+    local access={Private=true,Friends=true,["Game Party"]=true}
+    local difficulty={Normal=true,Hard=true,Elite=true}
+    state.BetweenAccess=access[state.BetweenAccess] and state.BetweenAccess or "Private"
+    state.BetweenDifficulty=difficulty[state.BetweenDifficulty] and state.BetweenDifficulty or "Normal"
+    local room=make({UserId=player.UserId,PlaceId=placeId,
+        Active=function()
+            return state.Running and state.AutoCreateBetween and game.PlaceId~=placeId
+                and not state.AutomationTeleporting and not state.TravelBusy
+        end,
+        Read=function()
+            local id=player:GetAttribute("PartyID")
+            if not id then return end
+            local list=ReplicatedStorage:FindFirstChild("LobbyParties")
+            local party=list and list:FindFirstChild(tostring(id))
+            return {Id=id,Host=party and party:GetAttribute("Host"),PlaceId=party and party:GetAttribute("PlaceId"),
+                Status=party and party:GetAttribute("Status"),Mode=party and party:GetAttribute("Mode")}
+        end,
+        Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
+        Status=function(message)state.BetweenRoomStatus=message end,
+        Send=function(action)
+            if action=="CreateParty" and not index then
+                for i,location in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
+                    if location.PlaceId==placeId then index=i;break end
+                end
+                assert(index,"The Between is unavailable")
+            end
+            ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty" and index or nil})
+        end,
+    })
+    function state.SetAutoCreateBetween(on)
+        state.AutoCreateBetween=on==true
+        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room" or "Auto Create Room is off"
+        room.Reset();requestSave()
+    end
+    function state.SetBetweenAccess(value)
+        if access[value] then state.BetweenAccess=value;requestSave()end
+    end
+    function state.SetBetweenDifficulty(value)
+        if difficulty[value] then state.BetweenDifficulty=value;requestSave()end
+    end
+    taskController("BetweenRoom",.35,room.Update)
+    table.insert(frameOrder,"BetweenRoom")
+end

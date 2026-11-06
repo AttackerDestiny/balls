@@ -71,7 +71,7 @@ local function settingsPayload()
     local position = {X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
     local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
     local features=state
-    return {AtheonUnlock=state.AtheonUnlock,AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
+    return {AutoCreateBetween=state.AutoCreateBetween,BetweenAccess=state.BetweenAccess,BetweenDifficulty=state.BetweenDifficulty,AtheonUnlock=state.AtheonUnlock,AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
         StopEverything=false,
         AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
         SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,

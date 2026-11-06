@@ -1327,8 +1327,15 @@ local function updateMovement(now)
         else state.ExploreFailures = 0 end
         state.LastExploreDestination = nil
     end
-    -- Let the active aura cast finish at its origin before following a new position.
-    if state.SkillCastRunning then return end
+    local previousTarget=state.FarmTargetLock or state.FollowTarget
+    local previousData=previousTarget and getMobData(previousTarget)
+    local targetDefeated=previousData and (previousData.Health.Value<=0
+        or (previousData.HitLives and previousData.HitLives.Value<=0))
+    -- A confirmed kill can hand off immediately, even during an aura cast.
+    if state.SkillCastRunning then
+        if not targetDefeated then return end
+        state.CancelSkillAura("Farm target defeated")
+    end
     if Skills.usingSkill ~= "none" then
         if positionAlign then positionAlign.Enabled = false end
         if orientationAlign then orientationAlign.Enabled = false end
@@ -1351,7 +1358,8 @@ local function updateMovement(now)
     end
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
-    if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
+    if targetDefeated then nextAcquisition=0 end
+    if now>=nextAcquisition and (targetDefeated or not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
         nextAcquisition=now+0.15
         local locked=state.FarmTargetLock
         if locked and state.MultiSpot and not state.IsSelectedFarmMob(locked)then locked=nil end
@@ -1418,7 +1426,7 @@ local function updateMovement(now)
     state.Exploring = false
     state.LastExploreDestination = nil
     if correctionTarget ~= state.FollowTarget then correctionTarget = state.FollowTarget; correctionStrikes = 0 end
-    if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
+    if state.FarmCoordination and not state.DodgeReturnPending and not targetDefeated and not state.FarmCoordination.Ready("move")then return end
     local autoOffset = state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
     local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)

@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.startup-hold-v2.0.12"
-local VERSION="2.0.12"
+local BUILD="2026-11-06.between-rooms-v2.0.13"
+local VERSION="2.0.13"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -150,6 +150,9 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AtheonUnlock=preference("AtheonUnlock",false)==true,
+    AutoCreateBetween=preference("AutoCreateBetween",false)==true,
+    BetweenAccess=preference("BetweenAccess","Private"),
+    BetweenDifficulty=preference("BetweenDifficulty","Normal"),
     AutoCraft=preference("AutoCraft",{}),
     AutoDismantle=preference("AutoDismantle",{}),
     AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
