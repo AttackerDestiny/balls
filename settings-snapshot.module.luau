@@ -29,6 +29,5 @@ return function(previous,userId)
     local snapshot={}
     for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
     snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
-    snapshot.FarmPosition=previous.OffsetMode
     return snapshot
 end

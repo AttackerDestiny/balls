@@ -149,7 +149,7 @@ Offline users, full servers, locked floors, and native join permissions can prev
 | Feature | Behavior and fresh default |
 | --- | --- |
 | **Kill Aura** | Scripted normal damage against eligible nearby enemies. Damage-only: manual walking/jumping works without Auto Farm. OFF. |
-| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. **Auto Farm Position** chooses Above or Below (default). Adaptive offsets are capped at +200 and −60 studs. Does not automatically enable Kill Aura. OFF. |
+| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. Uses the default Below position with adaptive clearance. Does not automatically enable Kill Aura. OFF. |
 | **Boss Only** | Restricts Auto Farm and arena-clear checks to main bosses/mini-bosses, ignoring regular mobs. OFF. |
 | **Credit Check** | Coordinates the user-specified 5% boss-credit target with a separate group. OFF. |
 | **Credit Whitelist** | Independent usernames/user IDs for credit coordination |
@@ -159,7 +159,7 @@ Offline users, full servers, locked floors, and native join permissions can prev
 
 ### Target selection and movement
 
-Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank fights stay locked. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
+Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank boss fights converge on the common selected-scope order. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
@@ -508,3 +508,7 @@ Never use real account blocks, kicks, trades, crafting spends or floor progressi
 ### UI attribution
 
 WindUI comes from [Footagesus/WindUI](https://github.com/Footagesus/WindUI). Release **1.6.66** is bundled so queued recovery does not download a separate UI library. Its embedded banner differs from the release tag; provenance/checksum are in [vendor/README.md](vendor/README.md). See [vendor/WindUI-LICENSE.txt](vendor/WindUI-LICENSE.txt) for its MIT license. The library may still fetch normal visual assets.
+
+Auto Farm Position has been removed. Saved Above/Below selections are ignored; ordinary farming uses Below.
+
+Common boss choice is independent of credit-roster presence. Conflicting same-rank locks converge using the selected-scope order, and owned skill casts yield when that focus changes. Enemies must still be streamed to the client. Account Progression, selected-arena limits, native invulnerability and safety checks remain authoritative.

@@ -53,7 +53,7 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         assert(a.Select(origins[i],peer,0)==boss,"An exhausted enemy must not keep any account's previous-target preference")
     end
     entity.Children.HitLives=nil
-    for i,a in ipairs(accounts)do assert(not a.GetData(peer).HitLives);assert(a.Select(origins[i],boss,0)==boss,"A living target remains locked after another enemy becomes eligible")end
+    for i,a in ipairs(accounts)do assert(not a.GetData(peer).HitLives);assert(a.Select(origins[i],boss,0)==peer,"Accounts converge on the common same-rank target after a spawn becomes eligible")end
     peer.Children.Entity.Children.Health.Value=0;boss.Children.Entity.Children.Health.Value=0
     for i,a in ipairs(accounts)do assert(a.Select(origins[i],peer,0)==other,"All accounts advance to the same next living boss")end
     other.Children.Entity.Children.Immortal={}
@@ -108,7 +108,7 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         a.State.FarmLockArena=a.State.MultiSpotAnchor
         a.State.FarmTargetLock=i==1 and mainB or globalMini
         local current=a.State.FarmTargetLock
-        assert(a.Select(vec(i*10000),current,0)==(i==1 and mainB or mainA),"A main boss preempts a mini-boss while same-rank locks stay stable")
+        assert(a.Select(vec(i*10000),current,0)==mainA,"Accounts converge on the common main boss regardless of their previous living lock")
         synchronized[i]=a
     end
     mainB.Children.Entity.Children.Health.Value=0;globalMini.Children.Entity.Children.Health.Value=0
@@ -135,6 +135,12 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         a.State.CreditCheck=true;a.State.FarmTargetLock=i==1 and mainA or mainB
         a.State.CreditController=creditFactory({State=a.State,Members=function()return {{Name="A"},{Name="B"}}end,Rank=a.Priority.Rank})
         assert(a.Select(vec(i*1000),a.State.FarmTargetLock,0)==mainA,"Active credit groups must converge despite conflicting living locks")
+    end
+    for cycle=1,300 do
+        local a=account({mainA,mainB})
+        a.State.CreditCheck=true;a.State.FarmTargetLock=mainB
+        a.State.CreditController=creditFactory({State=a.State,Members=function()return {{Name="A"},{Name="Missing",CreditMissing=true}}end,Rank=a.Priority.Rank})
+        assert(a.Select(vec(cycle*100),mainB,cycle)==mainA,"An incomplete credit roster cannot preserve conflicting same-rank boss locks")
     end
     print("PASS Credit target convergence: split living locks across three accounts adopt one boss instead of waiting on each other")
     print("PASS Global boss override: main=1, mini=2, cross-arena priority, different account locks converge after current kills, all priority kills and regular arena scope")

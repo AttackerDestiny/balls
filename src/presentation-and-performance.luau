@@ -83,7 +83,6 @@ local function settingsPayload()
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
         Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,CreditCheck=state.CreditCheck,CreditWhitelistText=state.CreditWhitelistText,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
-        AutoOffset = true, FarmPosition = state.OffsetMode, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,

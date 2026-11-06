@@ -18,7 +18,7 @@ local state = {
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
-    FarmAbove=restore.FarmPosition=="Above",OffsetMode=restore.FarmPosition,
+    FarmAbove=false,OffsetMode="Below",
     OffsetProfiles = {}, UnsafeOffsetProfiles = {}, ProtectionStatus = "Retreat on health loss",
     ProtectionRetreats = 0, TeleportInterval = 0.18, TeleportsSent = 0,
     AverageFrameTime = 1 / 60, AverageLoopCost = 0, TargetScans = 0,

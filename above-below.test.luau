@@ -60,10 +60,11 @@ return function(rangeSource,offsetSource,scriptSource,payloadSource)
         input.Center=vec(0,500,0)
         assert(not solve(input),"Reject a capped position that is outside attack reach")
     end)
-    test("Settings persist the selected farm position",function()
+    test("Removed farm position cannot persist or restore an Above preference",function()
         local position={X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
         local result=load(payloadSource.."\nreturn settingsPayload()",{state={OffsetMode="Above"},panel={Position=position},enemyHUD={Position=position}})
-        assert(result.FarmPosition=="Above")
+        assert(result.FarmPosition==nil)
+        assert(not scriptSource:find("function state.SetFarmPosition",1,true)and not scriptSource:find('preference("FarmPosition"',1,true)and not scriptSource:find("Auto Farm Position",1,true))
     end)
     print("All "..count.." Above/Below scenarios passed")
 end

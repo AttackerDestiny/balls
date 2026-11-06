@@ -48,14 +48,13 @@ return function(previous,userId)
     local snapshot={}
     for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
     snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
-    snapshot.FarmPosition=previous.OffsetMode
     return snapshot
 end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.keep-above-target-v2.0.20"
-local VERSION="2.0.20"
+local BUILD="2026-11-06.common-farm-target-v2.0.21"
+local VERSION="2.0.21"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -283,7 +282,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"FarmPosition","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -384,7 +383,6 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AtheonUnlock=preference("AtheonUnlock",false)==true,
-    FarmPosition=preference("FarmPosition","Below")=="Above" and "Above" or "Below",
     AutoCreateBetween=preference("AutoCreateBetween",false)==true,
     BetweenAccess=preference("BetweenAccess","Private"),
     BetweenDifficulty=preference("BetweenDifficulty","Normal"),
@@ -574,7 +572,7 @@ local state = {
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
-    FarmAbove=restore.FarmPosition=="Above",OffsetMode=restore.FarmPosition,
+    FarmAbove=false,OffsetMode="Below",
     OffsetProfiles = {}, UnsafeOffsetProfiles = {}, ProtectionStatus = "Retreat on health loss",
     ProtectionRetreats = 0, TeleportInterval = 0.18, TeleportsSent = 0,
     AverageFrameTime = 1 / 60, AverageLoopCost = 0, TargetScans = 0,
@@ -1548,7 +1546,6 @@ local function settingsPayload()
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
         Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,CreditCheck=state.CreditCheck,CreditWhitelistText=state.CreditWhitelistText,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
-        AutoOffset = true, FarmPosition = state.OffsetMode, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
@@ -2288,16 +2285,6 @@ function state.SetTeleportOffset(value)
     correctionStrikes, correctionTarget = 0, nil
 end
 local activeOffsetMob, offsetSample
-function state.SetFarmPosition(mode)
-    if mode~="Above" and mode~="Below" then return end
-    if state.OffsetMode==mode then return end
-    state.FarmAbove=mode=="Above"
-    state.OffsetMode=mode
-    state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-    activeOffsetMob,offsetSample=nil,nil
-    state.SetTeleportOffset(state.TeleportOffset)
-    requestSave()
-end
 state.OffsetAvoidTypes={}
 state.AutoOffsetSolver=(function()
 -- BEGIN BUNDLED AUTO OFFSET
@@ -2846,10 +2833,6 @@ function state.GetFarmPriorityTarget(now)
     for mob in pairs(trackedMobs)do
         if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
             and (not best or targetPriority.FarmLess(mob,best))then best=mob end
-    end
-    if state.IsFarmEnemyAlive()then
-        local locked=state.FarmTargetLock or state.FollowTarget
-        if targetPriority.Rank(locked)<=2 and (not best or targetPriority.Rank(locked)<=targetPriority.Rank(best))then best=locked end
     end
     -- A temporary invulnerability/streaming gap is not a kill and must not
     -- downgrade an already observed main boss to a mini-boss or normal mob.
@@ -5094,6 +5077,17 @@ local function updateMovement(now)
     local targetDefeated=previousData and (previousData.Health.Value<=0
         or (previousData.HitLives and previousData.HitLives.Value<=0))
     -- A confirmed kill can hand off immediately, even during an aura cast.
+    -- Select the common loaded focus before a continuous owned cast blocks acquisition.
+    if state.GetFarmPriorityTarget and not state.AccountProgression then
+        local focus=state.GetFarmPriorityTarget(now)
+        local previous=state.FarmTargetLock or state.FollowTarget
+        if focus and focus~=previous and (not previous or targetPriority.FarmLess(focus,previous))then
+            if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Synchronizing farm target")end
+            state.FarmTargetLock=focus;state.FollowTarget=focus
+            state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
+            nextAcquisition=0
+        end
+    end
     if state.SkillCastRunning then
         if not targetDefeated then return end
         state.CancelSkillAura("Farm target defeated")
@@ -5137,7 +5131,7 @@ local function updateMovement(now)
         end
         if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
             local priority=state.GetFarmPriorityTarget(now)
-            if priority and targetPriority.Rank(priority)<targetPriority.Rank(locked)then locked=priority end
+            if priority and (targetPriority.Rank(priority)<targetPriority.Rank(locked)or (targetPriority.Rank(priority)==targetPriority.Rank(locked)and targetPriority.FarmLess(priority,locked)))then locked=priority end
         end
         if locked then
             state.FarmTargetLock=locked
@@ -10220,7 +10214,7 @@ return function(ctx)
     local kinds={}
     for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"FarmPosition","BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
+    for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
     local function plain(value,depth)
         assert(depth<=12,"Config nesting is too deep")
@@ -28242,9 +28236,6 @@ return function(ctx)
     local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
-    dropdown("FarmPosition","Combat","Auto Farm Position",function()
-        return {Options={"Above","Below"},Map={Above="Above",Below="Below"},Value=s.OffsetMode or "Below"}
-    end,function(value,map)if map[value] then invoke("SetFarmPosition",map[value]) end end)
     stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
     stateToggle("CreditCheck","Combat","Credit Check","SetCreditCheck")
     input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)

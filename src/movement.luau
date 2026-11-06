@@ -33,16 +33,6 @@ function state.SetTeleportOffset(value)
     correctionStrikes, correctionTarget = 0, nil
 end
 local activeOffsetMob, offsetSample
-function state.SetFarmPosition(mode)
-    if mode~="Above" and mode~="Below" then return end
-    if state.OffsetMode==mode then return end
-    state.FarmAbove=mode=="Above"
-    state.OffsetMode=mode
-    state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-    activeOffsetMob,offsetSample=nil,nil
-    state.SetTeleportOffset(state.TeleportOffset)
-    requestSave()
-end
 state.OffsetAvoidTypes={}
 state.AutoOffsetSolver=(function()
 -- BEGIN BUNDLED AUTO OFFSET
@@ -443,10 +433,6 @@ function state.GetFarmPriorityTarget(now)
     for mob in pairs(trackedMobs)do
         if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
             and (not best or targetPriority.FarmLess(mob,best))then best=mob end
-    end
-    if state.IsFarmEnemyAlive()then
-        local locked=state.FarmTargetLock or state.FollowTarget
-        if targetPriority.Rank(locked)<=2 and (not best or targetPriority.Rank(locked)<=targetPriority.Rank(best))then best=locked end
     end
     -- A temporary invulnerability/streaming gap is not a kill and must not
     -- downgrade an already observed main boss to a mini-boss or normal mob.
@@ -1317,6 +1303,17 @@ local function updateMovement(now)
     local targetDefeated=previousData and (previousData.Health.Value<=0
         or (previousData.HitLives and previousData.HitLives.Value<=0))
     -- A confirmed kill can hand off immediately, even during an aura cast.
+    -- Select the common loaded focus before a continuous owned cast blocks acquisition.
+    if state.GetFarmPriorityTarget and not state.AccountProgression then
+        local focus=state.GetFarmPriorityTarget(now)
+        local previous=state.FarmTargetLock or state.FollowTarget
+        if focus and focus~=previous and (not previous or targetPriority.FarmLess(focus,previous))then
+            if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Synchronizing farm target")end
+            state.FarmTargetLock=focus;state.FollowTarget=focus
+            state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
+            nextAcquisition=0
+        end
+    end
     if state.SkillCastRunning then
         if not targetDefeated then return end
         state.CancelSkillAura("Farm target defeated")
@@ -1360,7 +1357,7 @@ local function updateMovement(now)
         end
         if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
             local priority=state.GetFarmPriorityTarget(now)
-            if priority and targetPriority.Rank(priority)<targetPriority.Rank(locked)then locked=priority end
+            if priority and (targetPriority.Rank(priority)<targetPriority.Rank(locked)or (targetPriority.Rank(priority)==targetPriority.Rank(locked)and targetPriority.FarmLess(priority,locked)))then locked=priority end
         end
         if locked then
             state.FarmTargetLock=locked
