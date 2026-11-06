@@ -19,6 +19,7 @@ The distributed entry is one standalone Luau file (Roblox's Lua). It uses the ex
 - [Misc and Player](#misc-and-player)
 - [Utility](#utility)
 - [Speacial](#speacial)
+- [Dodge](#dodge)
 - [Settings](#settings)
 - [Built-in background features](#built-in-background-features)
 - [Default Multi Spot arenas](#default-multi-spot-arenas)
@@ -55,7 +56,7 @@ Use the header's **Restart script** icon or re-execute the loader to update. Upd
 
 ## Interface
 
-Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Settings**.
+Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Dodge · Settings**.
 
 `Speacial` and `Perfromance Booster` retain their current UI spelling. The interface uses bundled **WindUI 1.6.66**, searchable dropdowns, and multi-select controls.
 
@@ -154,7 +155,6 @@ Offline users, full servers, locked floors, and native join permissions can prev
 | **Credit Whitelist** | Independent usernames/user IDs for credit coordination |
 | **Credit Status** | Shows missing accounts/counters, required damage, current plan, or finishing status |
 | **Auto Equip Best Gear** | Equips the best owned usable weapon, armor, and accessories. ON. |
-| **Atheon Dodge** | Bounded evasions based on supported native Atheon attack/hazard state, followed by returning to farm. OFF. |
 | **Swing animation** | Normal-speed visible swings, independent of damage-request pacing. ON. |
 
 ### Target selection and movement
@@ -316,6 +316,10 @@ Trading pauses conflicting farming, attacks, gear changes, and crafting/dismantl
 - Restores saved farming preferences when progression is switched off.
 
 Streaming loss, an unrelated miniboss, or an uncredited corpse is not a completed main-boss kill. The script cannot grant a floor unlock the server has not awarded. **F12 is the endpoint**; Atheon and Atlantis are not additional progression stages.
+
+## Dodge
+
+**Atheon Dodge** evades supported Atheon attacks and hazards, then returns to farming. OFF by default.
 
 ## Settings
 

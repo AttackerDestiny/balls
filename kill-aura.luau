@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.safe-immediate-rejoin-v2.0.9"
-local VERSION="2.0.9"
+local BUILD="2026-11-06.dodge-tab-v2.0.10"
+local VERSION="2.0.10"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -27939,8 +27939,8 @@ return function(ctx)
         elseif ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
         if disposed or s.Running==false then error("UI initialization cancelled")end
     end
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","shield","sliders-horizontal"}
     local function report(reason)
         s.WindUIError=tostring(reason)
         if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=s.WindUIError,Duration=5})end
@@ -28172,7 +28172,6 @@ return function(ctx)
         return not s.CreditCheck and "Credit Check is off"or s.CreditCheckStatus or "Waiting for a boss or mini-boss"
     end)
     stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
-    stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
     stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
     stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
     api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
@@ -28212,7 +28211,7 @@ return function(ctx)
     dropdown("PerformanceBoosters","Utility","Performance boosters",function()
         local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
         return {Options=boostNames,Value=value}
-    end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+    end,applyBoost,true)
     local rarities={"Common","Uncommon","Rare"}
     api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
     dropdown("AutoDismantle","Utility","Auto Dismantle",function()
@@ -28245,6 +28244,7 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    stateToggle("AtheonDodge","Dodge","Atheon Dodge","SetAtheonDodge")
     dropdown("Theme","Settings","Theme",function()
         local options={}
         for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end
