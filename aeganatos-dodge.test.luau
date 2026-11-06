@@ -30,6 +30,8 @@ return function(source)
     callback({},"RunPhase","OmegaWave","FireWave",Vector3.zero,200);assert(api.Seen==2,"Unrelated enemies are excluded")
     predicted=Vector3.new(0,-20,0)
     callback(boss,"Initial","OceanGyzer")
+    assert(not api.Plan(predicted,predicted),"Early warning keeps the offensive window available")
+    at+=4.9
     local windup=api.Plan(predicted,predicted)
     assert(windup,"The native windup creates an early avoidance request")
     callback(boss,"RunPhase","OceanGyzer","CreateGyzer",Vector3.new(200,0,0),2)

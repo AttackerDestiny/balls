@@ -12,7 +12,7 @@ return function(ctx)
             local predicted=ctx.PlayerPosition()
             if predicted then
                 if #hazards>=32 then table.remove(hazards,1)end
-                hazards[#hazards+1]={Kind=skill,Point=predicted,Radius=ctx.GyzerRadius+8,Expires=now()+18,Provisional=true,Boss=boss}
+                hazards[#hazards+1]={Kind=skill,Point=predicted,Radius=ctx.GyzerRadius+8,Expires=now()+18,ActivateAt=now()+4.8,Provisional=true,Boss=boss}
                 api.Seen+=1
             end
             return
@@ -38,6 +38,7 @@ return function(ctx)
     end
     if ctx.Replicate then connection=ctx.Replicate:Connect(receive)end
     local function contains(record,point)
+        if record.ActivateAt and now()<record.ActivateAt then return false end
         if record.Kind=="OceanGyzer"then return ((point-record.Point)*Vector3.new(1,0,1)).Magnitude<record.Radius end
         local localPoint=record.Frame:PointToObjectSpace(point)
         return math.abs(localPoint.X)<record.Width and math.abs(localPoint.Y)<record.Height

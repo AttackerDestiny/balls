@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.aeganatos-handoff-v2.0.24"
-local VERSION="2.0.24"
+local BUILD="2026-11-06.aeganatos-windup-budget-v2.0.25"
+local VERSION="2.0.25"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
