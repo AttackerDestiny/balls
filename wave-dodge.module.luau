@@ -205,8 +205,12 @@ return function(ctx)
         state.WaveEventsSeen=api.Seen
         local seen=0; for _ in pairs(api.Seen) do seen+=1 end
         if root and health and health.Value>0 and not state.TravelBusy and ctx.AeganatosDodge then
-            local point,reason=ctx.AeganatosDodge.Plan(root.Position,root.Position)
-            if point then hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true end
+            local point,reason=ctx.AeganatosDodge.Plan(root.Position,state.AutoOffsetDestination or root.Position)
+            if point then
+                if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Aeganatos dodge has movement priority")end
+                hold(point,"Aeganatos evade: "..tostring(reason),now)
+                ctx.Status("Aeganatos Dodge · "..tostring(reason));return true
+            end
         end
         if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
             local target=state.FollowTarget

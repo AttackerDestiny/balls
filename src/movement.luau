@@ -609,7 +609,8 @@ do
     local plane=template and template:FindFirstChild("Plane")
     local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
     state.AeganatosDodgeController=factory({State=state,Replicate=replicate and replicate.OnClientEvent,
-        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=62,
+        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=145,
+        PlayerPosition=function()local c=player.Character;local root=c and c:FindFirstChild("HumanoidRootPart");return root and root.Position end,
         IsBoss=function(mob)return typeof(mob)=="Instance"and mob.Name=="Aeganatos, The Sunken Sovereign"end,
         Frame=function(mob)local root=mob:FindFirstChild("HumanoidRootPart");return root and root.CFrame end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})

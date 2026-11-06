@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.self-damage-protection-v2.0.23"
-local VERSION="2.0.23"
+local BUILD="2026-11-06.aeganatos-handoff-v2.0.24"
+local VERSION="2.0.24"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -3443,13 +3443,23 @@ do
 -- BEGIN BUNDLED AEGANATOS DODGE
 -- Native phase envelopes: FireWave has a 3.5s swept plane; CreateGyzer is timed.
 return function(ctx)
-    local api={Active=false,Seen=0,Moves=0}
+    local api={Active=false,Seen=0,Moves=0,Plans=0,Released=0}
     local hazards={}
     local connection
+    local shelter
     local disposed=false
     local now=ctx.Now or os.clock
     local function receive(boss,operation,skill,phase,point,duration)
         if disposed or not ctx.State.AeganatosDodge or not ctx.IsBoss(boss)then return end
+        if operation=="Initial"and skill=="OceanGyzer"and ctx.PlayerPosition then
+            local predicted=ctx.PlayerPosition()
+            if predicted then
+                if #hazards>=32 then table.remove(hazards,1)end
+                hazards[#hazards+1]={Kind=skill,Point=predicted,Radius=ctx.GyzerRadius+8,Expires=now()+18,Provisional=true,Boss=boss}
+                api.Seen+=1
+            end
+            return
+        end
         if operation~="RunPhase"or typeof(point)~="Vector3"then return end
         local record
         if skill=="OmegaWave"and phase=="FireWave"then
@@ -3461,6 +3471,7 @@ return function(ctx)
                 Width=ctx.WaveSize.X/2+8,Height=ctx.WaveSize.Y/2+8,
                 Length=ctx.WaveSize.Z+math.abs(travel)+12,Expires=now()+4.5}
         elseif skill=="OceanGyzer"and phase=="CreateGyzer"then
+            for i=#hazards,1,-1 do if hazards[i].Provisional and hazards[i].Boss==boss then table.remove(hazards,i)end end
             record={Kind=skill,Point=point,Radius=ctx.GyzerRadius+8,Expires=now()+math.clamp(tonumber(duration)or 3,0,20)+1.2}
         end
         if record then
@@ -3483,7 +3494,21 @@ return function(ctx)
         if not s.AeganatosDodge or s.StopEverything or s.SafeModePanic or s.ModeratorBlocking or s.TravelBusy or s.AutoTradeBusy then return end
         local danger
         for _,record in ipairs(hazards)do if contains(record,point)or contains(record,desired)then danger=record;break end end
-        if not danger then return end
+        if not danger then
+            if shelter then api.Released+=1 end
+            shelter=nil
+            return
+        end
+        api.Plans+=1
+        if shelter then
+            local safe=ctx.Valid(shelter.Point)
+            for _,record in ipairs(hazards)do if contains(record,shelter.Point)then safe=false;break end end
+            if safe then api.Active=true;return shelter.Point,shelter.Kind end
+            shelter=nil
+        end
+        local alreadySafe=ctx.Valid(point)
+        for _,record in ipairs(hazards)do if contains(record,point)then alreadySafe=false;break end end
+        if alreadySafe then shelter={Point=point,Kind=danger.Kind};api.Active=true;return point,danger.Kind end
         local candidates={}
         if danger.Kind=="OmegaWave"then
             local p=danger.Frame:PointToObjectSpace(point)
@@ -3501,9 +3526,9 @@ return function(ctx)
             local distance=(candidate-point).Magnitude
             if valid and distance<=180 and(not cost or distance<cost)then best=candidate;cost=distance end
         end
-        if best then api.Active=true;api.Moves+=1;return best,danger.Kind end
+        if best then shelter={Point=best,Kind=danger.Kind};api.Active=true;api.Moves+=1;return best,danger.Kind end
     end
-    function api.Reset()table.clear(hazards);api.Active=false end
+    function api.Reset()table.clear(hazards);shelter=nil;api.Active=false end
     function api.Destroy()if disposed then return end;disposed=true;if connection then connection:Disconnect()end;api.Reset()end
     return api
 end
@@ -3520,7 +3545,8 @@ end
     local plane=template and template:FindFirstChild("Plane")
     local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
     state.AeganatosDodgeController=factory({State=state,Replicate=replicate and replicate.OnClientEvent,
-        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=62,
+        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=145,
+        PlayerPosition=function()local c=player.Character;local root=c and c:FindFirstChild("HumanoidRootPart");return root and root.Position end,
         IsBoss=function(mob)return typeof(mob)=="Instance"and mob.Name=="Aeganatos, The Sunken Sovereign"end,
         Frame=function(mob)local root=mob:FindFirstChild("HumanoidRootPart");return root and root.CFrame end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
@@ -3794,8 +3820,12 @@ return function(ctx)
         state.WaveEventsSeen=api.Seen
         local seen=0; for _ in pairs(api.Seen) do seen+=1 end
         if root and health and health.Value>0 and not state.TravelBusy and ctx.AeganatosDodge then
-            local point,reason=ctx.AeganatosDodge.Plan(root.Position,root.Position)
-            if point then hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true end
+            local point,reason=ctx.AeganatosDodge.Plan(root.Position,state.AutoOffsetDestination or root.Position)
+            if point then
+                if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Aeganatos dodge has movement priority")end
+                hold(point,"Aeganatos evade: "..tostring(reason),now)
+                ctx.Status("Aeganatos Dodge · "..tostring(reason));return true
+            end
         end
         if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
             local target=state.FollowTarget
