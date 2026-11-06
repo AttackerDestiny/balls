@@ -512,3 +512,5 @@ WindUI comes from [Footagesus/WindUI](https://github.com/Footagesus/WindUI). Rel
 Auto Farm Position has been removed. Saved Above/Below selections are ignored; ordinary farming uses Below.
 
 Common boss choice is independent of credit-roster presence. Conflicting same-rank locks converge using the selected-scope order, and owned skill casts yield when that focus changes. Enemies must still be streamed to the client. Account Progression, selected-arena limits, native invulnerability and safety checks remain authoritative.
+
+Aeganatos Dodge (Dodge tab, default OFF) reads native OmegaWave FireWave and OceanGyzer CreateGyzer phase events for Aeganatos, The Sunken Sovereign. It plans outside the swept wave envelope or geyser footprint, expires records and yields to safety/trade/travel. Hidden VFX do not determine whether a phase is dangerous. Live cast coverage is limited to phases replicated to that client; this does not guarantee every attack is avoided.

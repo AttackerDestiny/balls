@@ -10,6 +10,7 @@ SOURCE = ROOT / "src/main.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "AEGANATOS DODGE": "aeganatos-dodge.module.luau",
     "BETWEEN ROOM": "between-room.module.luau",
     "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "PAD SLOT": "pad-slot.module.luau",

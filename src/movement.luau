@@ -594,6 +594,31 @@ do
         end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
 end
+do
+    local factory=(function()
+-- BEGIN BUNDLED AEGANATOS DODGE
+-- END BUNDLED AEGANATOS DODGE
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local catalog=enemy and enemy:FindFirstChild("Skills")
+    local floors=catalog and catalog:FindFirstChild("Floors")
+    local ocean=floors and floors:FindFirstChild("Ocean Floor")
+    local boss=ocean and ocean:FindFirstChild("Aeganatos, The Sunken Sovereign")
+    local wave=boss and boss:FindFirstChild("OmegaWave")
+    local template=wave and wave:FindFirstChild("Wave")
+    local plane=template and template:FindFirstChild("Plane")
+    local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
+    state.AeganatosDodgeController=factory({State=state,Replicate=replicate and replicate.OnClientEvent,
+        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=62,
+        IsBoss=function(mob)return typeof(mob)=="Instance"and mob.Name=="Aeganatos, The Sunken Sovereign"end,
+        Frame=function(mob)local root=mob:FindFirstChild("HumanoidRootPart");return root and root.CFrame end,
+        Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
+    function state.SetAeganatosDodge(value)
+        state.AeganatosDodge=value==true
+        if not value then state.AeganatosDodgeController.Reset()end
+        requestSave()
+    end
+end
 local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
@@ -601,6 +626,7 @@ end)()({
     State = state,
     BossDodge = state.BossDodge,
     AtheonDodge = state.AtheonDodgeController,
+    AeganatosDodge = state.AeganatosDodgeController,
     Mobs = trackedMobs,
     MobData = getMobData,
     Hold = function(destination,farmIdle)

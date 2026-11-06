@@ -335,6 +335,7 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    stateToggle("AeganatosDodge","Dodge","Aeganatos Dodge","SetAeganatosDodge")
     stateToggle("AtheonDodge","Dodge","Atheon Dodge","SetAtheonDodge")
     dropdown("Theme","Settings","Theme",function()
         local options={}

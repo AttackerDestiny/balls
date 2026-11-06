@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.common-farm-target-v2.0.21"
-local VERSION="2.0.21"
+local BUILD="2026-11-06.aeganatos-dodge-v2.0.22"
+local VERSION="2.0.22"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -168,6 +168,7 @@ local restore = {
     Skill=preference("SelectedSkill","Piercing Dash"),
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
+    AeganatosDodge=preference("AeganatosDodge",false)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),

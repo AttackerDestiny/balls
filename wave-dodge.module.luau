@@ -204,6 +204,10 @@ return function(ctx)
         end
         state.WaveEventsSeen=api.Seen
         local seen=0; for _ in pairs(api.Seen) do seen+=1 end
+        if root and health and health.Value>0 and not state.TravelBusy and ctx.AeganatosDodge then
+            local point,reason=ctx.AeganatosDodge.Plan(root.Position,root.Position)
+            if point then hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true end
+        end
         if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
             local target=state.FollowTarget
             local tr=target and target:FindFirstChild("HumanoidRootPart")
@@ -274,6 +278,7 @@ return function(ctx)
         saveAudit()
         if ctx.BossDodge then ctx.BossDodge.Destroy() end
         if ctx.AtheonDodge then ctx.AtheonDodge.Destroy() end
+        if ctx.AeganatosDodge then ctx.AeganatosDodge.Destroy()end
         if api.Active then ctx.Release() end
         api.Active=false
         state.BlackoutTarget=nil

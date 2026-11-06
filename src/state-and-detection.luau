@@ -33,7 +33,7 @@ local state = {
     HideSkillAnimation = true, HiddenSkillAnimations = 0,
     SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
-    AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, Dodging = false,
+    AutoDodge = restore.AutoDodge, AeganatosDodge=restore.AeganatosDodge,AtheonDodge=restore.AtheonDodge, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,

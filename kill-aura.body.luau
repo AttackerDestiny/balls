@@ -19,7 +19,7 @@ local previous=(function()
 -- A reload retains settings, never the previous runtime's instances or closures.
 return function(previous,userId)
     if not previous or previous.UserId~=userId then return nil end
-    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","AeganatosDodge","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.common-farm-target-v2.0.21"
-local VERSION="2.0.21"
+local BUILD="2026-11-06.aeganatos-dodge-v2.0.22"
+local VERSION="2.0.22"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -282,7 +282,7 @@ return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
     local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","PerformanceBoosters",
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AeganatosDodge","AtheonDodge","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
@@ -400,6 +400,7 @@ local restore = {
     Skill=preference("SelectedSkill","Piercing Dash"),
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
+    AeganatosDodge=preference("AeganatosDodge",false)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
@@ -586,7 +587,7 @@ local state = {
     HideSkillAnimation = true, HiddenSkillAnimations = 0,
     SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
-    AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, Dodging = false,
+    AutoDodge = restore.AutoDodge, AeganatosDodge=restore.AeganatosDodge,AtheonDodge=restore.AtheonDodge, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
@@ -1549,7 +1550,7 @@ local function settingsPayload()
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
         AutoExplore = state.AutoExplore,
-        AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge,
+        AutoDodge = features.AutoDodge, AeganatosDodge=features.AeganatosDodge,AtheonDodge=features.AtheonDodge,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
         WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,
@@ -3436,6 +3437,98 @@ end
         end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
 end
+do
+    local factory=(function()
+-- BEGIN BUNDLED AEGANATOS DODGE
+-- Native phase envelopes: FireWave has a 3.5s swept plane; CreateGyzer is timed.
+return function(ctx)
+    local api={Active=false,Seen=0,Moves=0}
+    local hazards={}
+    local connection
+    local disposed=false
+    local now=ctx.Now or os.clock
+    local function receive(boss,operation,skill,phase,point,duration)
+        if disposed or not ctx.State.AeganatosDodge or not ctx.IsBoss(boss)then return end
+        if operation~="RunPhase"or typeof(point)~="Vector3"then return end
+        local record
+        if skill=="OmegaWave"and phase=="FireWave"then
+            local frame=ctx.Frame(boss)
+            if not frame then return end
+            local direction=frame.LookVector
+            local travel=tonumber(duration)or 0
+            record={Kind=skill,Frame=CFrame.lookAt(point,point+direction),
+                Width=ctx.WaveSize.X/2+8,Height=ctx.WaveSize.Y/2+8,
+                Length=ctx.WaveSize.Z+math.abs(travel)+12,Expires=now()+4.5}
+        elseif skill=="OceanGyzer"and phase=="CreateGyzer"then
+            record={Kind=skill,Point=point,Radius=ctx.GyzerRadius+8,Expires=now()+math.clamp(tonumber(duration)or 3,0,20)+1.2}
+        end
+        if record then
+            if #hazards>=32 then table.remove(hazards,1)end
+            hazards[#hazards+1]=record;api.Seen+=1
+        end
+    end
+    if ctx.Replicate then connection=ctx.Replicate:Connect(receive)end
+    local function contains(record,point)
+        if record.Kind=="OceanGyzer"then return ((point-record.Point)*Vector3.new(1,0,1)).Magnitude<record.Radius end
+        local localPoint=record.Frame:PointToObjectSpace(point)
+        return math.abs(localPoint.X)<record.Width and math.abs(localPoint.Y)<record.Height
+            and localPoint.Z<8 and localPoint.Z>-record.Length
+    end
+    function api.Plan(point,desired)
+        api.Active=false
+        if disposed then return end
+        for i=#hazards,1,-1 do if now()>=hazards[i].Expires then table.remove(hazards,i)end end
+        local s=ctx.State
+        if not s.AeganatosDodge or s.StopEverything or s.SafeModePanic or s.ModeratorBlocking or s.TravelBusy or s.AutoTradeBusy then return end
+        local danger
+        for _,record in ipairs(hazards)do if contains(record,point)or contains(record,desired)then danger=record;break end end
+        if not danger then return end
+        local candidates={}
+        if danger.Kind=="OmegaWave"then
+            local p=danger.Frame:PointToObjectSpace(point)
+            candidates={danger.Frame:PointToWorldSpace(Vector3.new(danger.Width+5,p.Y,p.Z)),
+                danger.Frame:PointToWorldSpace(Vector3.new(-danger.Width-5,p.Y,p.Z)),
+                Vector3.new(point.X,danger.Frame.Position.Y-danger.Height-6,point.Z)}
+        else
+            local radius=danger.Radius+5
+            for i=0,7 do local angle=i*math.pi/4;candidates[#candidates+1]=danger.Point+Vector3.new(math.cos(angle)*radius,point.Y-danger.Point.Y,math.sin(angle)*radius)end
+        end
+        local best,cost
+        for _,candidate in ipairs(candidates)do
+            local valid=ctx.Valid(candidate)
+            for _,record in ipairs(hazards)do if contains(record,candidate)then valid=false;break end end
+            local distance=(candidate-point).Magnitude
+            if valid and distance<=180 and(not cost or distance<cost)then best=candidate;cost=distance end
+        end
+        if best then api.Active=true;api.Moves+=1;return best,danger.Kind end
+    end
+    function api.Reset()table.clear(hazards);api.Active=false end
+    function api.Destroy()if disposed then return end;disposed=true;if connection then connection:Disconnect()end;api.Reset()end
+    return api
+end
+
+-- END BUNDLED AEGANATOS DODGE
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local catalog=enemy and enemy:FindFirstChild("Skills")
+    local floors=catalog and catalog:FindFirstChild("Floors")
+    local ocean=floors and floors:FindFirstChild("Ocean Floor")
+    local boss=ocean and ocean:FindFirstChild("Aeganatos, The Sunken Sovereign")
+    local wave=boss and boss:FindFirstChild("OmegaWave")
+    local template=wave and wave:FindFirstChild("Wave")
+    local plane=template and template:FindFirstChild("Plane")
+    local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
+    state.AeganatosDodgeController=factory({State=state,Replicate=replicate and replicate.OnClientEvent,
+        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=62,
+        IsBoss=function(mob)return typeof(mob)=="Instance"and mob.Name=="Aeganatos, The Sunken Sovereign"end,
+        Frame=function(mob)local root=mob:FindFirstChild("HumanoidRootPart");return root and root.CFrame end,
+        Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
+    function state.SetAeganatosDodge(value)
+        state.AeganatosDodge=value==true
+        if not value then state.AeganatosDodgeController.Reset()end
+        requestSave()
+    end
+end
 local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
 return function(ctx)
@@ -3644,6 +3737,10 @@ return function(ctx)
         end
         state.WaveEventsSeen=api.Seen
         local seen=0; for _ in pairs(api.Seen) do seen+=1 end
+        if root and health and health.Value>0 and not state.TravelBusy and ctx.AeganatosDodge then
+            local point,reason=ctx.AeganatosDodge.Plan(root.Position,root.Position)
+            if point then hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true end
+        end
         if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
             local target=state.FollowTarget
             local tr=target and target:FindFirstChild("HumanoidRootPart")
@@ -3714,6 +3811,7 @@ return function(ctx)
         saveAudit()
         if ctx.BossDodge then ctx.BossDodge.Destroy() end
         if ctx.AtheonDodge then ctx.AtheonDodge.Destroy() end
+        if ctx.AeganatosDodge then ctx.AeganatosDodge.Destroy()end
         if api.Active then ctx.Release() end
         api.Active=false
         state.BlackoutTarget=nil
@@ -3727,6 +3825,7 @@ end)()({
     State = state,
     BossDodge = state.BossDodge,
     AtheonDodge = state.AtheonDodgeController,
+    AeganatosDodge = state.AeganatosDodgeController,
     Mobs = trackedMobs,
     MobData = getMobData,
     Hold = function(destination,farmIdle)
@@ -10211,7 +10310,7 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AeganatosDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
     for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
@@ -28327,6 +28426,7 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    stateToggle("AeganatosDodge","Dodge","Aeganatos Dodge","SetAeganatosDodge")
     stateToggle("AtheonDodge","Dodge","Atheon Dodge","SetAtheonDodge")
     dropdown("Theme","Settings","Theme",function()
         local options={}
