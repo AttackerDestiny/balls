@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.farm-position-v2.0.17"
-local VERSION="2.0.17"
+local BUILD="2026-11-06.instant-farm-tween-v2.0.18"
+local VERSION="2.0.18"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP

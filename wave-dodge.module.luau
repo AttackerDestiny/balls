@@ -265,7 +265,7 @@ return function(ctx)
         if not root then return end
         local point=anchor or root.Position
         local floor=anchor and anchor.Y or api.FloorY(point)
-        ctx.Hold(Vector3.new(point.X,floor-20,point.Z))
+        ctx.Hold(Vector3.new(point.X,floor-20,point.Z),true)
         state.IdleFloorY=floor
         state.IdleBelowMap=true
         state.IdleAboveMap=false

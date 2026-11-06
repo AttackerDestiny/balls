@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.farm-position-v2.0.17"
-local VERSION="2.0.17"
+local BUILD="2026-11-06.instant-farm-tween-v2.0.18"
+local VERSION="2.0.18"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -2577,17 +2577,37 @@ local function attackRadiusFor(mob)
     local size=data.Root.Size
     return math.min(120,math.max(size.X,size.Z)*.5+20)
 end
-local function pivotRoot(root, position)
-    if releaseStartupHold then releaseStartupHold(false)end
-    local character = root.Parent
+local farmTween
+local instantFarmTweenInfo=TweenInfo.new(0,Enum.EasingStyle.Linear)
+local function clearFarmTween()
+    if not farmTween then return end
+    farmTween:Cancel()
+    farmTween:Destroy()
+    farmTween=nil
+end
+local function rootFrameAt(root,position)
     local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
     if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1) end
-    local targetRoot=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
+    return CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
+end
+local function pivotRoot(root, position)
+    clearFarmTween()
+    if releaseStartupHold then releaseStartupHold(false)end
+    local character = root.Parent
+    local targetRoot=rootFrameAt(root,position)
     character:PivotTo(targetRoot * root.CFrame:ToObjectSpace(character:GetPivot()))
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
 end
+local function tweenFarmRoot(root,position)
+    clearFarmTween()
+    root.AssemblyLinearVelocity=Vector3.zero
+    root.AssemblyAngularVelocity=Vector3.zero
+    farmTween=TweenService:Create(root,instantFarmTweenInfo,{CFrame=rootFrameAt(root,position)})
+    farmTween:Play()
+end
 stopMovement = function(message, keepPosition)
+    if farmTween then clearFarmTween()end
     local floatingRoot=state.ArenaFloat and state.ArenaFloat.Root
     if state.ArenaFloat then state.ArenaFloat.Release() end
     state.TravelHold=false
@@ -3699,7 +3719,7 @@ return function(ctx)
         if not root then return end
         local point=anchor or root.Position
         local floor=anchor and anchor.Y or api.FloorY(point)
-        ctx.Hold(Vector3.new(point.X,floor-20,point.Z))
+        ctx.Hold(Vector3.new(point.X,floor-20,point.Z),true)
         state.IdleFloorY=floor
         state.IdleBelowMap=true
         state.IdleAboveMap=false
@@ -3723,7 +3743,7 @@ end)()({
     AtheonDodge = state.AtheonDodgeController,
     Mobs = trackedMobs,
     MobData = getMobData,
-    Hold = function(destination)
+    Hold = function(destination,farmIdle)
         local character = player.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -3732,7 +3752,11 @@ end)()({
         ensureMovementController(character, root, humanoid, destination)
         positionAlign.Enabled, orientationAlign.Enabled = true, true
         positionAlign.Position = destination
-        if (root.Position-destination).Magnitude > 1.25 then pivotRoot(root, destination); state.TeleportsSent+=1 end
+        if (root.Position-destination).Magnitude>1.25 then
+            if farmIdle and state.AutoFarm then tweenFarmRoot(root,destination)
+            else pivotRoot(root,destination)end
+            state.TeleportsSent+=1
+        end
     end,
     Release = function()
         teleportTarget, correctionTarget = nil, nil
@@ -5012,7 +5036,7 @@ local function exploreEmptyArea(character, root, humanoid, now)
     ensureMovementController(character, root, humanoid, destination)
     positionAlign.Position = destination
     positionAlign.Enabled, orientationAlign.Enabled = true, true
-    pivotRoot(root, destination)
+    tweenFarmRoot(root, destination)
     teleportTarget, correctionTarget = nil, nil
     correctionStrikes = 0
     lastTeleportTime, lastTeleportPosition = now, destination
@@ -5190,7 +5214,7 @@ local function updateMovement(now)
     orientationAlign.Enabled = true
     local changedTarget = teleportTarget ~= state.FollowTarget
     if changedTarget or (now - lastTeleportTime >= state.TeleportInterval and (destination - root.Position).Magnitude > 3.5) then
-        pivotRoot(root, destination)
+        tweenFarmRoot(root, destination)
         if changedTarget then state.OffsetGraceUntil = now + 0.35 end
         teleportTarget = state.FollowTarget
         lastTeleportTime, lastTeleportPosition = now, destination
