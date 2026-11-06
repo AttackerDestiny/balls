@@ -108,10 +108,10 @@ def main():
             f"-- END BUNDLED {marker}", 1)[0]
         assert actual == read(name) + "\n", f"Stale bundle: {name}"
 
-    destroy_start = script.index("function state.Destroy(replacing, teleportCleanup)")
+    destroy_start = script.index("function state.Destroy(replacing,teleportCleanup)")
     destroy = script[destroy_start:script.index("bind(toggle.Activated,", destroy_start)]
     swing = script[script.index("local swingThread\n"):script.index(
-        "\ndo\n    local create=(function()\n-- BEGIN BUNDLED SKILL ACTIVATION")]
+        "\ndo\n    local activation=(function()\n-- BEGIN BUNDLED SKILL ACTIVATION")]
     sources = {"HUD": read("enemy-health.module.luau"), "Travel": read("arena-travel.module.luau"),
                "Destroy": destroy, "Adapter": read("server-isolation-client.module.luau"),
                "Friend": read("auto-join-friend.module.luau"), "Owner": read("runtime-owner.module.luau")}
@@ -123,15 +123,15 @@ def main():
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("mobile-regression.test.luau")) + "))()(sources)\n"
     replacement_start=script.index("if previousRuntime and previousRuntime.Destroy then")
-    replacement=script[replacement_start:script.index("if env.SB2FarmRecoveryUntil",replacement_start)]
+    replacement=script[replacement_start:script.index("local recoveryUntil=",replacement_start)]
     fixture += "assert(loadstring(" + quote(read("replacement-failure.test.luau")) + "))()(" + quote(replacement) + ")\n"
     fallback=script.split("    -- BEGIN MODERN UI FAILURE\n",1)[1].split("    -- END MODERN UI FAILURE",1)[0]
     fixture += "assert(loadstring(" + quote(read("cancelled-ui-fallback.test.luau")) + "))()(" + quote(fallback) + ")\n"
-    visibility_start=script.index("function state.SetUIVisible(visible)")
+    visibility_start=script.index("function state.SetUIVisible(requested)")
     visibility=script[visibility_start:script.index("bind(showUI.Activated",visibility_start)]
     fixture += "assert(loadstring(" + quote(read("modern-ui-only.test.luau")) + "))()(" + quote(visibility) + ")\n"
     views_start=script.index("local controllerViews=(function()")
-    views_binding=script[views_start:script.index("local function create(className",views_start)]
+    views_binding=script[views_start:script.index("state.StartupSliceAt=",views_start)]
     fixture += "assert(loadstring(" + quote(read("controller-view.test.luau")) + "))()(" + quote(read("controller-view.module.luau")) + "," + quote(views_binding) + ")\n"
     assert 'Name="Panel"' not in script and 'legacyVisibility' not in script
     assert 'local m=a.load\'b\'' in script
@@ -149,8 +149,7 @@ def main():
     data_start = script.index("local function getMobData(mob)")
     data = script[data_start:script.index("function state.ReadOwnDamage", data_start)]
     data = "local enemyRegistry=(function()\n" + read("enemy-registry.module.luau") + "\nend)()({Now=os.clock})\n" + data
-    farm_start = script.index("    if now>=nextAcquisition and")
-    farm_selection = script[farm_start:script.index("    if not targetRoot then", farm_start)]
+    farm_selection = script.split("-- BEGIN TEST FARM SELECTION\n",1)[1].split("-- END TEST FARM SELECTION",1)[0]
     # The arena fixture needs validMob returned; the selection fixture embeds its definition.
     valid_definition = valid.removesuffix("\nreturn validMob")
     fixture += "assert(loadstring(" + quote(read("farm-sync.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("target-priority.module.luau"), data, valid_definition, farm_selection, read("credit-check.module.luau"))) + ")\n"
@@ -174,8 +173,7 @@ def main():
     stream_start=script.index("    local pendingParts,queuedParts=")
     stream_budget=script[stream_start:script.index("    bind(workspace.DescendantRemoving",stream_start)]
     fixture += "assert(loadstring(" + quote(read("map-stream-budget.test.luau")) + "))()(" + quote(stream_budget) + ")\n"
-    gate_start = script.index('    if state.FarmCoordination and not state.DodgeReturnPending')
-    movement_gate = script[gate_start:script.index('    local destination = state.AutoOffsetDestination or targetRoot.Position', gate_start)]
+    movement_gate = script.split("-- BEGIN TEST MOVEMENT BUDGET\n",1)[1].split("-- END TEST MOVEMENT BUDGET",1)[0]
     fixture += "assert(loadstring(" + quote(read("fps-budget.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(movement_gate) + ")\n"
     move_adapter = read("server-isolation-client.module.luau")
     can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
@@ -194,7 +192,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("credit-check.test.luau")) + "))()(" + quote(read("credit-check.module.luau")) + "," + quote(read("attack-scheduler.module.luau")) + "," + quote(credit_send) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("windui.test.luau")) + "))()(" + quote(read("windui.module.luau")) + ")\n"
-    payload_start = script.index("local function settingsPayload()")
+    payload_start = script.index("local persistedFields=")
     payload = script[payload_start:script.index("function state.SaveNow()", payload_start)]
     fixture += "assert(loadstring(" + quote(read("above-below.test.luau")) + "))()(" + ",".join(quote(v) for v in (read("auto-range.module.luau"), read("auto-offset.module.luau"), script, payload)) + ")\n"
     arrival_start = script.index("function state.FinishMultiSpotArrival()")
@@ -205,7 +203,7 @@ def main():
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("progression-client.test.luau")) + "))()(" + ",".join(quote(read(name)) for name in ("progression-client.module.luau", "account-progression.module.luau", "progression-gear.module.luau")) + "," + quote(payload) + ")\n"
     save_start = script.index("function state.SaveNow()")
-    save = script[save_start:script.index("requestSave = function()", save_start)]
+    save = script[save_start:script.index("requestSave=function()", save_start)]
     fixture += "assert(loadstring(" + quote(read("storage-bootstrap.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("storage-bootstrap.module.luau"), script, read("kill-aura.luau"), save)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-input.test.luau")) + "))()(" + quote(read("block-input.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
@@ -230,7 +228,7 @@ def main():
     native_start = adapter.index("    local blockBusy=false")
     native = adapter[native_start:adapter.index("    local queuedToken", native_start)]
     fixture += "assert(loadstring(" + quote(read("native-block.test.luau")) + "))()(" + quote(native) + ")\n"
-    ownership = script[script.index("local previousRuntime="):script.index("local BUILD=")]
+    ownership = script[script.index("local previousRuntime="):script.index("local storageBootstrap=")]
     fixture += "assert(loadstring(" + quote(read("account-settings.test.luau")) + "))()(" + quote(ownership) + ")\n"
     fixture += "assert(loadstring(" + quote(read("shared-settings.test.luau")) + "))()(" + quote(read("shared-settings.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("frame-timing.test.luau")) + "))()(" + quote(read("frame-timing.module.luau")) + ")\n"
@@ -268,7 +266,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("multi-spot-hud.test.luau")) + "))()(" + quote(read("multi-spot-hud.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("inventory-view.test.luau")) + "))()(" + quote(read("inventory-view.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-craft.test.luau")) + "))()(" + quote(read("auto-craft.module.luau")) + ")\n"
-    release_start=script.index("stopMovement = function(message, keepPosition)")
+    release_start=script.index("stopMovement = function(message,keepPosition)")
     release=script[release_start:script.index("\ndo\n",release_start)]
     fixture += "assert(loadstring(" + quote(read("movement-release.test.luau")) + "))()(" + quote(release) + ")\n"
     fixture += "assert(loadstring(" + quote(read("auto-quest.test.luau")) + "))()(" + quote(read("auto-quest.module.luau")) + ")\n"

@@ -1,19 +1,20 @@
 return function(ctx)
     local api={}
-    local root,anchor,owned
+    local lease
     function api.Update()
-        if ctx.Blocked()then root,anchor,owned=nil,nil,false;return end
-        if not ctx.Active()then
-            if owned then ctx.Release()end
-            root,anchor,owned=nil,nil,false;return
+        if ctx.Blocked() then lease=nil;return end
+        if not ctx.Active() then
+            local release=lease~=nil
+            lease=nil
+            if release then ctx.Release()end
+            return
         end
-        local current=ctx.Root()
-        if current~=root or not owned then
-            root=current;anchor=nil;owned=true
-            if root then anchor=ctx.Anchor(root)end
+        local root=ctx.Root()
+        if not lease or lease.root~=root then
+            lease={root=root,point=root and ctx.Anchor(root)}
             ctx.Pause()
         end
-        if root and anchor then ctx.Hold(anchor)end
+        if lease.root and lease.point then ctx.Hold(lease.point)end
     end
     return api
 end

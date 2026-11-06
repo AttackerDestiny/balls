@@ -1,21 +1,25 @@
--- Every registered cleanup runs exactly once, even after another cleanup fails.
+-- Detach callbacks before invoking them so nested shutdown cannot run twice.
 return function()
-    local api={Errors={}}
-    local entries,disposed={},false
-    function api.Add(name,fn)
-        assert(not disposed,"Runtime scope already closed")
-        entries[#entries+1]={Name=name,Run=fn}
+    local scope={Errors={}}
+    local callbacks,labels={},{}
+    local open=true
+    function scope.Add(label,callback)
+        assert(open,"Runtime scope already closed")
+        assert(type(callback)=="function","Cleanup must be callable")
+        callbacks[#callbacks+1]=callback;labels[#labels+1]=label
     end
-    function api.Close()
-        if disposed then return api.Errors end
-        disposed=true
-        for _,entry in ipairs(entries)do
-            local ok,reason=pcall(entry.Run)
-            if not ok then api.Errors[#api.Errors+1]={Name=entry.Name,Error=tostring(reason)}end
-            entry.Run=nil
+    function scope.Close()
+        if open then
+            open=false
+            local pending=callbacks;callbacks={}
+            for index=1,#pending do
+                local callback=pending[index];pending[index]=nil
+                local ok,reason=pcall(callback)
+                if not ok then scope.Errors[#scope.Errors+1]={Name=labels[index],Error=tostring(reason)}end
+                labels[index]=nil
+            end
         end
-        table.clear(entries)
-        return api.Errors
+        return scope.Errors
     end
-    return api
+    return scope
 end

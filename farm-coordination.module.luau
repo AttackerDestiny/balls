@@ -1,53 +1,47 @@
--- Lua-only coordination: shared server-time beats and common destination geometry.
--- This does not exchange state between clients or promise a network barrier.
+-- Server-clock beats and roster-indexed formation slots require no external service.
 return function(ctx)
     local api={}
-    local last={}
-    local step=.25
+    local beats={}
+    local formation={Due=0,Index=1,Count=1}
+    local holds=setmetatable({}, {__mode="k"})
     function api.Ready(channel)
-        local epoch=math.floor(ctx.Now()/step)
-        local previous=last[channel]
-        if previous==nil then last[channel]=epoch;return false end
-        if epoch>previous then last[channel]=epoch;return true end
-        return false
+        local beat=math.floor(ctx.Now()*4)
+        local seen=beats[channel]
+        if seen==nil then beats[channel]=beat;return false end
+        if beat<=seen then return false end
+        beats[channel]=beat;return true
     end
-    function api.Position(point)
-        local function snap(value)return math.floor(value*2+.5)/2 end
-        return ctx.Vector(snap(point.X),snap(point.Y),snap(point.Z))
+    local function quantize(value)return math.floor(value*2+.5)/2 end
+    function api.Position(point)return ctx.Vector(quantize(point.X),quantize(point.Y),quantize(point.Z))end
+    local function refreshRoster(now)
+        if formation.Roster and now<formation.Due then return end
+        local roster=ctx.Members()
+        table.sort(roster,function(a,b)return a.UserId<b.UserId end)
+        formation.Roster=roster;formation.Due=now+1;formation.Count=math.max(1,#roster);formation.Index=1
+        for index,person in ipairs(roster)do if person.UserId==ctx.UserId then formation.Index=index;break end end
     end
-    local roster,rosterAt,slot,count=nil,0,1,1
-    local held=setmetatable({}, {__mode="k"})
-    function api.Spread(point,mob,center,reach)
+    function api.Spread(point,target,center,reach)
         if not ctx.Members then return point end
-        local now=ctx.Now()
-        if not roster or now>=rosterAt then
-            rosterAt=now+1
-            roster=ctx.Members()
-            table.sort(roster,function(a,b)return a.UserId<b.UserId end)
-            slot,count=1,math.max(1,#roster)
-            for i,person in ipairs(roster)do if person.UserId==ctx.UserId then slot=i;break end end
-        end
-        local radius=count>1 and math.min(12,4/(2*math.sin(math.pi/count)))or 0
+        refreshRoster(ctx.Now())
+        local count,index=formation.Count,formation.Index
+        local sine=count>1 and math.sin(math.pi/count)or 0
+        local radius=count>1 and math.min(12,2/sine)or 0
         if center and reach then
-            -- Preserve vertical body clearance. Reserve space for position snapping.
             local vertical=math.abs(point.Y-center.Y)+.5
-            radius=math.min(radius,math.sqrt(math.max(0,(math.max(0,reach-1))^2-vertical^2))-.5)
-            radius=math.max(0,radius)
+            local usable=math.max(0,reach-1)
+            radius=math.max(0,math.min(radius,math.sqrt(math.max(0,usable*usable-vertical*vertical))-.5))
         end
-        local angle=(slot-1)*2*math.pi/count
-        local result=api.Position(ctx.Vector(point.X+math.cos(angle)*radius,point.Y,point.Z+math.sin(angle)*radius))
-        local previous=held[mob]
-        if previous and previous.Slot==slot and previous.Count==count then
-            local p=previous.Point
-            local distance=(result.X-p.X)^2+(result.Y-p.Y)^2+(result.Z-p.Z)^2
-            if distance<.75^2 then return p end
+        local angle=(index-1)*2*math.pi/count
+        local proposed=api.Position(ctx.Vector(point.X+math.cos(angle)*radius,point.Y,point.Z+math.sin(angle)*radius))
+        local old=holds[target]
+        if old and old.Index==index and old.Count==count then
+            local delta=(proposed.X-old.Point.X)^2+(proposed.Y-old.Point.Y)^2+(proposed.Z-old.Point.Z)^2
+            if delta<.5625 then return old.Point end
         end
-        held[mob]={Point=result,Slot=slot,Count=count}
-        api.Slot,api.Count,api.Spacing=slot,count,count>1 and 2*radius*math.sin(math.pi/count)or 0
-        return result
+        holds[target]={Point=proposed,Index=index,Count=count}
+        api.Slot=index;api.Count=count;api.Spacing=2*radius*sine
+        return proposed
     end
-    function api.Deadline(killedAt,seconds)
-        return math.ceil((killedAt+seconds)*2)/2
-    end
+    function api.Deadline(killedAt,seconds)return math.ceil((killedAt+seconds)*2)/2 end
     return api
 end

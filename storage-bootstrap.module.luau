@@ -1,50 +1,45 @@
--- Executor paths are relative to its workspace; never add a second "workspace".
--- Existing account settings/tickets are preserved. The runnable entry passes its
--- own embedded body so this can persist a complete, dependency-free loader.
+-- Self-installation is a small journal of idempotent writes, not a reset.
 return function(ctx)
-    local api={Ready=false,Generation=0,Created={}}
-    local folder="SB2Codex"
-    local sourcePath=folder.."/kill-aura.luau"
-    local cachedPath=type(ctx.Build)=="string"and (folder.."/source_"..ctx.Build:gsub("[^%w_-]","_")..".luau")or sourcePath
-    api.SourcePath=cachedPath
-    local saved=false
-    local fullSource=type(ctx.Source)=="string"and ctx.Prefix..ctx.Source..ctx.Suffix or nil
-    local function ensureFile(path,value)
-        if not ctx.IsFile(path)then
-            ctx.Write(path,value);api.Generation+=1;api.Created[path]=true
-        end
+    local directory="SB2Codex"
+    local stable=directory.."/kill-aura.luau"
+    local versioned=type(ctx.Build)=="string"and directory.."/source_"..ctx.Build:gsub("[^%w_-]","_")..".luau"or stable
+    local entry=type(ctx.Source)=="string"and ctx.Prefix..ctx.Source..ctx.Suffix or nil
+    local api={Ready=false,Generation=0,Created={},SourcePath=versioned}
+    local installed=false
+    local function write(path,text)
+        ctx.Write(path,text)
+        api.Generation+=1;api.Created[path]=true
     end
-    function api.Ensure(verifySource)
-        local ok,message=pcall(function()
-            assert(type(ctx.IsFile)=="function"and type(ctx.Read)=="function"and type(ctx.Write)=="function",
-                "This executor does not provide file storage for automatic rejoin")
-            assert(fullSource,"Run the complete kill-aura.luau entry to install automatic rejoin")
-            if type(ctx.IsFolder)=="function"then
-                if not ctx.IsFolder(folder)then
-                    assert(type(ctx.MakeFolder)=="function","This executor cannot create SB2Codex")
-                    local made,reason=pcall(ctx.MakeFolder,folder)
-                    assert(made or ctx.IsFolder(folder),tostring(reason))
-                end
-            elseif type(ctx.MakeFolder)=="function"then
-                -- Executors without isfolder may report an existing folder as an error.
-                pcall(ctx.MakeFolder,folder)
-            end
-            if (verifySource and cachedPath==sourcePath)or not saved or not ctx.IsFile(sourcePath)then
-                if not ctx.IsFile(sourcePath)or ctx.Read(sourcePath)~=fullSource then
-                    ctx.Write(sourcePath,fullSource);api.Generation+=1;api.Created[sourcePath]=true
-                end
-                saved=true
-            end
-            if cachedPath~=sourcePath and (verifySource or not ctx.IsFile(cachedPath))then
-                if not ctx.IsFile(cachedPath)or ctx.Read(cachedPath)~=fullSource then
-                    ctx.Write(cachedPath,fullSource);api.Generation+=1;api.Created[cachedPath]=true
-                end
-            end
-            ensureFile(folder.."/settings_"..ctx.UserId..".json",ctx.Encode({Version=1}))
-            ensureFile(folder.."/solo-search_"..ctx.UserId..".json",ctx.Encode({Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId}))
-        end)
-        api.Ready=ok;api.Error=not ok and tostring(message)or nil
-        return ok,api.Error
+    local function source(path,inspect)
+        local exists=ctx.IsFile(path)
+        if not exists or (inspect and ctx.Read(path)~=entry)then write(path,entry)end
+    end
+    local function directoryReady()
+        if ctx.IsFolder then
+            if ctx.IsFolder(directory)then return end
+            assert(type(ctx.MakeFolder)=="function","This executor cannot create SB2Codex")
+            local ok,reason=pcall(ctx.MakeFolder,directory)
+            assert(ok or ctx.IsFolder(directory),tostring(reason))
+        elseif ctx.MakeFolder then pcall(ctx.MakeFolder,directory)end
+    end
+    local function newFile(path,value)
+        if not ctx.IsFile(path)then write(path,ctx.Encode(value))end
+    end
+    local function synchronize(verify)
+        for _,name in ipairs({"IsFile","Read","Write"})do
+            assert(type(ctx[name])=="function","This executor does not provide file storage for automatic rejoin")
+        end
+        assert(entry,"Run the complete kill-aura.luau entry to install automatic rejoin")
+        directoryReady()
+        if not installed or not ctx.IsFile(stable)or (verify and stable==versioned)then source(stable,true);installed=true end
+        if versioned~=stable then source(versioned,verify==true)end
+        newFile(directory.."/settings_"..ctx.UserId..".json",{Version=1})
+        newFile(directory.."/solo-search_"..ctx.UserId..".json",{Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId})
+    end
+    function api.Ensure(verify)
+        local ok,reason=pcall(synchronize,verify)
+        api.Ready=ok;api.Error=not ok and tostring(reason)or nil
+        return api.Ready,api.Error
     end
     api.Ensure(true)
     return api

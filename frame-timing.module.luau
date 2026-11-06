@@ -1,16 +1,18 @@
--- All deadlines remain wall-clock based. Steady 10 FPS is not a freeze.
+-- Exponential timing baseline with a separate, bounded hitch hold.
 return function(state)
-    local api={}
-    function api.Sample(delta,now)
-        if type(delta)~="number" or delta~=delta or delta<=0 or delta==math.huge then return end
-        local previous=state.AverageFrameTime or 1/60
-        local stalled=delta>math.max(.35,previous*4)
-        -- Ignore a single long hitch in the baseline so it cannot poison pacing.
-        state.AverageFrameTime=previous+(math.min(delta,.2)-previous)*.08
-        if stalled and (state.Enabled or state.SkillAura) then
-            state.LagPauseUntil=math.max(state.LagPauseUntil or 0,now+.5)
-        end
-        return stalled
+    local smoothing, ceiling = .08, .2
+    local function finitePositive(value)
+        return type(value)=="number" and value>0 and value<math.huge and value==value
     end
-    return api
+    return {Sample=function(elapsed,stamp)
+        if not finitePositive(elapsed)then return nil end
+        local baseline=state.AverageFrameTime or 1/60
+        local hitch=elapsed>math.max(.35,baseline*4)
+        state.AverageFrameTime=baseline*(1-smoothing)+math.min(ceiling,elapsed)*smoothing
+        if hitch and (state.Enabled or state.SkillAura)then
+            local hold=stamp+.5
+            if hold>(state.LagPauseUntil or 0)then state.LagPauseUntil=hold end
+        end
+        return hitch
+    end}
 end

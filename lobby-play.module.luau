@@ -1,26 +1,31 @@
--- Bounded login-screen helper; no frame connection or floor-runtime polling.
+-- Observe readiness, queue recovery once, then pace attempts until the menu leaves.
 return function(ctx)
     local api={Attempts=0,Done=false}
-    local deadline,nextTry,queued=ctx.Now()+60,0,false
+    local expires=ctx.Now()+60
+    local nextActivation=0
+    local prepared=false
+    local function call(fn,...)
+        local ok,result=pcall(fn,...)
+        if not ok then api.Error=tostring(result);api.Done=true end
+        return ok,result
+    end
     function api.Update()
         if api.Done then return end
         local now=ctx.Now()
-        if not ctx.Alive() or now>=deadline then api.Done=true;return end
+        if now>=expires or not ctx.Alive() then api.Done=true;return end
         local button=ctx.Find()
         if not button or not ctx.Ready(button) then
-            if api.Attempts>0 then api.Done=true end
+            api.Done=api.Attempts>0
             return
         end
-        if now<nextTry then return end
-        nextTry=now+1
-        if not queued then
-            local ok,err=pcall(ctx.Queue)
-            if not ok then api.Error=tostring(err);api.Done=true;return end
-            queued=true
+        if now<nextActivation then return end
+        nextActivation=now+1
+        if not prepared then
+            if not call(ctx.Queue) then return end
+            prepared=true
         end
-        local ok,err=pcall(ctx.Activate,button)
-        if not ok then api.Error=tostring(err);api.Done=true;return end
-        if err~=false then api.Attempts+=1 end
+        local ok,activated=call(ctx.Activate,button)
+        if ok and activated~=false then api.Attempts=api.Attempts+1 end
     end
     return api
 end

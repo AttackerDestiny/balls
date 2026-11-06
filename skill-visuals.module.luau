@@ -1,313 +1,267 @@
--- Suppress rendering while retaining animation timelines, hitboxes and callbacks.
+-- Local visual overlays preserve native hitbox geometry, timers and animation markers.
 return function(ctx)
-    local state,player=ctx.State,game.Players.LocalPlayer
-    local api={AnimationsHidden=0,EffectsHidden=0}
-    local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
-    local managed,tracks={},{}
-    local maintenance,maintenanceQueued=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
-    local maintenanceHead,maintenanceTail=1,0
-    local maintenanceNext,maintenanceNextTail=setmetatable({}, {__mode="v"}),0
-    local ordinaryTracks=setmetatable({}, {__mode="k"})
-    local connections={}
+    local state=ctx.State
+    local player=game.Players.LocalPlayer
+    local api={AnimationsHidden=0,EffectsHidden=0,Pending=0}
     local disposed=false
-    local animator,played,nextCheck=nil,nil,0
-    local pendingQueue=assert(ctx.Queue,"Bounded visual queue is required")
+    local pending=assert(ctx.Queue,"Bounded visual queue is required")
+    local managed,tracks={},{}
+    local maintenance=setmetatable({}, {__mode="v"})
+    local maintenanceNext=setmetatable({}, {__mode="v"})
+    local maintenanceQueued=setmetatable({}, {__mode="k"})
+    local maintenanceHead,maintenanceTail,maintenanceNextTail=1,0,0
+    local ordinaryTracks=setmetatable({}, {__mode="k"})
     local invisible=NumberSequence.new(1)
-    local hiddenWeight=0.0001 -- A zero-weight track can stop before its damage markers.
-    local gunUntil,gunOrigin=0,nil
+    local catalogs={Animation={},Sound={},Name={},Skill={},Ordinary={}}
     local gunModels=setmetatable({}, {__mode="k"})
-    local function normalize(value) return string.lower((string.gsub(value or "","[^%w]",""))) end
-    local function assetId(value) return string.match(value or "","%d+") end
+    local gunOrigin,gunUntil=nil,0
+    local connections={}
+    local animator,animationConnection
+    local nextAnimation=0
+    local hiddenWeight=.0001
+    local function normalize(value)return tostring(value or ""):lower():gsub("[^%w]","")end
+    local function id(value)return tostring(value or ""):match("%d+")end
     local generic={part=true,meshpart=true,model=true,folder=true,attachment=true,rock=true,rocks=true,groundrocks=true,floor=true,terrain=true,baseplate=true,spawnlocation=true,humanoidrootpart=true,uppertorso=true,lowertorso=true,vfx=true,handle=true,trail=true,beam=true,light=true,animation=true,particleemitter=true,pointlight=true,spotlight=true,surfacelight=true,sound=true,smoke=true,texture=true,decal=true}
     local locomotion={idle=true,walk=true,run=true,jump=true,fall=true,climb=true,swim=true,swimidle=true,sit=true,toolnone=true}
-    for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren()) do names[normalize(definition.Name)]=true end
-    for _,root in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects}) do
-        for _,instance in ipairs(root:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
-            if instance:IsA("Animation")then
-                local id=assetId(instance.AnimationId);if id then assets[id]=true end
+    for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren())do catalogs.Skill[normalize(definition.Name)]=true end
+    for _,service in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects})do
+        for _,object in ipairs(service:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound"))do
+            if object:IsA("Animation")then local key=id(object.AnimationId);if key then catalogs.Animation[key]=true end
             else
-                if instance:IsA("Sound")then local id=assetId(instance.SoundId);if id then sounds[id]=true end end
-                local key=normalize(instance.Name)
-                if #key>=5 and not generic[key]then effectNames[key]=true end
+                if object:IsA("Sound")then local key=id(object.SoundId);if key then catalogs.Sound[key]=true end end
+                local key=normalize(object.Name);if #key>=5 and not generic[key]then catalogs.Name[key]=true end
             end
             if state.YieldStartup then state.YieldStartup()end
         end
     end
-    for _,style in pairs(ctx.Actions.animations) do
-        if type(style)=="table" then for key,track in pairs(style) do
-            if type(key)=="string" and typeof(track)=="Instance" and track:IsA("AnimationTrack") and track.Animation then
-                local id=assetId(track.Animation.AnimationId)
-                if id then if names[normalize(key)] then assets[id]=true else ordinaryAnimations[id]=true end end
+    for _,pack in pairs(ctx.Actions.animations)do if type(pack)=="table"then
+        for name,track in pairs(pack)do
+            if type(name)=="string"and typeof(track)=="Instance"and track:IsA("AnimationTrack")and track.Animation then
+                local key=id(track.Animation.AnimationId)
+                if key then local collection=catalogs.Skill[normalize(name)]and catalogs.Animation or catalogs.Ordinary;collection[key]=true end
             end
-        end end
-    end
-    local function keep(instance)
-        if (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui"))
-            and #instance:QueryDescendants("TextLabel,TextButton")>0 then return true end
-        if ctx.Preserve and ctx.Preserve(instance) then return true end
+        end
+    end end
+    local function keep(object)
+        if (object:IsA("BillboardGui")or object:IsA("SurfaceGui"))and #object:QueryDescendants("TextLabel,TextButton")>0 then return true end
+        if ctx.Preserve and ctx.Preserve(object)then return true end
         local mobs=workspace:FindFirstChild("Mobs")
+        if mobs and object:IsDescendantOf(mobs)then return true end
         local characters=workspace:FindFirstChild("Characters")
+        if characters and object:IsDescendantOf(characters)and not(player.Character and object:IsDescendantOf(player.Character))then return true end
         local items=workspace:FindFirstChild("CharacterItems")
-        local ownItems=items and items:FindFirstChild(tostring(player.UserId))
-        if items and instance:IsDescendantOf(items) and not (ownItems and instance:IsDescendantOf(ownItems)) then return true end
-        if mobs and instance:IsDescendantOf(mobs) then return true end
-        if characters and instance:IsDescendantOf(characters) and not (player.Character and instance:IsDescendantOf(player.Character)) then return true end
+        local own=items and items:FindFirstChild(tostring(player.UserId))
+        return items and object:IsDescendantOf(items)and not(own and object:IsDescendantOf(own))or false
+    end
+    local function gunEffect(object)
+        local part=object:IsA("BasePart")and object or object:FindFirstAncestorWhichIsA("BasePart")
+        if not part then return false end
+        local near=false
+        for model,expires in pairs(gunModels)do
+            if not model.Parent or os.clock()>expires then gunModels[model]=nil
+            else local gun=model:FindFirstChild("Gun");if gun and gun:IsA("BasePart")and (part.Position-gun.Position).Magnitude<160 then near=true;break end end
+        end
+        if not near and gunOrigin and os.clock()<gunUntil then
+            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            near=(part.Position-gunOrigin).Magnitude<160 or root and (part.Position-root.Position).Magnitude<160
+        end
+        if not near then return false end
+        if object:IsA("Trail")or object:IsA("Beam")or object:IsA("ParticleEmitter")then return true end
+        local sphere=part:IsA("Part")and part.Name=="Part"and not part.CanCollide and part.Shape==Enum.PartType.Ball and part.Transparency>=.95 and part.Size.X>=8 and part.Size.X<=16
+        if object:IsA("Decal")then return sphere or object.Texture:find("3170098415",1,true)~=nil or object.Texture:find("3170224154",1,true)~=nil end
+        if sphere and (object:IsA("Light")or object:IsA("Sound"))then return true end
+        if object:IsA("BasePart")and not object.CanCollide and object.Material==Enum.Material.Neon then
+            if object.BrickColor==BrickColor.new("Bright yellow")then return true end
+            if object:IsA("Part")and object.Name=="Part"and object.BrickColor==BrickColor.new("Bright blue")then
+                return object.Shape==Enum.PartType.Ball or object.Size.Z>object.Size.X*3 and object.Size.Z>object.Size.Y*3
+            end
+        end
         return false
     end
-    local function effect(instance)
-        if managed[instance] then return true end
-        if keep(instance) then return false end
-        local gunNearby=false
-        local part=instance:IsA("BasePart") and instance or instance:FindFirstAncestorWhichIsA("BasePart")
-        if part then
-            for model,expires in pairs(gunModels) do
-                if not model.Parent or os.clock()>expires then gunModels[model]=nil
-                else local gun=model:FindFirstChild("Gun"); if gun and gun:IsA("BasePart") and (part.Position-gun.Position).Magnitude<160 then gunNearby=true; break end end
-            end
-        end
-        if (gunOrigin and os.clock()<gunUntil) or gunNearby then
-            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if part and (gunNearby or (gunOrigin and (part.Position-gunOrigin).Magnitude<160) or (root and (part.Position-root.Position).Magnitude<160)) then
-                local sphere=part:IsA("Part") and part.Name=="Part" and not part.CanCollide and part.Shape==Enum.PartType.Ball
-                    and part.Transparency>=.95 and part.Size.X>=8 and part.Size.X<=16
-                if instance:IsA("Trail") or instance:IsA("Beam") or instance:IsA("ParticleEmitter") then return true end
-                if instance:IsA("Decal") and (sphere or string.find(instance.Texture,"3170098415",1,true) or string.find(instance.Texture,"3170224154",1,true)) then return true end
-                if sphere and (instance:IsA("Light") or instance:IsA("Sound")) then return true end
-                if instance:IsA("BasePart") and not instance.CanCollide and instance.Material==Enum.Material.Neon
-                    and (instance.BrickColor==BrickColor.new("Bright yellow")
-                        or (instance:IsA("Part") and instance.Name=="Part" and instance.BrickColor==BrickColor.new("Bright blue")
-                            and (instance.Shape==Enum.PartType.Ball or (instance.Size.Z>instance.Size.X*3 and instance.Size.Z>instance.Size.Y*3)))) then return true end
-            end
-        end
-        if instance:IsA("Sound") and sounds[assetId(instance.SoundId)] then return true end
-        local own=player.Character and instance:IsDescendantOf(player.Character)
-        if own and instance:IsA("BasePart") and (instance.Parent==player.Character or instance.Parent:IsA("Accessory") or instance.Parent:IsA("Tool")) then return false end
-        if own and (instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") or instance:IsA("Light") or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles")) then return true end
-        local node=instance
+    local function effect(object)
+        if managed[object]then return true end
+        if keep(object)then return false end
+        if gunEffect(object)then return true end
+        if object:IsA("Sound")and catalogs.Sound[id(object.SoundId)]then return true end
+        local own=player.Character and object:IsDescendantOf(player.Character)
+        if own and object:IsA("BasePart")and (object.Parent==player.Character or object.Parent:IsA("Accessory")or object.Parent:IsA("Tool"))then return false end
+        if own and (object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")or object:IsA("Light")or object:IsA("Smoke")or object:IsA("Fire")or object:IsA("Sparkles"))then return true end
+        local node=object
         while node and node~=workspace do
             local key=normalize(node.Name)
-            local rifle=key=="ar" and node:IsA("Model") and node:FindFirstChild("Gun")
-                and (node:FindFirstChild("Portal1") or node:FindFirstChild("Portal2"))
-            if node.Name=="HitEffects" or names[key] or effectNames[key] or key=="pistol" or key=="rifle" or key=="summonrifle" or rifle then return true end
+            if node.Name=="HitEffects"or catalogs.Skill[key]or catalogs.Name[key]or key=="pistol"or key=="rifle"or key=="summonrifle"then return true end
+            if key=="ar"and node:IsA("Model")and node:FindFirstChild("Gun")and (node:FindFirstChild("Portal1")or node:FindFirstChild("Portal2"))then return true end
             node=node.Parent
         end
         return false
     end
-    -- Mobile executors may reject LocalTransparencyModifier on effect classes.
-    -- Treat each property independently so one unsupported member cannot stall VFX cleanup.
-    local function write(instance,property,value)
-        return pcall(function()instance[property]=value end)
+    -- Isolated property access handles mobile executors that reject optional members.
+    local function write(object,property,value)
+        return pcall(function()object[property]=value end)
     end
-    local function restore(instance,record)
-        for property,value in pairs(record.Before) do write(instance,property,value) end
+    local function restore(object,record)
+        for property,value in pairs(record.Before)do write(object,property,value)end
     end
-    local function suppress(instance)
-        if disposed or state.StopEverything then return end
-        if managed[instance] or not effect(instance) then return end
+    local function suppress(object)
+        if disposed or state.StopEverything or managed[object]or not effect(object)then return end
         if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
-        local properties
-        if instance:IsA("BasePart") then
-            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
-            properties={LocalTransparencyModifier=1,Transparency=1}
-        elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
-        elseif instance:IsA("Light") then properties={Enabled=false,Brightness=0}
-        elseif instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles") then properties={Enabled=false}
-        elseif instance:IsA("Sound") then properties={Volume=0}
-        elseif instance:IsA("Decal") or instance:IsA("Texture") then properties={Transparency=1}
-        elseif instance:IsA("BillboardGui") or instance:IsA("SurfaceGui") then properties={Enabled=false}
-        elseif instance:IsA("Highlight") then properties={Enabled=false,FillTransparency=1,OutlineTransparency=1} end
-        if not properties then return end
-        local record={Before={},Hidden=properties,Parent=instance.Parent}
-        for property,value in pairs(properties) do
-            local readable,before=pcall(function()return instance[property]end)
-            if readable and write(instance,property,value) then record.Before[property]=before
-            else record.Hidden[property]=nil end
+        local hidden
+        if object:IsA("BasePart")then
+            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(object)end
+            hidden={Transparency=1,LocalTransparencyModifier=1}
+        elseif object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")then hidden={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
+        elseif object:IsA("Light")then hidden={Brightness=0,Enabled=false}
+        elseif object:IsA("Sound")then hidden={Volume=0}
+        elseif object:IsA("Decal")or object:IsA("Texture")then hidden={Transparency=1}
+        elseif object:IsA("Highlight")then hidden={Enabled=false,FillTransparency=1,OutlineTransparency=1}
+        elseif object:IsA("Smoke")or object:IsA("Fire")or object:IsA("Sparkles")or object:IsA("BillboardGui")or object:IsA("SurfaceGui")then hidden={Enabled=false}end
+        if not hidden then return end
+        local before={}
+        for property,value in pairs(hidden)do
+            local readable,original=pcall(function()return object[property]end)
+            if readable and write(object,property,value)then before[property]=original else hidden[property]=nil end
         end
-        if not next(record.Hidden)then return end
-        managed[instance]=record
-        if not maintenanceQueued[instance]then
-            maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
-        end
-        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") then pcall(function()instance:Clear()end) end
+        if not next(hidden)then return end
+        managed[object]={Before=before,Hidden=hidden,Parent=object.Parent}
+        if not maintenanceQueued[object]then maintenanceTail+=1;maintenance[maintenanceTail]=object;maintenanceQueued[object]=true end
+        if object:IsA("ParticleEmitter")or object:IsA("Trail")then pcall(function()object:Clear()end)end
         api.EffectsHidden+=1
     end
     local function isSkill(track)
-        if ordinaryTracks[track] then return false end
-        local key=normalize(track.Name)
-        if locomotion[key] or string.sub(key,1,5)=="swing" then return false end
-        local id=track.Animation and assetId(track.Animation.AnimationId)
-        if id and assets[id] then return true end
-        if id and ordinaryAnimations[id] then return false end
-        if names[key] then return true end
-        if track.Priority.Value>=Enum.AnimationPriority.Action.Value then return true end
-        return (state.SkillCastRunning or (ctx.SkillState and ctx.SkillState.usingSkill~="none")) and not locomotion[key]
+        if ordinaryTracks[track]then return false end
+        local name=normalize(track.Name)
+        if locomotion[name]or name:sub(1,5)=="swing"then return false end
+        local asset=track.Animation and id(track.Animation.AnimationId)
+        if asset and catalogs.Animation[asset]then return true end
+        if asset and catalogs.Ordinary[asset]then return false end
+        if catalogs.Skill[name]or track.Priority.Value>=Enum.AnimationPriority.Action.Value then return true end
+        return (state.SkillCastRunning or ctx.SkillState and ctx.SkillState.usingSkill~="none")and not locomotion[name]
     end
     api.IsSkillAnimation=isSkill
     function api.MarkGunCast(name,origin)
-        if name=="Summon Pistol" or name=="Summon Rifle" then gunUntil=os.clock()+5; gunOrigin=origin end
+        if name=="Summon Pistol"or name=="Summon Rifle"then gunOrigin=origin;gunUntil=os.clock()+5 end
     end
     function api.AllowSwingTrack(track)
         ordinaryTracks[track]=true
-        local before=tracks[track]
-        if before and track.IsPlaying then track:AdjustWeight(before.Weight,0) end
-        tracks[track]=nil
+        local weight=tracks[track];tracks[track]=nil
+        if weight and track.IsPlaying then track:AdjustWeight(weight.Weight,0)end
     end
     local function hideTrack(track)
-        if disposed or state.StopEverything then return end
-        if not isSkill(track) then return end
-        if not tracks[track] then
-            tracks[track]={Weight=track.WeightTarget}
-            api.AnimationsHidden+=1
-        end
-        if math.abs(track.WeightTarget-hiddenWeight)>0.00001 or track.WeightCurrent>0.001 then track:AdjustWeight(hiddenWeight,0) end
+        if disposed or state.StopEverything or not isSkill(track)then return end
+        if not tracks[track]then tracks[track]={Weight=track.WeightTarget};api.AnimationsHidden+=1 end
+        if math.abs(track.WeightTarget-hiddenWeight)>.00001 or track.WeightCurrent>.001 then track:AdjustWeight(hiddenWeight,0)end
     end
-    local function enqueue(instance,priority)
-        if disposed or state.StopEverything or pendingQueue.Contains(instance)or managed[instance]then return end
-        local name=instance.ClassName
-        if not (instance:IsA("BasePart") or instance:IsA("Light") or name=="ParticleEmitter" or name=="Beam" or name=="Trail"
-            or name=="Smoke" or name=="Fire" or name=="Sparkles" or name=="Texture" or name=="Sound" or name=="Decal" or name=="BillboardGui" or name=="SurfaceGui" or name=="Highlight") then return end
-        pendingQueue.Push(instance,priority)
+    local eligible={ParticleEmitter=true,Beam=true,Trail=true,Smoke=true,Fire=true,Sparkles=true,Texture=true,Sound=true,Decal=true,BillboardGui=true,SurfaceGui=true,Highlight=true}
+    local function candidate(object)return object:IsA("BasePart")or object:IsA("Light")or eligible[object.ClassName]end
+    local function queue(object,priority)
+        if not disposed and not state.StopEverything and not managed[object]and candidate(object)then pending.Push(object,priority)end
     end
     function api.ProcessPending()
         local deadline=os.clock()+.0006
-        local count=0
-        while count<64 and (count==0 or os.clock()<deadline) do
-            local instance=pendingQueue.Pop()
-            if not instance then break end
-            if instance.Parent then pcall(suppress,instance) end
-            count+=1
+        local processed=0
+        while processed<64 and (processed==0 or os.clock()<deadline)do
+            local object=pending.Pop();if not object then break end
+            if object.Parent then pcall(suppress,object)end
+            processed+=1
         end
-        api.Pending=pendingQueue.Count
-        state.VisualQueueSize=api.Pending
+        api.Pending=pending.Count;state.VisualQueueSize=api.Pending
     end
-    local immediateCount,immediateSince=0,0
-    local function added(instance)
+    local burst={At=0,Count=0}
+    local function added(object)
         if disposed or state.StopEverything or not state.Running then return end
-        if instance:IsA("Model") and (instance.Name=="AR" or instance.Name=="Pistol") then
-            gunModels[instance]=os.clock()+5
-            for _,part in ipairs(instance:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Sound,Decal,Texture")) do enqueue(part,true) end
+        if object:IsA("Model")and (object.Name=="AR"or object.Name=="Pistol")then
+            gunModels[object]=os.clock()+5
+            for _,child in ipairs(object:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Sound,Decal,Texture"))do queue(child,true)end
         end
-        if instance:IsA("TextLabel") or instance:IsA("TextButton") then
-            local gui=instance:FindFirstAncestorWhichIsA("BillboardGui") or instance:FindFirstAncestorWhichIsA("SurfaceGui")
-            local record=gui and managed[gui]
-            if record then
-                restore(gui,record)
-                managed[gui]=nil
-            end
+        if object:IsA("TextLabel")or object:IsA("TextButton")then
+            local gui=object:FindFirstAncestorWhichIsA("BillboardGui")or object:FindFirstAncestorWhichIsA("SurfaceGui")
+            if gui and managed[gui]then restore(gui,managed[gui]);managed[gui]=nil end
             return
         end
-        -- Streaming also adds attachments, constraints, value objects and UI
-        -- layout nodes. They cannot render effects and must not grow the queue.
-        if not(instance:IsA("BasePart")or instance:IsA("ParticleEmitter")or instance:IsA("Beam")or instance:IsA("Trail")
-            or instance:IsA("Smoke")or instance:IsA("Fire")or instance:IsA("Sparkles")or instance:IsA("Light")
-            or instance:IsA("Decal")or instance:IsA("Texture")or instance:IsA("BillboardGui")or instance:IsA("SurfaceGui")
-            or instance:IsA("Highlight")or instance:IsA("Sound"))then return end
-        -- Hide proven effects on arrival, before waiting for the next mobile frame.
-        -- Cap synchronous work during bursty casts; overflow uses the bounded queue.
-        local now=os.clock()
-        if now-immediateSince>=.05 then immediateSince=now;immediateCount=0 end
-        if immediateCount<24 then
-            immediateCount+=1
-            pcall(suppress,instance)
-        end
-        enqueue(instance,state.SkillCastRunning or state.MiscCastRunning or instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail")
-            or instance:IsA("Sound") or effectNames[normalize(instance.Name)]~=nil)
+        if not candidate(object)then return end
+        local stamp=os.clock();if stamp-burst.At>=.05 then burst.At=stamp;burst.Count=0 end
+        if burst.Count<24 then burst.Count+=1;pcall(suppress,object)end
+        queue(object,state.SkillCastRunning or state.MiscCastRunning or object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")or object:IsA("Sound")or catalogs.Name[normalize(object.Name)])
     end
-    connections[#connections+1]=workspace.DescendantAdded:Connect(added)
-    connections[#connections+1]=workspace.DescendantRemoving:Connect(function(instance)
-        pendingQueue.Remove(instance)
-        local record=managed[instance]
-        if record then restore(instance,record); managed[instance]=nil end
+    connections[1]=workspace.DescendantAdded:Connect(added)
+    connections[2]=workspace.DescendantRemoving:Connect(function(object)
+        pending.Remove(object)
+        local record=managed[object];managed[object]=nil
+        if record then restore(object,record)end
     end)
-    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do
-        enqueue(instance,false)
+    for _,object in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound"))do
+        queue(object,false)
         if state.YieldStartup then state.YieldStartup()end
     end
-    for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
-    function api.IsEffect(instance) return effect(instance) end
+    for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol"))do if model:IsA("Model")then gunModels[model]=os.clock()+5 end end
+    function api.IsEffect(object)return effect(object)end
     function api.ProcessManaged()
         local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
         local deadline=os.clock()+.0006
         local available=math.min(64,maintenanceTail-maintenanceHead+1)
-        local count=0
-        while count<available and (count==0 or os.clock()<deadline)do
-            local instance=maintenance[maintenanceHead]
-            maintenance[maintenanceHead]=nil;maintenanceHead+=1
-            if instance then maintenanceQueued[instance]=nil end
-            local record=instance and managed[instance]
+        local processed=0
+        while processed<available and (processed==0 or os.clock()<deadline)do
+            local object=maintenance[maintenanceHead];maintenance[maintenanceHead]=nil;maintenanceHead+=1
+            if object then maintenanceQueued[object]=nil end
+            local record=object and managed[object]
             if record then
-                pcall(function()
-                    if not instance.Parent then managed[instance]=nil
-                    elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
-                        restore(instance,record)
-                        managed[instance]=nil
-                    elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
-                        restore(instance,record)
-                        managed[instance]=nil
-                    else
-                        record.Parent=instance.Parent
-                        for property,value in pairs(record.Hidden) do
-                            local ok,current=pcall(function()return instance[property]end)
-                            if ok then
-                                if typeof(value)=="NumberSequence" then
-                                    local points=current.Keypoints
-                                    if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
-                                elseif current~=value then write(instance,property,value) end
-                            end
+                local protect=false
+                pcall(function()protect=object.Parent==nil or (dynamic or object.Parent~=record.Parent)and keep(object)or (object:IsA("BillboardGui")or object:IsA("SurfaceGui"))and keep(object)end)
+                if protect then restore(object,record);managed[object]=nil
+                else
+                    record.Parent=object.Parent
+                    for property,value in pairs(record.Hidden)do
+                        local ok,current=pcall(function()return object[property]end)
+                        if ok then
+                            if typeof(value)=="NumberSequence"then
+                                local points=current.Keypoints
+                                if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(object,property,value)end
+                            elseif current~=value then write(object,property,value)end
                         end
                     end
-                end)
-                if managed[instance]then
-                    maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=instance;maintenanceQueued[instance]=true
                 end
+                if managed[object]then maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=object;maintenanceQueued[object]=true end
             end
-            count+=1
+            processed+=1
         end
         if maintenanceHead>maintenanceTail then
-            table.clear(maintenance)
-            maintenance,maintenanceNext=maintenanceNext,maintenance
-            maintenanceHead,maintenanceTail=1,maintenanceNextTail;maintenanceNextTail=0
+            table.clear(maintenance);maintenance,maintenanceNext=maintenanceNext,maintenance
+            maintenanceHead=1;maintenanceTail=maintenanceNextTail;maintenanceNextTail=0
         end
-        return count
+        return processed
     end
     function api.Update()
         if disposed or state.StopEverything then return end
         api.ProcessPending()
-        local now=os.clock()
-        if now<nextCheck then return end
-        nextCheck=now+0.08
+        local stamp=os.clock();if stamp<nextAnimation then return end;nextAnimation=stamp+.08
         local character=player.Character
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
         local current=humanoid and humanoid:FindFirstChildOfClass("Animator")
-        if current~=animator then
-            if played then played:Disconnect(); played=nil end
-            animator=current
-            if animator then played=animator.AnimationPlayed:Connect(function(track)
-                hideTrack(track)
-                task.defer(function() if state.Running and track.IsPlaying then hideTrack(track) end end)
-            end) end
+        if animator~=current then
+            if animationConnection then animationConnection:Disconnect()end
+            animator=current;animationConnection=nil
+            if current then animationConnection=current.AnimationPlayed:Connect(function(track)
+                hideTrack(track);task.defer(function()if not disposed and state.Running and track.IsPlaying then hideTrack(track)end end)
+            end)end
         end
-        if animator then for _,track in ipairs(animator:GetPlayingAnimationTracks()) do hideTrack(track) end end
-        for track,record in pairs(tracks) do
+        if animator then for _,track in ipairs(animator:GetPlayingAnimationTracks())do hideTrack(track)end end
+        for track,record in pairs(tracks)do
             if not track.IsPlaying then tracks[track]=nil
-            elseif track.WeightCurrent>0.001 or math.abs(track.WeightTarget-hiddenWeight)>0.00001 then track:AdjustWeight(hiddenWeight,0) end
+            elseif track.WeightCurrent>.001 or math.abs(track.WeightTarget-hiddenWeight)>.00001 then track:AdjustWeight(hiddenWeight,0)end
         end
-        api.ProcessManaged()
-        state.HiddenSkillAnimations=api.AnimationsHidden
-        state.HiddenSkillEffects=api.EffectsHidden
+        api.ProcessManaged();state.HiddenSkillAnimations=api.AnimationsHidden;state.HiddenSkillEffects=api.EffectsHidden
     end
     function api.Destroy()
         if disposed then return end
         disposed=true
-        if played then played:Disconnect() end
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
-        for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
-        table.clear(managed); table.clear(tracks)
-        table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
-        pendingQueue.Destroy()
-        table.clear(gunModels)
-        api.Pending=0; state.VisualQueueSize=0
+        if animationConnection then animationConnection:Disconnect();animationConnection=nil end
+        for _,connection in ipairs(connections)do connection:Disconnect()end;table.clear(connections)
+        for track,record in pairs(tracks)do pcall(function()if track.IsPlaying then track:AdjustWeight(record.Weight,0)end end)end
+        for object,record in pairs(managed)do if object.Parent then restore(object,record)end end
+        table.clear(managed);table.clear(tracks);table.clear(gunModels);table.clear(ordinaryTracks)
+        table.clear(maintenance);table.clear(maintenanceNext);table.clear(maintenanceQueued)
+        maintenanceHead,maintenanceTail,maintenanceNextTail=1,0,0
+        pending.Destroy();api.Pending=0;state.VisualQueueSize=0
     end
     api.Update()
     return api

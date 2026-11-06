@@ -1,15 +1,19 @@
--- Every configured account remains required; an unmatched entry is never dropped.
+-- Resolve aliases once; unmatched configured identities remain explicit requirements.
 return function(self,players,text)
-    local byName,byId={},{}
-    for _,person in ipairs(players)do byName[person.Name:lower()]=person;byId[tostring(person.UserId)]=person end
-    local result,seen={self},{[tostring(self.UserId)]=true}
-    for word in tostring(text or ""):gmatch("[%w_]+")do
-        local person=byName[word:lower()]or byId[word]
-        local key=person and tostring(person.UserId)or ("missing:"..word:lower())
-        if not seen[key]then
-            seen[key]=true
-            result[#result+1]=person or {Name=word,UserId=tonumber(word),CreditMissing=true}
+    local lookup={}
+    for _,person in ipairs(players)do
+        lookup[person.Name:lower()]=person
+        lookup[tostring(person.UserId)]=person
+    end
+    local members={self}
+    local identities={[tostring(self.UserId)]=true}
+    for token in tostring(text or ""):gmatch("[%w_]+")do
+        local person=lookup[token:lower()]or lookup[token]
+        local identity=person and tostring(person.UserId)or "missing:"..token:lower()
+        if not identities[identity]then
+            identities[identity]=true
+            members[#members+1]=person or {Name=token,UserId=tonumber(token),CreditMissing=true}
         end
     end
-    return result
+    return members
 end

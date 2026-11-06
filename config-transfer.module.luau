@@ -1,65 +1,77 @@
--- Portable preferences and custom arenas; never execute imported text as code.
+-- Strict portable-data schema; imported bytes are decoded only, never executed.
 return function(ctx)
-    local api={}
-    local kinds={}
-    for _,key in ipairs({"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
-    for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
-    for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
-    local function plain(value,depth)
+    local schema={}
+    local groups={
+        boolean={"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
+        string={"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
+        table={"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+    }
+    for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
+    local function data(value,depth,path)
         assert(depth<=12,"Config nesting is too deep")
         local kind=type(value)
-        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number")
-        elseif kind=="table"then
-            local count=0
-            for key,item in pairs(value)do
-                count+=1;assert(count<=4096,"Config table is too large")
-                assert(type(key)=="string"or type(key)=="number","Invalid config key")
-                plain(item,depth+1)
-            end
-        else assert(kind=="string"or kind=="boolean","Invalid config value")end
+        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number");return end
+        if kind~="table"then assert(kind=="string"or kind=="boolean","Invalid config value");return end
+        assert(not path[value],"Config cannot contain cycles")
+        path[value]=true
+        local total=0
+        for key,child in pairs(value)do
+            total+=1;assert(total<=4096,"Config table is too large")
+            assert(type(key)=="string"or type(key)=="number","Invalid config key")
+            data(child,depth+1,path)
+        end
+        path[value]=nil
     end
-    function api.Validate(value)
-        assert(type(value)=="table"and value.Format=="FeatherConfig"and value.Version==1,"Not a Feather config")
-        assert(type(value.Settings)=="table"and value.Settings.Version==1,"Invalid settings")
-        plain(value,0)
-        for key,item in pairs(value.Settings)do assert(kinds[key]and type(item)==kinds[key],"Invalid setting: "..tostring(key))end
-        for _,key in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do
-            local position=value.Settings[key]
-            if position then
-                assert(#position==4,"Invalid UI position")
-                for _,coordinate in ipairs(position)do assert(type(coordinate)=="number","Invalid UI position")end
-            end
+    local function tuple(value,count,limit)
+        assert(type(value)=="table"and #value==count,"Invalid position")
+        for _,coordinate in ipairs(value)do assert(type(coordinate)=="number"and (not limit or math.abs(coordinate)<=limit),"Invalid coordinate")end
+    end
+    local function settings(value)
+        assert(type(value)=="table"and value.Version==1,"Invalid settings")
+        for key,item in pairs(value)do assert(schema[key]and type(item)==schema[key],"Invalid setting: "..tostring(key))end
+        for _,name in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do if value[name]then tuple(value[name],4)end end
+        for _,name in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
+            for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
         end
-        for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
-            for name,on in pairs(value.Settings[key]or {})do assert(type(name)=="string"and type(on)=="boolean","Invalid selection: "..key)end
-        end
-        for _,id in ipairs(value.Settings.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
-        assert(type(value.CustomSpots)=="table","Missing custom spots")
-        local floors=0
-        for id,spots in pairs(value.CustomSpots)do
-            floors+=1;assert(floors<=64 and tostring(id):match("^%d+$"),"Invalid spot floor")
+        for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
+    end
+    local function arenas(value)
+        assert(type(value)=="table","Missing custom spots")
+        local count=0
+        for floor,spots in pairs(value)do
+            count+=1;assert(count<=64 and tostring(floor):match("^%d+$"),"Invalid spot floor")
             assert(type(spots)=="table"and #spots<=20,"Too many custom spots")
             for _,spot in ipairs(spots)do
                 assert(type(spot)=="table"and type(spot.Id)=="string"and spot.Id:sub(1,16)=="saved:multispot:","Invalid custom spot")
-                assert(type(spot.Name)=="string"and #spot.Name<=200 and type(spot.Position)=="table"and #spot.Position==3,"Invalid spot name/position")
-                for _,coordinate in ipairs(spot.Position)do assert(type(coordinate)=="number"and math.abs(coordinate)<=1e7,"Invalid coordinate")end
+                assert(type(spot.Name)=="string"and #spot.Name<=200,"Invalid spot name/position")
+                tuple(spot.Position,3,1e7)
             end
         end
-        return value
+    end
+    local api={}
+    function api.Validate(package)
+        assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
+        data(package,0,{})
+        settings(package.Settings);arenas(package.CustomSpots)
+        return package
+    end
+    local function withinStorage(package)
+        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
     end
     function api.Export()
-        local value=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
-        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
-        local text=ctx.Encode(value);assert(#text<=262144,"Config exceeds 256 KB")
+        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        withinStorage(package)
+        local bytes=ctx.Encode(package)
+        assert(#bytes<=262144,"Config exceeds 256 KB")
         assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
-        ctx.Copy(text);return text
+        ctx.Copy(bytes)
+        return bytes
     end
-    function api.Import(text)
-        assert(type(text)=="string"and #text<=262144,"Config exceeds 256 KB")
-        local value=api.Validate(ctx.Decode(text))
-        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
-        ctx.Apply(value)
+    function api.Import(bytes)
+        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
+        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
+        ctx.Apply(package)
         return true
     end
     return api

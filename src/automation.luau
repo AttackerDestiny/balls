@@ -1,11 +1,15 @@
+-- Restore feature intent only after every combat controller has registered its API.
 state.SetAutoSwing(restore.AutoSwing)
 state.SetEnabled(restore.Enabled)
-if restore.AutoFarm then state.SetAutoFarm(true); if not restore.Enabled then state.SetEnabled(false) end end
+if restore.AutoFarm then
+    state.SetAutoFarm(true)
+    if not restore.Enabled then state.SetEnabled(false)end
+end
 state.SetSkillAura(restore.SkillAura)
-configReady = true
+configReady=true
 state.SaveNow()
 do
-    local create=(function()
+    local makeWatch=(function()
 -- BEGIN BUNDLED MODERATOR WATCH
 -- END BUNDLED MODERATOR WATCH
     end)()
@@ -13,22 +17,21 @@ do
 -- BEGIN BUNDLED MODERATOR REJOIN
 -- END BUNDLED MODERATOR REJOIN
     end)()
-    local teleportService=game:GetService("TeleportService")
-    local rejoin=makeRejoin({State=state,Spawn=task.spawn,Sleep=task.wait,
+    local teleport=game:GetService("TeleportService")
+    local recovery=makeRejoin({State=state,Spawn=task.spawn,Sleep=task.wait,
         Queue=function()
-            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-            assert(type(queue)=="function","Executor has no teleport queue")
-            queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
-        end,
-        Teleport=function()teleportService:Teleport(game.PlaceId,player)end,
-        Kick=function(message)player:Kick(message)end})
-    state.ModeratorRejoin=rejoin
-    bind(player.OnTeleport,function(phase)
-        if phase==Enum.TeleportState.Started or phase==Enum.TeleportState.InProgress then rejoin.MarkStarted()end
+            local enqueue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)or (fluxus and fluxus.queue_on_teleport)
+            assert(type(enqueue)=="function","Executor has no teleport queue")
+            enqueue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
+        end,Teleport=function()teleport:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end})
+    state.ModeratorRejoin=recovery
+    bind(player.OnTeleport,function(stage)
+        if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then recovery.MarkStarted();state.SaveNow()end
     end)
-    state.ModeratorWatch=create({State=state,Players=Players,Save=state.SaveNow,
+    state.ModeratorWatch=makeWatch({State=state,Players=Players,Save=state.SaveNow,
         Pause=function()
-            if state.SoloServerSearch and state.SoloServerSearch.Active then pcall(state.SoloServerSearch.Stop,"Moderator detection has priority")end
+            local search=state.SoloServerSearch
+            if search and search.Active then pcall(search.Stop,"Moderator detection has priority")end
             state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false;state.AutomationTeleporting=false
             finishAttackBurst("Moderator detected");stopSword(true)
             if state.CancelSkillAura then state.CancelSkillAura("Moderator detected")end
@@ -37,70 +40,24 @@ do
             if state.FarmNoclip then state.FarmNoclip.Update()end
             if state.PanicToSpawn then state.PanicToSpawn()end
         end,
-        Block=function(target,active)
-            local deadline=os.clock()+8
-            while active()and not state.BlockPlayerNative and os.clock()<deadline do task.wait(.04)end
-            if not active()then return false end
+        Block=function(person,active)
+            local expires=os.clock()+8
+            repeat
+                if not active()then return false end
+                if state.BlockPlayerNative then break end
+                task.wait(.04)
+            until os.clock()>=expires
             assert(state.BlockPlayerNative,"Native block handler did not initialize")
-            return state.BlockPlayerNative(target,active)
+            return state.BlockPlayerNative(person,active)
         end,
-        Notify=function(message)
-            state.SafeModeStatus=message;state.MultiSpotStatus=message;state.ProgressionStatus=message
-            movementStatus(message)
-        end,
-        Kick=rejoin.Kick})
+        Notify=function(reason)
+            state.SafeModeStatus=reason;state.MultiSpotStatus=reason;state.ProgressionStatus=reason
+            movementStatus(reason)
+        end,Kick=recovery.Kick})
 end
-bind(player.OnTeleport, function(teleportState)
-    if teleportState == Enum.TeleportState.Started or teleportState == Enum.TeleportState.InProgress then state.SaveNow() end
-end)
 
--- Player utilities use the same replicated profile and character paths as the supplied source.
+-- Player utilities publish state to the modern UI; no duplicate option controls.
 do
-    local ui=state.UI
-    local tools
-    local savedSelection=restore.SelectedPlayerId
-    local savedView,savedInventory=restore.ViewingPlayer,restore.ViewingPlayerInventory
-    local function message(text)
-        if not state.Running then return end
-        state.PlayerStatus=text or ""
-        ui.PlayerMessage.Text=state.PlayerStatus
-        ui.PlayerMessage.Visible=state.PlayerStatus~=""
-    end
-    local function render()
-        if not tools or not state.Running then return end
-        local selected=tools.GetSelected()
-        ui.PlayerSelector.Text=selected and (selected.DisplayName==selected.Name and "@"..selected.Name or selected.DisplayName.." (@"..selected.Name..")") or "Select player"
-        ui.ViewPlayer.Text=tools.Viewing and "View player · ON" or "View player · OFF"
-        ui.ViewInventory.Text=tools.InventoryVisible and "View player inventory · ON" or "View player inventory · OFF"
-        ui.ViewPlayer.BackgroundColor3=tools.Viewing and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
-        ui.ViewInventory.BackgroundColor3=tools.InventoryVisible and Color3.fromRGB(114,88,229) or Color3.fromRGB(38,41,56)
-        ui.PlayerInventory.Visible=tools.InventoryVisible
-        if savedSelection~=state.SelectedPlayerId or savedView~=tools.Viewing or savedInventory~=tools.InventoryVisible then
-            savedSelection,savedView,savedInventory=state.SelectedPlayerId,tools.Viewing,tools.InventoryVisible
-            requestSave()
-        end
-    end
-    local function refreshPlayers()
-        if not tools or not state.Running or state.StopEverything then return end
-        for _,child in ipairs(ui.PlayerOptions:GetChildren()) do if child:IsA("GuiObject") then child:Destroy() end end
-        local choices=tools.Choices()
-        state.PlayerChoices=choices
-        for index,entry in ipairs(choices) do
-            local text=entry.DisplayName==entry.Name and "@"..entry.Name or entry.DisplayName.." (@"..entry.Name..")"
-            local option=uiButton("Player"..entry.UserId,text,index,28,ui.PlayerOptions)
-            option.Font=Enum.Font.Gotham; option.TextSize=10
-            option.Activated:Connect(function()
-                if state.StopEverything then return end
-                local ok,reason=tools.Select(entry.UserId)
-                ui.PlayerOptions.Visible=false
-                message(ok and "" or reason)
-            end)
-        end
-        if #choices==0 then
-            create("TextLabel",{Name="Empty",Text="No other players in this server",Size=UDim2.new(1,0,0,28),BackgroundTransparency=1,
-                Font=Enum.Font.Gotham,TextSize=11,TextColor3=Color3.fromRGB(153,161,187)},ui.PlayerOptions)
-        end
-    end
     local makePlayerTools=(function()
 -- BEGIN BUNDLED PLAYER TOOLS
 -- END BUNDLED PLAYER TOOLS
@@ -109,102 +66,86 @@ do
 -- BEGIN BUNDLED INVENTORY VIEW
 -- END BUNDLED INVENTORY VIEW
     end)()
-    local inventoryView=makeInventoryView({OwnProfile=ReplicatedStorage.Profiles:FindFirstChild(player.Name),
+    local renderer=makeInventoryView({OwnProfile=ReplicatedStorage.Profiles:FindFirstChild(player.Name),
         Function=function()return require(services.UI.Inventory).GetInventoryData end,
         Read=function(fn,index)
             assert(type(debug.getupvalue)=="function","Executor cannot read inventory renderer upvalues")
             local first,second=debug.getupvalue(fn,index)
-            return second~=nil and second or first
+            if second~=nil then return second end
+            return first
         end,
         Write=function(fn,index,value)
             assert(type(debug.setupvalue)=="function","Executor cannot change inventory renderer upvalues")
             debug.setupvalue(fn,index,value)
         end})
-    tools=makePlayerTools({State=state,Players=Players,LocalPlayer=player,Workspace=workspace,Profiles=ReplicatedStorage:FindFirstChild("Profiles"),
+    local tools
+    local saved={selection=restore.SelectedPlayerId,view=restore.ViewingPlayer,inventory=restore.ViewingPlayerInventory}
+    local function message(value)if state.Running then state.PlayerStatus=value or ""end end
+    local function changed()
+        if not tools or not state.Running then return end
+        if saved.selection~=state.SelectedPlayerId or saved.view~=tools.Viewing or saved.inventory~=tools.InventoryVisible then
+            saved={selection=state.SelectedPlayerId,view=tools.Viewing,inventory=tools.InventoryVisible}
+            requestSave()
+        end
+    end
+    local function teleport(target)
+        if state.TravelBusy then return false,"Another teleport is still running"end
+        local character=player.Character
+        local root=character and character:FindFirstChild("HumanoidRootPart")
+        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        local targetRoot=target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+        if not root or not humanoid or humanoid.Health<=0 or not targetRoot or root.Anchored then return false,"Player character is not loaded or ready"end
+        state.TravelBusy=true
+        local lease={};state.PlayerTravelLease=lease
+        task.spawn(function()
+            local moved=false
+            local function active()return state.Running and not state.StopEverything and state.PlayerTravelLease==lease end
+            local ok,reason=pcall(function()
+                local expires=os.clock()+4
+                repeat task.wait(.05)until not active()or not(state.Recovering or state.SkillCastRunning)or os.clock()>expires
+                if not active()then return end
+                assert(not state.SkillCastRunning and not state.Recovering,"Wait for the current skill to finish")
+                assert(target.Parent==Players and target.Character and player.Character==character,"Player left or respawned")
+                local other=target.Character:FindFirstChild("HumanoidRootPart")
+                local living=target.Character:FindFirstChildOfClass("Humanoid")
+                assert(other and living and living.Health>0,"Target character is unavailable")
+                local point=other.Position+Vector3.new(0,5,0)
+                assert(finitePoint(point)and point.Y>workspace.FallenPartsDestroyHeight+40,"Target position is too low")
+                stopMovement("Travelling to player",true)
+                ensureMovementController(character,root,humanoid,point)
+                positionAlign.Position=point;pivotRoot(root,point)
+                moved=true;lastSurfaceY=other.Position.Y+3;state.TeleportsSent=state.TeleportsSent+1
+                state.LastPlayerTeleport={UserId=target.UserId,Name=target.Name,Requested=point,Actual=root.Position,At=os.clock()}
+                task.wait(.75)
+                if not active()then return end
+                assert(root.Parent and (root.Position-point).Magnitude<18,"The game corrected this teleport")
+                state.TravelHold=not(state.AutoFarm and state.Enabled)
+                state.TravelHoldPosition=state.TravelHold and point or nil
+            end)
+            if state.PlayerTravelLease==lease then state.PlayerTravelLease=nil;state.TravelBusy=false end
+            if not state.Running or state.StopEverything then return end
+            if not ok then if moved then stopMovement("Player teleport stopped")end;message(tostring(reason))
+            else message("")end
+        end)
+        return true
+    end
+    tools=makePlayerTools({State=state,Players=Players,LocalPlayer=player,Workspace=workspace,
+        Profiles=ReplicatedStorage:FindFirstChild("Profiles"),
         NativeInventory=function(target)
             local profile=target and ReplicatedStorage.Profiles:FindFirstChild(target.Name)
             if target and not profile then return false,"Selected player's inventory profile is not loaded"end
-            return inventoryView.Set(profile)
+            return renderer.Set(profile)
         end,
-        Changed=render,RosterChanged=function() if ui.PlayerOptions.Visible then refreshPlayers() end end,
-        Inventory=function(rows,reason,target)
+        Changed=changed,RosterChanged=function()if tools then state.PlayerChoices=tools.Choices()end end,
+        Inventory=function(rows,reason)
             if not state.Running then return end
-            state.PlayerInventoryRows=rows;state.PlayerInventoryMessage=reason
-            for _,child in ipairs(ui.PlayerInventory:GetChildren()) do if child:IsA("TextLabel") then child:Destroy() end end
-            local function row(text,index)
-                create("TextLabel",{Name="Item"..index,Text=text,LayoutOrder=index,Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,
-                    Font=Enum.Font.Gotham,TextSize=11,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,
-                    TextColor3=Color3.fromRGB(219,223,238)},ui.PlayerInventory)
-            end
-            if reason or #rows==0 then row(reason or "No inventory items",1)
-            else for index,item in ipairs(rows) do
-                row(item.Name..(item.Upgrade>0 and " +"..item.Upgrade or "")..(item.Count>1 and " ×"..item.Count or ""),index)
-            end end
-            state.ViewedInventoryCount=#rows
-        end,
-        Teleport=function(target)
-            if state.TravelBusy then return false,"Another teleport is still running" end
-            local character=player.Character
-            local root=character and character:FindFirstChild("HumanoidRootPart")
-            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            local targetRoot=target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-            if not root or not humanoid or humanoid.Health<=0 or not targetRoot or root.Anchored then return false,"Player character is not loaded or ready" end
-            state.TravelBusy=true
-            ui.PlayerOptions.Visible=false
-            task.spawn(function()
-                local moved=false
-                local ok,reason=pcall(function()
-                    local deadline=os.clock()+4
-                    repeat task.wait(.05) until (not state.Recovering and not state.SkillCastRunning) or os.clock()>deadline or not state.Running or state.StopEverything
-                    if not state.Running or state.StopEverything then return end
-                    assert(not state.SkillCastRunning and not state.Recovering,"Wait for the current skill to finish")
-                    assert(target.Parent==Players and target.Character and player.Character==character,"Player left or respawned")
-                    local otherRoot=target.Character:FindFirstChild("HumanoidRootPart")
-                    local otherHumanoid=target.Character:FindFirstChildOfClass("Humanoid")
-                    assert(otherRoot and otherHumanoid and otherHumanoid.Health>0,"Target character is unavailable")
-                    local destination=otherRoot.Position+Vector3.new(0,5,0)
-                    assert(finitePoint(destination) and destination.Y>workspace.FallenPartsDestroyHeight+40,"Target position is too low")
-                    stopMovement("Travelling to player",true)
-                    ensureMovementController(character,root,humanoid,destination)
-                    positionAlign.Position=destination; pivotRoot(root,destination)
-                    moved=true
-                    lastSurfaceY=otherRoot.Position.Y+3
-                    state.TeleportsSent+=1
-                    state.LastPlayerTeleport={UserId=target.UserId,Name=target.Name,Requested=destination,Actual=root.Position,At=os.clock()}
-                    task.wait(.75)
-                    if not state.Running or state.StopEverything then return end
-                    assert(root.Parent and (root.Position-destination).Magnitude<18,"The game corrected this teleport")
-                    state.TravelHold=not (state.AutoFarm and state.Enabled)
-                    state.TravelHoldPosition=state.TravelHold and destination or nil
-                end)
-                state.TravelBusy=false
-                if not state.Running or state.StopEverything then return end
-                if not ok then
-                    if moved then stopMovement("Player teleport stopped") end
-                    message(tostring(reason))
-                else message("") end
-            end)
-            return true
-        end,
-    })
+            state.PlayerInventoryRows=rows;state.PlayerInventoryMessage=reason;state.ViewedInventoryCount=#rows
+        end,Teleport=teleport})
     state.PlayerTools=tools
-    if savedSelection then tools.Select(savedSelection) end
-    if restore.ViewingPlayer then tools.SetViewing(true) end
-    if restore.ViewingPlayerInventory then tools.SetInventoryVisible(true) end
-    render(); refreshPlayers()
-    bind(ui.PlayerSelector.Activated,function()
-        if state.StopEverything then return end
-        if not ui.PlayerOptions.Visible then refreshPlayers() end
-        ui.PlayerOptions.Visible=not ui.PlayerOptions.Visible
-        if ui.PlayerOptions.Visible then revealOptions(ui.PlayerOptions) end
-    end)
-    bind(ui.TeleportPlayer.Activated,function() local ok,reason=tools.Teleport(); message(ok and "" or reason) end)
-    bind(ui.ViewPlayer.Activated,function() local ok,reason=tools.SetViewing(not tools.Viewing); message(ok and "" or reason) end)
-    bind(ui.ViewInventory.Activated,function()
-        local ok,reason=tools.SetInventoryVisible(not tools.InventoryVisible)
-        message(ok and "" or reason)
-        if ok and tools.InventoryVisible then revealOptions(ui.PlayerInventory) end
-    end)
+    if saved.selection then tools.Select(saved.selection)end
+    if restore.ViewingPlayer then tools.SetViewing(true)end
+    if restore.ViewingPlayerInventory then tools.SetInventoryVisible(true)end
+    state.PlayerChoices=tools.Choices();changed()
 end
 
 -- Support skills from the provided source, with native cooldown and stamina checks.

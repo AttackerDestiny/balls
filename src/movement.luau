@@ -20,16 +20,13 @@ local function movementStatus(message)
     if not state.AutoFarm and string.sub(message, 1, 7) == "Stopped" then state.LastFarmStopReason = message end
 end
 function state.SetTeleportOffset(value)
-    if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return end
-    local newValue = (state.OffsetMode=="Above" and 1 or -1)*math.max(1,math.floor(math.abs(value)*10+0.5)/10)
-    if offsetInitialized and newValue == state.TeleportOffset then return end
-    state.TeleportOffset = newValue
-    offsetInitialized = true
-    -- Recalibration is an intentional destination change, not a server correction.
-    teleportTarget, lastTeleportPosition = nil, nil
-    lastTeleportTime, nextMovementUpdate = 0, 0
-    state.OffsetGraceUntil = os.clock() + 0.4
-    correctionStrikes, correctionTarget = 0, nil
+    if type(value)~="number"or value~=value or math.abs(value)==math.huge then return end
+    local sign=state.OffsetMode=="Above"and 1 or -1
+    local offset=sign*math.max(1,math.floor(math.abs(value)*10+.5)/10)
+    if offsetInitialized and offset==state.TeleportOffset then return end
+    offsetInitialized=true;state.TeleportOffset=offset
+    teleportTarget=nil;lastTeleportPosition=nil;lastTeleportTime=0;nextMovementUpdate=0
+    correctionStrikes=0;correctionTarget=nil;state.OffsetGraceUntil=os.clock()+.4
 end
 local activeOffsetMob, offsetSample
 state.OffsetAvoidTypes={}
@@ -46,33 +43,31 @@ function state.GetOffsetKey(mob,data)
     return data.OffsetKey
 end
 do
-    local make=(function()
+    local createTracker=(function()
 -- BEGIN BUNDLED GROUND FOLLOW
 -- END BUNDLED GROUND FOLLOW
     end)()
-    local enemy=services:FindFirstChild("EnemySkills")
-    state.NativeEnemySkills=enemy and require(enemy)
-    state.GroundFollow=make({
+    local module=services:FindFirstChild("EnemySkills")
+    state.NativeEnemySkills=module and require(module)
+    local groundParams=RaycastParams.new()
+    groundParams.FilterType=Enum.RaycastFilterType.Exclude;groundParams.RespectCanCollide=true
+    local function ground(mob,data)
+        local excluded={mob}
+        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects"})do
+            local object=workspace:FindFirstChild(name);if object then excluded[#excluded+1]=object end
+        end
+        if player.Character then excluded[#excluded+1]=player.Character end
+        groundParams.FilterDescendantsInstances=excluded
+        local hit=workspace:Raycast(data.Root.Position+Vector3.new(0,32,0),Vector3.new(0,-2048,0),groundParams)
+        return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+    end
+    state.GroundFollow=createTracker({Floor=ground,
         MapDeleted=function()return state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"]end,
-        Floor=function(mob,data)
-            local params=RaycastParams.new()
-            params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
-            local excluded={mob}
-            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects"})do
-                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
-            end
-            if player.Character then excluded[#excluded+1]=player.Character end
-            params.FilterDescendantsInstances=excluded
-            local hit=workspace:Raycast(data.Root.Position+Vector3.new(0,32,0),Vector3.new(0,-2048,0),params)
-            if hit and hit.Normal.Y>.6 then return hit.Position.Y end
-        end,
         GroundHint=function(mob)
             local native=state.NativeEnemySkills
             local rig=native and native.RiggedEnemies and native.RiggedEnemies[mob]
-            local smash=rig and rig.ActiveSkills.LavaSmash
-            if smash and not smash.Destroyed then
-                return smash.LastCFrame and smash.LastCFrame.Position or smash.SurfacePosition
-            end
+            local cast=rig and rig.ActiveSkills and rig.ActiveSkills.LavaSmash
+            if cast and not cast.Destroyed then return cast.LastCFrame and cast.LastCFrame.Position or cast.SurfacePosition end
         end})
 end
 function state.ResolveAutoOffset(mob)
@@ -82,228 +77,174 @@ function state.ResolveAutoOffset(mob)
     local root=character and character:FindFirstChild("HumanoidRootPart")
     if not data or not root then return nil end
     if state.AutoFarm and mob.Name=="Suspended Unborn"then
-        -- Supplied arena (-2439,60,5389), with the requested +10 height.
         local destination=Vector3.new(-2439,70,5389)
         if state.FarmCoordination then destination=state.FarmCoordination.Spread(destination,mob)end
         activeOffsetMob,offsetSample=nil,nil
-        state.FixedFarmPosition=destination
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        state.FarmTargetAirborne=false
-        state.TeleportOffset=destination.Y-data.Root.Position.Y
+        state.FixedFarmPosition=destination;state.AutoOffsetTarget=mob;state.AutoOffsetDestination=destination
+        state.FarmTargetAirborne=false;state.TeleportOffset=destination.Y-data.Root.Position.Y
         state.OffsetStatus="Suspended Unborn · fixed arena position +10 studs"
         data.LastGroundedFarmDestination=destination
         return state.TeleportOffset
     end
     local now,mobRoot=os.clock(),data.Root
     local key=state.GetOffsetKey(mob,data)
-    if not data.BodyBelow or not data.BodyAbove or data.OffsetRootSize ~= mobRoot.Size then
-        local bottom,top = -mobRoot.Size.Y/2,mobRoot.Size.Y/2
-        local reach = math.max(12, mobRoot.Size.Magnitude * 2)
-        -- Whole-model bounds can contain effects at the world origin. Only use
-        -- visible body parts near the root, once per mob/size.
-        for _, part in ipairs(mob:QueryDescendants("BasePart")) do
-            local name = string.lower(part.Name)
-            if part.Transparency < 0.95 and (part.Position - mobRoot.Position).Magnitude <= reach
-                and not string.find(name, "hitbox", 1, true) and not string.find(name, "effect", 1, true)
-                and not string.find(name, "attack", 1, true) and not string.find(name, "trail", 1, true)
-                and not string.find(name,"weapon",1,true) and not string.find(name,"sword",1,true)
-                and not string.find(name,"blade",1,true) and name~="handle"
-                and not part:FindFirstAncestorWhichIsA("Tool") and not part:FindFirstAncestorWhichIsA("Accessory") then
-                local cf, size = part.CFrame, part.Size
-                local halfHeight = (math.abs(cf.RightVector.Y) * size.X + math.abs(cf.UpVector.Y) * size.Y + math.abs(cf.LookVector.Y) * size.Z) / 2
-                bottom = math.min(bottom, part.Position.Y - mobRoot.Position.Y - halfHeight)
-                top=math.max(top,part.Position.Y-mobRoot.Position.Y+halfHeight)
+    local function measureBody()
+        if data.BodyBelow and data.BodyAbove and data.OffsetRootSize==mobRoot.Size then return end
+        local lower,upper=-mobRoot.Size.Y/2,mobRoot.Size.Y/2
+        local bound=math.max(12,mobRoot.Size.Magnitude*2)
+        local ignore={"hitbox","effect","attack","trail","weapon","sword","blade"}
+        for _,part in ipairs(mob:QueryDescendants("BasePart"))do
+            local usable=part.Transparency<.95 and (part.Position-mobRoot.Position).Magnitude<=bound
+                and part.Name:lower()~="handle"and not part:FindFirstAncestorWhichIsA("Tool")and not part:FindFirstAncestorWhichIsA("Accessory")
+            if usable then
+                for _,word in ipairs(ignore)do if part.Name:lower():find(word,1,true)then usable=false;break end end
+            end
+            if usable then
+                local frame,size=part.CFrame,part.Size
+                local extent=(math.abs(frame.RightVector.Y)*size.X+math.abs(frame.UpVector.Y)*size.Y+math.abs(frame.LookVector.Y)*size.Z)/2
+                local height=part.Position.Y-mobRoot.Position.Y
+                lower=math.min(lower,height-extent);upper=math.max(upper,height+extent)
             end
         end
-        data.BodyBelow,data.BodyAbove = -bottom,top
-        data.OffsetRootSize = mobRoot.Size
+        data.BodyBelow=-lower;data.BodyAbove=upper;data.OffsetRootSize=mobRoot.Size
     end
-    local head=character:FindFirstChild("Head")
-    local humanoid=character:FindFirstChildOfClass("Humanoid")
-    local playerAbove=head and math.max(root.Size.Y/2,head.Position.Y+head.Size.Y/2-root.Position.Y) or 3
-    local playerBelow=math.max(3,humanoid and humanoid.HipHeight+root.Size.Y/2 or 3)
+    measureBody()
     local grounded,airborne=state.GroundFollow.Resolve(mob,data,now)
     state.FarmTargetAirborne=airborne
     if airborne then
-        local destination=data.LastGroundedFarmDestination
-            or (state.FarmAbove and root.Position)
-            or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z)) or root.Position
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        state.OffsetStatus="Waiting for enemy to land"
-        return destination.Y-mobRoot.Position.Y
+        local frozen=data.LastGroundedFarmDestination or (state.FarmAbove and root.Position)
+            or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z))or root.Position
+        state.AutoOffsetTarget=mob;state.AutoOffsetDestination=frozen;state.OffsetStatus="Waiting for enemy to land"
+        return frozen.Y-mobRoot.Position.Y
     end
-    if state.AutoFarm and state.FarmCoordination then
-        local sharedCenter=mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)
-        local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player={Size=Vector3.new(2,2,1)},Center=sharedCenter,
-            Mode="Below",Reach=state.AutoRanges.BodyRange(data),Margin=3,
-            BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=3,PlayerBelow=3,
-            DestroyHeight=workspace.FallenPartsDestroyHeight})
-        if not plan then
-            state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-            state.OffsetStatus=reason
-            return nil
-        end
-        local destination=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        data.LastGroundedFarmDestination=destination
-        activeOffsetMob,offsetSample=nil,nil
-        state.TeleportOffset=destination.Y-mobRoot.Position.Y
+    local shared=state.AutoFarm and state.FarmCoordination
+    local head=character:FindFirstChild("Head")
+    local humanoid=character:FindFirstChildOfClass("Humanoid")
+    local center=shared and mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)or root.Position+state.AutoRanges.Delta(data,root)
+    local mode=shared and "Below"or state.OffsetMode or "Below"
+    local kind=state.Enabled and "Kill"or "Skill"
+    local reach=shared and state.AutoRanges.BodyRange(data)or (state.FarmAbove and state.AutoRanges.Range(kind,data,state.SelectedSkill)or state.AutoRanges.BodyRange(data))
+    local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player=shared and {Size=Vector3.new(2,2,1)}or root,Center=center,
+        Mode=mode,Reach=reach,Margin=shared and 3 or 1.5+math.min(1,(state.PingMs or 150)/500),AdaptiveAbove=not shared and state.FarmAbove,
+        BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=shared and 3 or (head and math.max(root.Size.Y/2,head.Position.Y+head.Size.Y/2-root.Position.Y)or 3),
+        PlayerBelow=shared and 3 or math.max(3,humanoid and humanoid.HipHeight+root.Size.Y/2 or 3),DestroyHeight=workspace.FallenPartsDestroyHeight})
+    if plan and not shared and plan.Radius>state.AutoRanges.Range(kind,data,state.SelectedSkill)-(state.FarmAbove and .2 or 1)then plan=nil;reason="Outer position exceeds the learned attack reach"end
+    if not plan then
+        state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;state.OffsetStatus=reason
+        if not shared then data.SkipUntil=now+8;state.LastOffsetRejected={Target=mob.Name,Reason=reason,At=now};if state.FollowTarget==mob then state.FollowTarget=nil end end
+        return nil
+    end
+    if shared then
+        local destination=state.FarmCoordination.Spread(plan.Destination,mob,center,plan.Reach)
+        state.AutoOffsetTarget=mob;state.AutoOffsetDestination=destination;data.LastGroundedFarmDestination=destination
+        activeOffsetMob,offsetSample=nil,nil;state.TeleportOffset=destination.Y-mobRoot.Position.Y
         state.OffsetStatus="Separated farm hold · slot "..tostring(state.FarmCoordination.Slot or 1)
         return state.TeleportOffset
     end
-    local center=root.Position+state.AutoRanges.Delta(data,root)
-    local reach=state.FarmAbove and state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill) or state.AutoRanges.BodyRange(data)
-    local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player=root,Center=center,
-        Mode=state.OffsetMode or "Below",Reach=reach,Margin=1.5+math.min(1,(state.PingMs or 150)/500),
-        AdaptiveAbove=state.FarmAbove,BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=playerAbove,PlayerBelow=playerBelow,
-        DestroyHeight=workspace.FallenPartsDestroyHeight})
-    local verifiedReach=state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill)
-    if plan and plan.Radius>verifiedReach-(state.FarmAbove and .2 or 1) then plan=nil; reason="Outer position exceeds the learned attack reach" end
-    if not plan then
-        data.SkipUntil=now+8
-        state.OffsetStatus=reason
-        state.LastOffsetRejected={Target=mob.Name,Reason=reason,At=now}
-        state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-        if state.FollowTarget==mob then state.FollowTarget=nil end
-        return nil
-    end
-    local playerHealth=character:FindFirstChild("Entity")
-    playerHealth=playerHealth and playerHealth:FindFirstChild("Health")
+    local entity=character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
     if activeOffsetMob~=mob or not offsetSample or offsetSample.Key~=key then
-        activeOffsetMob=mob
-        offsetSample={Offset=plan.Offset,Key=key,Requests=data.OffsetRequests or 0,At=now,
-            SafeSince=now,PlayerHealth=playerHealth and playerHealth.Value,OwnDamage=state.ReadOwnDamage(data.Health),Misses=0,Confirmed=false}
-        state.OffsetStatus="Source outer reach · checking clearance"
+        activeOffsetMob=mob;offsetSample={Key=key,Offset=plan.Offset,At=now,SafeSince=now,Requests=data.OffsetRequests or 0,
+            PlayerHealth=health and health.Value,OwnDamage=state.ReadOwnDamage(data.Health),Misses=0,Confirmed=false}
     end
-    if math.abs(plan.Offset-offsetSample.Offset)>.75 then
-        offsetSample.SafeSince=now; offsetSample.Confirmed=false; offsetSample.Offset=plan.Offset
-    end
-    if now-offsetSample.At>=1.2 then
+    local sample=offsetSample
+    if math.abs(plan.Offset-sample.Offset)>.75 then sample.SafeSince=now;sample.Confirmed=false;sample.Offset=plan.Offset end
+    state.OffsetStatus="Source outer reach · checking clearance"
+    if now-sample.At>=1.2 then
         local requests=data.OffsetRequests or 0
-        local contribution=state.ReadOwnDamage(data.Health)
-        local damageConfirmed=contribution~=nil and contribution>(offsetSample.OwnDamage or 0)
-        if requests>offsetSample.Requests and damageConfirmed then
-            offsetSample.Misses=0
-            local noDamage=now-(state.LastIncomingDamageAt or -math.huge)>=4
-                and (not playerHealth or not offsetSample.PlayerHealth or playerHealth.Value>=offsetSample.PlayerHealth)
-            if noDamage and now-offsetSample.SafeSince>=4 then
-                offsetSample.Confirmed=true
-                state.OffsetStatus="Holding damage-free source position"
-                local saved=(plan.Mode=="Above" and 1 or -1)*math.floor(math.abs(plan.Offset)*4+.5)/4
-                if state.OffsetProfiles[key]~=saved and now-(data.LastProfileSaveAt or -math.huge)>=10 then
-                    local count=0; for _ in pairs(state.OffsetProfiles) do count+=1 end
-                    if count<32 or state.OffsetProfiles[key] then state.OffsetProfiles[key]=saved; data.LastProfileSaveAt=now; requestSave() end
+        local own=state.ReadOwnDamage(data.Health)
+        if requests>sample.Requests and own~=nil and own>(sample.OwnDamage or 0)then
+            sample.Misses=0
+            local safe=now-(state.LastIncomingDamageAt or -math.huge)>=4 and (not health or not sample.PlayerHealth or health.Value>=sample.PlayerHealth)
+            if safe and now-sample.SafeSince>=4 then
+                sample.Confirmed=true;state.OffsetStatus="Holding damage-free source position"
+                local value=(plan.Mode=="Above"and 1 or -1)*math.floor(math.abs(plan.Offset)*4+.5)/4
+                if state.OffsetProfiles[key]~=value and now-(data.LastProfileSaveAt or -math.huge)>=10 then
+                    local count=0;for _ in pairs(state.OffsetProfiles)do count+=1 end
+                    if count<32 or state.OffsetProfiles[key]then state.OffsetProfiles[key]=value;data.LastProfileSaveAt=now;requestSave()end
                 end
-            else state.OffsetStatus="Checking damage and player health" end
-        elseif requests-offsetSample.Requests>=3 and not state.SkillCastRunning and not state.Recovering
-            and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500) then
-            offsetSample.Misses+=1
-            state.OffsetStatus="No damage · holding outer clearance"
-            if offsetSample.Misses>=3 then
-                data.SkipUntil=now+8
-                state.FollowTarget=nil
-                state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-                return nil
-            end
+            else state.OffsetStatus="Checking damage and player health"end
+        elseif requests-sample.Requests>=3 and not state.SkillCastRunning and not state.Recovering and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500)then
+            sample.Misses+=1;state.OffsetStatus="No damage · holding outer clearance"
+            if sample.Misses>=3 then data.SkipUntil=now+8;state.FollowTarget=nil;state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;return nil end
         end
-        offsetSample.Requests,offsetSample.At=requests,now
-        offsetSample.OwnDamage=contribution
-        offsetSample.PlayerHealth=playerHealth and playerHealth.Value
+        sample.Requests=requests;sample.At=now;sample.OwnDamage=own;sample.PlayerHealth=health and health.Value
     end
-    state.OffsetDebug={Target=mob.Name,Mode=plan.Mode,Distance=math.abs(plan.Offset),Minimum=plan.Minimum,
-        Radius=plan.Radius,Reach=plan.Reach,CenterCorrection=center.Y-mobRoot.Position.Y,
-        BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=offsetSample.Misses,Confirmed=offsetSample.Confirmed}
-    state.AutoOffsetTarget,state.AutoOffsetDestination=mob,plan.Destination
-    data.LastGroundedFarmDestination=plan.Destination
-    state.SetTeleportOffset(plan.Offset)
-    return plan.Offset
+    state.OffsetDebug={Target=mob.Name,Mode=plan.Mode,Distance=math.abs(plan.Offset),Minimum=plan.Minimum,Radius=plan.Radius,Reach=plan.Reach,
+        CenterCorrection=center.Y-mobRoot.Position.Y,BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=sample.Misses,Confirmed=sample.Confirmed}
+    state.AutoOffsetTarget=mob;state.AutoOffsetDestination=plan.Destination;data.LastGroundedFarmDestination=plan.Destination
+    state.SetTeleportOffset(plan.Offset);return plan.Offset
 end
 
 local function attackDeltaFor(data,root)
-    if state.AutoRanges then return state.AutoRanges.Delta(data,root) end
-    return data.Root.Position+Vector3.new(0,(root.Size.Y-data.Root.Size.Y)*.5,0)-root.Position
+    if state.AutoRanges then return state.AutoRanges.Delta(data,root)end
+    local center=data.Root.Position+Vector3.new(0,(root.Size.Y-data.Root.Size.Y)*.5,0)
+    return center-root.Position
 end
 local function attackRadiusFor(mob)
     local data=getMobData(mob)
     if not data then return 20 end
-    if state.AutoRanges then return state.AutoRanges.Range("Kill",data) end
-    local size=data.Root.Size
-    return math.min(120,math.max(size.X,size.Z)*.5+20)
+    return state.AutoRanges and state.AutoRanges.Range("Kill",data)or math.min(120,math.max(data.Root.Size.X,data.Root.Size.Z)*.5+20)
 end
-local function pivotRoot(root, position)
-    local character = root.Parent
+local function pivotRoot(root,position)
+    local model=root.Parent
     local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
-    if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1) end
-    local targetRoot=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
-    character:PivotTo(targetRoot * root.CFrame:ToObjectSpace(character:GetPivot()))
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
+    if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1)end
+    local frame=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
+    local relative=root.CFrame:ToObjectSpace(model:GetPivot())
+    model:PivotTo(frame*relative)
+    root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
 end
-stopMovement = function(message, keepPosition)
-    local floatingRoot=state.ArenaFloat and state.ArenaFloat.Root
-    if state.ArenaFloat then state.ArenaFloat.Release() end
-    state.TravelHold=false
-    state.TravelHoldPosition=nil
+stopMovement = function(message,keepPosition)
+    local floated=state.ArenaFloat and state.ArenaFloat.Root
+    if state.ArenaFloat then state.ArenaFloat.Release()end
+    state.TravelHold=false;state.TravelHoldPosition=nil
     if state.Recovering and not movementRoot then return end
-    if characterPartConnection then characterPartConnection:Disconnect(); characterPartConnection = nil end
-    local oldRoot, oldHumanoid = movementRoot, movementHumanoid
-    if not oldRoot and floatingRoot then
-        oldRoot=floatingRoot
-        oldHumanoid=floatingRoot.Parent and floatingRoot.Parent:FindFirstChildOfClass("Humanoid")
-    end
-    local oldRotate, oldPlatform = previousAutoRotate, previousPlatformStand
-    local oldPosition, oldOrientation, oldAttachment = positionAlign, orientationAlign, movementAttachment
-    local oldCollisions = collisionParts
-    collisionParts = {}
-    local function cleanup()
-        if oldPosition then oldPosition:Destroy() end
-        if oldOrientation then oldOrientation:Destroy() end
-        if oldAttachment then oldAttachment:Destroy() end
-        for part, value in pairs(oldCollisions) do if part.Parent then part.CanCollide = value end end
-        if oldHumanoid and oldHumanoid.Parent then
-            oldHumanoid.AutoRotate = oldRotate~=false
-            oldHumanoid.PlatformStand = oldPlatform==true
-            if oldHumanoid.Health > 0 and not oldPlatform then oldHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
+    if characterPartConnection then characterPartConnection:Disconnect();characterPartConnection=nil end
+    local root=movementRoot or floated
+    local humanoid=movementHumanoid or (root and root.Parent and root.Parent:FindFirstChildOfClass("Humanoid"))
+    local rotate,platform=previousAutoRotate,previousPlatformStand
+    local align,orientation,attachment=positionAlign,orientationAlign,movementAttachment
+    local collisions=collisionParts;collisionParts={}
+    local function finish()
+        if align then align:Destroy()end
+        if orientation then orientation:Destroy()end
+        if attachment then attachment:Destroy()end
+        for part,value in pairs(collisions)do if part.Parent then part.CanCollide=value end end
+        if humanoid and humanoid.Parent then
+            humanoid.AutoRotate=rotate~=false;humanoid.PlatformStand=platform==true
+            if humanoid.Health>0 and not platform then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)end
         end
-        if oldRoot and oldRoot.Parent then oldRoot.AssemblyLinearVelocity = Vector3.zero end
-        state.Recovering = false
+        if root and root.Parent then root.AssemblyLinearVelocity=Vector3.zero end
+        state.Recovering=false
     end
-    local surface
-    if not keepPosition and oldRoot and oldRoot.Parent and (oldPosition or floatingRoot) and oldHumanoid and oldHumanoid.Health > 0 then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { oldRoot.Parent, workspace:FindFirstChild("Mobs") or oldRoot.Parent }
-        params.RespectCanCollide = true
-        local floor = workspace:Raycast(oldRoot.Position + Vector3.new(0, 35, 0), Vector3.new(0, -70, 0), params)
-        local exitY = floor and floor.Position.Y + oldHumanoid.HipHeight + oldRoot.Size.Y / 2 + 1.5 or lastSurfaceY
-        if exitY and math.abs(oldRoot.Position.Y - exitY) > 1 then surface = Vector3.new(oldRoot.Position.X, exitY, oldRoot.Position.Z) end
+    local exit
+    if not keepPosition and root and root.Parent and (align or floated)and humanoid and humanoid.Health>0 then
+        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        params.FilterDescendantsInstances={root.Parent,workspace:FindFirstChild("Mobs")or root.Parent}
+        local hit=workspace:Raycast(root.Position+Vector3.new(0,35,0),Vector3.new(0,-70,0),params)
+        local elevation=hit and hit.Position.Y+humanoid.HipHeight+root.Size.Y/2+1.5 or lastSurfaceY
+        if elevation and math.abs(root.Position.Y-elevation)>1 then exit=Vector3.new(root.Position.X,elevation,root.Position.Z)end
     end
-    if surface and not oldPosition then pivotRoot(oldRoot,surface);surface=nil end
-    if surface then
-        state.Recovering = true
-        oldPosition.Enabled = true
-        oldPosition.Position = surface
-        pivotRoot(oldRoot, surface)
-        local exitCollisionConnection = RunService.Stepped:Connect(function()
-            for part in pairs(oldCollisions) do if part.Parent then part.CanCollide = false end end
-        end)
-        env.SB2FarmRecoveryUntil = os.clock() + 0.3
-        task.delay(0.3, function()
-            exitCollisionConnection:Disconnect()
-            cleanup()
-            if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped · character controls restored") end
-        end)
-    else
-        cleanup()
-    end
-    movementRoot, movementHumanoid, previousAutoRotate, previousPlatformStand = nil, nil, nil, nil
-    movementAttachment, positionAlign, orientationAlign = nil, nil, nil
-    lastTeleportPosition, teleportTarget = nil, nil
-    correctionStrikes, correctionTarget, holdPaused = 0, nil, false
-    state.Exploring, state.LastExploreDestination = false, nil
-    state.Moving = false
-    if message then movementStatus(state.Recovering and "Returning above ground…" or message) end
+    if exit then
+        pivotRoot(root,exit)
+        if align then
+            state.Recovering=true;align.Enabled=true;align.Position=exit
+            local physics=RunService.Stepped:Connect(function()for part in pairs(collisions)do if part.Parent then part.CanCollide=false end end end)
+            env.SB2FarmRecoveryUntil=os.clock()+.3
+            task.delay(.3,function()
+                physics:Disconnect();finish()
+                if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped · character controls restored")end
+            end)
+        else finish()end
+    else finish()end
+    movementRoot=nil;movementHumanoid=nil;previousAutoRotate=nil;previousPlatformStand=nil
+    movementAttachment=nil;positionAlign=nil;orientationAlign=nil
+    lastTeleportPosition=nil;teleportTarget=nil;correctionTarget=nil;correctionStrikes=0;holdPaused=false
+    state.Exploring=false;state.LastExploreDestination=nil;state.Moving=false
+    if message then movementStatus(state.Recovering and "Returning above ground…"or message)end
 end
+
 do
     local make=(function()
 -- BEGIN BUNDLED FARM NOCLIP
@@ -312,167 +253,128 @@ do
     state.FarmNoclip=make({Player=player,Pulse=RunService.Stepped,
         Enabled=function()return state.Running and state.AutoFarm and not state.StopEverything and not state.ModeratorBlocking end})
 end
-function state.SetAutoFarm(enabled, reason)
-    if state.StopEverything and enabled==true then return false end
-    if (enabled == true) == state.AutoFarm then return end
-    state.LastAutoFarmChange={Enabled=enabled==true,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
-    if state.AutoFarm and enabled ~= true then state.ProtectionUntil = os.clock() + 8 end
-    state.AutoFarm = enabled == true
-    state.FarmTargetLock=nil
-    if state.AutoFarm then state.LastFarmStopReason = nil end
-    state.LastMovementError = nil
-    farmToggle.Text = state.AutoFarm and "Auto farm  ·  ON" or "Auto farm  ·  OFF"
-    farmToggle.BackgroundColor3 = state.AutoFarm and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
-    stopMovement(state.AutoFarm and "Searching for the nearest living mob" or "Auto farm is off")
-    state.FollowTarget = nil
-    activeOffsetMob, offsetSample = nil, nil
-    state.AutoOffsetTarget = nil
-    nextTargetRefresh = 0
-    nextMovementUpdate = 0
-    targetMissingSince, nextAcquisition = nil, 0
-    if state.AutoFarm and state.SetEnabled then
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid:Move(Vector3.zero, false) end
+function state.SetAutoFarm(enabled,reason)
+    enabled=enabled==true
+    if (state.StopEverything and enabled)or enabled==state.AutoFarm then return end
+    state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
+    if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
+    state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
+    if enabled then state.LastFarmStopReason=nil end
+    farmToggle.Text=enabled and "Auto farm  ·  ON"or "Auto farm  ·  OFF"
+    farmToggle.BackgroundColor3=enabled and Color3.fromRGB(114,88,229)or Color3.fromRGB(45,48,63)
+    stopMovement(enabled and "Searching for the nearest living mob"or "Auto farm is off")
+    state.FollowTarget=nil;activeOffsetMob=nil;offsetSample=nil;state.AutoOffsetTarget=nil
+    nextTargetRefresh=0;nextMovementUpdate=0;targetMissingSince=nil;nextAcquisition=0
+    if enabled and state.SetEnabled then
+        local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:Move(Vector3.zero,false)end
     end
     if state.FarmNoclip then state.FarmNoclip.Update()end
     requestSave()
 end
-function state.SetFarmRange(range)
-    if type(range) ~= "number" or range ~= range then range = state.FarmRange end
-    state.FarmRange = math.huge
-    state.FollowTarget = nil
-    nextTargetRefresh = 0
-    movementStatus("Detection range updated")
-    nextMovementUpdate = 0
+function state.SetBossOnly(enabled)
+    state.BossOnly=enabled==true;state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityTarget=nil
+    state.MultiSpotEncounter={};state.MultiSpotNextScan=0;nextTargetRefresh=0;nextAcquisition=0;nextMovementUpdate=0
     requestSave()
 end
-bind(farmToggle.Activated, function() state.SetAutoFarm(not state.AutoFarm,"UI toggle") end)
+function state.SetFarmRange(value)
+    state.FarmRange=math.huge;state.FollowTarget=nil;nextTargetRefresh=0;nextMovementUpdate=0
+    movementStatus("Detection range updated");requestSave()
+end
+bind(farmToggle.Activated,function()state.SetAutoFarm(not state.AutoFarm,"UI toggle")end)
 state.SetAutoFarm(false)
 refreshMobIndex()
-function state.SetBossOnly(on)
-    state.BossOnly=on==true
-    state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityScanAt=0
-    nextAcquisition=0
-    requestSave()
-end
 local function validMob(mob, mobs)
-    if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
-    if not mob or mob.Parent ~= mobs then return nil end
-    if state.AutoFarm and state.BossOnly and targetPriority.Rank(mob)>2 then return nil end
-    if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
-        or mob~=state.ProgressionBossMob)then return nil end
-    local data = getMobData(mob)
-    if state.MultiSpotAnchor and data and not (state.AutoFarm and targetPriority.Rank(mob)<=2) and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-    if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
-    return nil
+    if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
+    local rank=targetPriority.Rank(mob)
+    if state.AutoFarm and state.BossOnly and rank>2 then return nil end
+    if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+    local data=getMobData(mob)
+    if not data then return nil end
+    local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+    if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
+    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or os.clock()<(data.SkipUntil or 0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    return data.Root
 end
 function state.IsFarmEnemyAlive()
     if not state.AutoFarm then return false end
-    local mob=state.FarmTargetLock or state.FollowTarget
-    if not mob or mob.Parent~=refreshMobIndex()then return false end
-    local data=getMobData(mob)
-    return not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))
+    local target=state.FarmTargetLock or state.FollowTarget
+    if not target or target.Parent~=refreshMobIndex()then return false end
+    local data=getMobData(target)
+    return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
 end
--- Share one paced, position-independent boss choice across movement and arena rotation.
 function state.GetFarmPriorityTarget(now)
     if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
-    local mobs=refreshMobIndex()
-    if not mobs then return nil end
+    local folder=refreshMobIndex()
+    if not folder then return nil end
     if state.CreditController and state.CreditCheck then
-        local focus=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
-        if focus then return focus end
+        local shared=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,folder)end,targetPriority.FarmLess)
+        if shared then return shared end
     end
     local cached=state.FarmPriorityTarget
-    if now<(state.FarmPriorityScanAt or 0)and cached and validMob(cached,mobs)then return cached end
-    if now<(state.FarmPriorityScanAt or 0)and not cached then return nil end
+    if now<(state.FarmPriorityScanAt or 0)and (not cached or validMob(cached,folder))then return cached end
     state.FarmPriorityScanAt=now+.15
-    local best
+    local candidate
     for mob in pairs(trackedMobs)do
-        if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
-            and (not best or targetPriority.FarmLess(mob,best))then best=mob end
+        if targetPriority.Rank(mob)<=2 and validMob(mob,folder)and (not candidate or targetPriority.FarmLess(mob,candidate))then candidate=mob end
     end
-    if state.IsFarmEnemyAlive()then
-        local locked=state.FarmTargetLock or state.FollowTarget
-        if targetPriority.Rank(locked)<=2 and (not best or targetPriority.Rank(locked)<=targetPriority.Rank(best))then best=locked end
-    end
-    -- A temporary invulnerability/streaming gap is not a kill and must not
-    -- downgrade an already observed main boss to a mini-boss or normal mob.
-    if cached and cached.Parent==mobs and targetPriority.Rank(cached)<=2 then
+    local locked=state.IsFarmEnemyAlive()and (state.FarmTargetLock or state.FollowTarget)
+    if locked and targetPriority.Rank(locked)<=2 and (not candidate or targetPriority.Rank(locked)<=targetPriority.Rank(candidate))then candidate=locked end
+    if cached and cached.Parent==folder and targetPriority.Rank(cached)<=2 then
         local data=getMobData(cached)
-        if (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)))
-            and (not best or targetPriority.Rank(cached)<targetPriority.Rank(best))then best=cached end
+        local living=not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
+        if living and (not candidate or targetPriority.Rank(cached)<targetPriority.Rank(candidate))then candidate=cached end
     end
-    state.FarmPriorityTarget=best
-    return best
+    state.FarmPriorityTarget=candidate;return candidate
 end
 function state.IsAttackingEnemy()
-    if not state.Running or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging
-        or state.Recovering or state.ProtectionRetreating then return false end
-    local stamp=state.LastEnemyAttackAt
-    if not stamp or os.clock()-stamp>.8 then return false end
-    local kind=state.LastEnemyAttackKind
-    if not ((kind=="Normal" and state.Enabled) or (kind=="Skill" and state.SkillAura)) then return false end
-    local mob=state.LastEnemyAttackTarget
-    if not validMob(mob,indexedMobFolder) then return false end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    local entity=character:FindFirstChild("Entity")
-    local health=entity and entity:FindFirstChild("Health")
-    if not health or health.Value<=0 then return false end
-    local data=getMobData(mob)
-    local range=kind=="Normal" and attackRadiusFor(mob) or state.AutoRanges.Range("Skill",data,state.LastEnemyAttackSkill)
-    return attackDeltaFor(data,root).Magnitude<=range
+    if not state.Running or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering or state.ProtectionRetreating then return false end
+    if not state.LastEnemyAttackAt or os.clock()-state.LastEnemyAttackAt>.8 then return false end
+    local normal=state.LastEnemyAttackKind=="Normal"
+    if not ((normal and state.Enabled)or (state.LastEnemyAttackKind=="Skill"and state.SkillAura))then return false end
+    local target=state.LastEnemyAttackTarget
+    if not validMob(target,indexedMobFolder)then return false end
+    local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+    local entity=character and character:FindFirstChild("Entity");local health=entity and entity:FindFirstChild("Health")
+    if not root or not health or health.Value<=0 then return false end
+    local data=getMobData(target)
+    local radius=normal and attackRadiusFor(target)or state.AutoRanges.Range("Skill",data,state.LastEnemyAttackSkill)
+    return attackDeltaFor(data,root).Magnitude<=radius
 end
 local function pauseHold(message)
-    if movementRoot and movementRoot.Parent and positionAlign and not holdPaused then positionAlign.Position = movementRoot.Position end
-    holdPaused = true
-    movementStatus(message)
+    if not holdPaused and movementRoot and movementRoot.Parent and positionAlign then positionAlign.Position=movementRoot.Position end
+    holdPaused=true;movementStatus(message)
 end
 local function clearStaleFarmControllers(root)
-    for _,child in ipairs(root:GetChildren())do
-        if (child.Name=="SB2FarmPosition"and child:IsA("AlignPosition"))
-            or (child.Name=="SB2FarmOrientation"and child:IsA("AlignOrientation"))
-            or (child.Name=="SB2FarmAttachment"and child:IsA("Attachment"))then child:Destroy()end
-    end
+    local names={SB2FarmPosition="AlignPosition",SB2FarmOrientation="AlignOrientation",SB2FarmAttachment="Attachment"}
+    for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
-    if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release() end
-    if movementRoot and positionAlign and positionAlign.Parent then return end
+    if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
+    if movementRoot==root and positionAlign and positionAlign.Parent then return end
     clearStaleFarmControllers(root)
-    movementRoot, movementHumanoid = root, humanoid
-    previousAutoRotate, previousPlatformStand = humanoid.AutoRotate, humanoid.PlatformStand
-    humanoid.AutoRotate = false
-    humanoid.PlatformStand = false
-    humanoid.Sit = false
-    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-    local function trackPart(part)
-        if part:IsA("BasePart") then
-            if collisionParts[part] == nil then
-                local original=state.FarmNoclip and state.FarmNoclip.Original(part)
-                if original==nil then original=part.CanCollide end
-                collisionParts[part]=original
-            end
-            part.CanCollide = false
+    movementRoot=root;movementHumanoid=humanoid;previousAutoRotate=humanoid.AutoRotate;previousPlatformStand=humanoid.PlatformStand
+    humanoid.AutoRotate=false;humanoid.PlatformStand=false;humanoid.Sit=false;humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    local function collision(part)
+        if not part:IsA("BasePart")then return end
+        if collisionParts[part]==nil then
+            local original=state.FarmNoclip and state.FarmNoclip.Original(part)
+            if original==nil then original=part.CanCollide end
+            collisionParts[part]=original
         end
+        part.CanCollide=false
     end
-    for _, part in ipairs(character:QueryDescendants("BasePart")) do trackPart(part) end
-    characterPartConnection = character.DescendantAdded:Connect(trackPart)
-    movementAttachment = create("Attachment", { Name = "SB2FarmAttachment" }, root)
-    positionAlign = create("AlignPosition", {
-        Name = "SB2FarmPosition", Mode = Enum.PositionAlignmentMode.OneAttachment,
-        Attachment0 = movementAttachment, Position = destination, ApplyAtCenterOfMass = true,
-        MaxForce = math.max(1, root.AssemblyMass) * workspace.Gravity * 8,
-        MaxVelocity = 60, Responsiveness = 40, RigidityEnabled = false,
-    }, root)
-    orientationAlign = create("AlignOrientation", {
-        Name = "SB2FarmOrientation", Mode = Enum.OrientationAlignmentMode.OneAttachment,
-        Attachment0 = movementAttachment, CFrame = state.UprightController.Rotation(root.CFrame),
-        MaxTorque = math.max(1, root.AssemblyMass) * 10000, MaxAngularVelocity = 20,
-        Responsiveness = 40, RigidityEnabled = true,
-    }, root)
-    state.Moving = true
+    for _,part in ipairs(character:QueryDescendants("BasePart"))do collision(part)end
+    characterPartConnection=character.DescendantAdded:Connect(collision)
+    movementAttachment=create("Attachment",{Name="SB2FarmAttachment"},root)
+    local mass=math.max(1,root.AssemblyMass)
+    positionAlign=create("AlignPosition",{Name="SB2FarmPosition",Mode=Enum.PositionAlignmentMode.OneAttachment,
+        Attachment0=movementAttachment,Position=destination,ApplyAtCenterOfMass=true,MaxForce=mass*workspace.Gravity*8,
+        MaxVelocity=60,Responsiveness=40,RigidityEnabled=false},root)
+    orientationAlign=create("AlignOrientation",{Name="SB2FarmOrientation",Mode=Enum.OrientationAlignmentMode.OneAttachment,
+        Attachment0=movementAttachment,CFrame=state.UprightController.Rotation(root.CFrame),MaxTorque=mass*10000,
+        MaxAngularVelocity=20,Responsiveness=40,RigidityEnabled=true},root)
+    state.Moving=true
 end
 
 state.UprightController=(function()
@@ -484,229 +386,223 @@ end)()({State=state,Player=player,
 })
 
 do
-    local create=(function()
+    local buildWarnings=(function()
 -- BEGIN BUNDLED BOSS DODGE
 -- END BUNDLED BOSS DODGE
     end)()
-    local enemy=services:FindFirstChild("EnemySkills")
-    local enemySkills=enemy and enemy:FindFirstChild("Skills")
-    local waveSkills=enemySkills and enemySkills:FindFirstChild("Wave Defense")
-    local bosses=waveSkills and waveSkills:FindFirstChild("Bosses")
+    local native=services:FindFirstChild("EnemySkills")
+    local definitions=native and native:FindFirstChild("Skills")
+    local wave=definitions and definitions:FindFirstChild("Wave Defense")
+    local bosses=wave and wave:FindFirstChild("Bosses")
+    local configured={
+        {Boss="Nythrane, the Hollow Flame",Skill="PurpleFireyOrb",Marker="Burning",Scale=2.5,Minimum=0},
+        {Boss="Vaelith, the Riftborn",Skill="RiftDetonation",Marker="Zap",Scale=1,Minimum=8}}
     local projectiles={}
-    for _,entry in ipairs({{"Nythrane, the Hollow Flame","PurpleFireyOrb","Burning",2.5,0},{"Vaelith, the Riftborn","RiftDetonation","Zap",1,8}}) do
-        local boss=bosses and bosses:FindFirstChild(entry[1]); local skill=boss and boss:FindFirstChild(entry[2])
-        local template=skill and skill:FindFirstChild("Part")
-        if template and template:IsA("BasePart") then projectiles[#projectiles+1]={BossName=entry[1],Name=entry[2],Template=template,Marker=entry[3],Radius=math.max(entry[5],math.max(template.Size.X,template.Size.Y,template.Size.Z)*.5*entry[4])} end
+    for _,spec in ipairs(configured)do
+        local boss=bosses and bosses:FindFirstChild(spec.Boss)
+        local skill=boss and boss:FindFirstChild(spec.Skill)
+        local part=skill and skill:FindFirstChild("Part")
+        if part and part:IsA("BasePart")then
+            local width=math.max(part.Size.X,part.Size.Y,part.Size.Z)*.5
+            projectiles[#projectiles+1]={BossName=spec.Boss,Name=spec.Skill,Marker=spec.Marker,Template=part,Radius=math.max(spec.Minimum,width*spec.Scale)}
+        end
     end
-    local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
-    state.BossDodge=create({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),
-        Projectiles=projectiles,Replicate=replicate and replicate.OnClientEvent})
+    local events=ReplicatedStorage:FindFirstChild("ReplicateSkill")
+    state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),Projectiles=projectiles,Replicate=events and events.OnClientEvent})
 end
 do
-    local make=(function()
+    local createPlanner=(function()
 -- BEGIN BUNDLED ATHEON DODGE
 -- END BUNDLED ATHEON DODGE
     end)()
-    local enemy=services:FindFirstChild("EnemySkills")
-    local native=state.NativeEnemySkills or (enemy and require(enemy))
-    state.AtheonDodgeController=make({State=state,Native=native or {RiggedEnemies={}},
-        Collection=game:GetService("CollectionService"),Warnings=state.BossDodge,
-        FireAssets=function(skill)
-            local result={}
-            local a,b=skill.SurfacePosition,skill.FocusPosition
-            if not a or not b then error("Dash path unavailable") end
-            local flat=Vector3.new(1,0,1)
-            local line=(b-a)*flat;local length=line:Dot(line)
-            local name=skill.IsCorrupted and "CorruptedFlames" or "Flames"
-            for _,part in ipairs(workspace:QueryDescendants("#Flames,#CorruptedFlames")) do
-                if part.Name==name and part:IsA("BasePart") then
-                    local delta=(part.Position-a)*flat
-                    local alpha=length>.01 and math.clamp(delta:Dot(line)/length,0,1) or 0
-                    if (delta-line*alpha).Magnitude<=(tonumber(skill.Width) or 50)+32 then
-                        result[#result+1]=part;if #result>=8 then break end
-                    end
-                end
+    local module=services:FindFirstChild("EnemySkills")
+    local native=state.NativeEnemySkills or module and require(module)or {RiggedEnemies={}}
+    local function flames(skill)
+        local origin,finish=skill.SurfacePosition,skill.FocusPosition
+        if not origin or not finish then error("Dash path unavailable")end
+        local segment=(finish-origin)*Vector3.new(1,0,1)
+        local length=segment:Dot(segment)
+        local expected=skill.IsCorrupted and "CorruptedFlames"or "Flames"
+        local result={}
+        for _,part in ipairs(workspace:QueryDescendants("#Flames,#CorruptedFlames"))do
+            if part.Name==expected and part:IsA("BasePart")then
+                local from=(part.Position-origin)*Vector3.new(1,0,1)
+                local alpha=length>.01 and math.clamp(from:Dot(segment)/length,0,1)or 0
+                if (from-segment*alpha).Magnitude<=(tonumber(skill.Width)or 50)+32 then result[#result+1]=part;if #result==8 then break end end
             end
-            return result
-        end,
+        end
+        return result
+    end
+    local function bosses()
+        local folder=workspace:FindFirstChild("Mobs")
+        local result={}
+        if folder then
+            for _,name in ipairs({"Atheon","Corrupted Atheon"})do
+                local boss=folder:FindFirstChild(name)
+                local entity=boss and boss:FindFirstChild("Entity");local health=entity and entity:FindFirstChild("Health")
+                if health and health.Value>0 then result[#result+1]=boss end
+            end
+        end
+        return result
+    end
+    state.AtheonDodgeController=createPlanner({State=state,Native=native,Collection=game:GetService("CollectionService"),Warnings=state.BossDodge,FireAssets=flames,Bosses=bosses,
         Grounded=function(boss)
             local data=getMobData(boss)
             if not data then return false end
-            local _,airborne=state.GroundFollow.Resolve(boss,data,os.clock())
-            return not airborne
+            local _,air=state.GroundFollow.Resolve(boss,data,os.clock());return not air
         end,
-        Position=function(boss)
-            local root=boss:FindFirstChild("HumanoidRootPart") or boss.PrimaryPart
-            return root and root.Position
-        end,
-        Bosses=function()
-            local list={}
-            local mobs=workspace:FindFirstChild("Mobs")
-            if mobs then
-                for _,name in ipairs({"Atheon","Corrupted Atheon"}) do
-                    local boss=mobs:FindFirstChild(name)
-                    local entity=boss and boss:FindFirstChild("Entity")
-                    local health=entity and entity:FindFirstChild("Health")
-                    if health and health.Value>0 then list[#list+1]=boss end
-                end
-            end
-            return list
-        end,
+        Position=function(boss)local root=boss:FindFirstChild("HumanoidRootPart")or boss.PrimaryPart;return root and root.Position end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
 end
-local waveDodge = (function()
+local waveDodge=(function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
-end)()({
-    State = state,
-    BossDodge = state.BossDodge,
-    AtheonDodge = state.AtheonDodgeController,
-    Hold = function(destination)
-        local character = player.Character
-        local root = character and character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not root or not humanoid then return end
-        if movementRoot and movementRoot ~= root then stopMovement(nil, true) end
-        ensureMovementController(character, root, humanoid, destination)
-        positionAlign.Enabled, orientationAlign.Enabled = true, true
-        positionAlign.Position = destination
-        if (root.Position-destination).Magnitude > 1.25 then pivotRoot(root, destination); state.TeleportsSent+=1 end
+end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,
+    Hold=function(point)
+        local character=player.Character
+        local root=character and character:FindFirstChild("HumanoidRootPart")
+        local human=character and character:FindFirstChildOfClass("Humanoid")
+        if not root or not human then return end
+        if movementRoot and movementRoot~=root then stopMovement(nil,true)end
+        ensureMovementController(character,root,human,point)
+        positionAlign.Enabled=true;orientationAlign.Enabled=true;positionAlign.Position=point
+        if (root.Position-point).Magnitude>1.25 then pivotRoot(root,point);state.TeleportsSent+=1 end
     end,
-    Release = function()
-        teleportTarget, correctionTarget = nil, nil
-        correctionStrikes = 0
-        nextMovementUpdate,nextAcquisition=0,0
-        state.LastDodgeFinishedAt=os.clock()
-        state.DodgeReturnPending=state.AutoFarm
-        if state.WakeSkillAura then state.WakeSkillAura() end
-        state.OffsetGraceUntil = os.clock()+0.6
-        if not state.AutoFarm then
-            if state.MultiSpot and state.MultiSpotAnchor and state.FinishMultiSpotArrival then
-                state.FinishMultiSpotArrival()
-            elseif state.TravelHold and state.TravelHoldPosition then
-                local character=player.Character; local root=character and character:FindFirstChild("HumanoidRootPart"); local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-                if root and humanoid then ensureMovementController(character,root,humanoid,state.TravelHoldPosition); positionAlign.Position=state.TravelHoldPosition; pivotRoot(root,state.TravelHoldPosition) end
-            else stopMovement("Dodge complete",true) end
-        end
+    Release=function()
+        teleportTarget=nil;correctionTarget=nil;correctionStrikes=0;nextMovementUpdate=0;nextAcquisition=0
+        state.LastDodgeFinishedAt=os.clock();state.DodgeReturnPending=state.AutoFarm;state.OffsetGraceUntil=os.clock()+.6
+        if state.WakeSkillAura then state.WakeSkillAura()end
+        if state.AutoFarm then return end
+        if state.MultiSpot and state.MultiSpotAnchor and state.FinishMultiSpotArrival then state.FinishMultiSpotArrival();return end
+        if not state.TravelHold or not state.TravelHoldPosition then stopMovement("Dodge complete",true);return end
+        local character=player.Character
+        local root=character and character:FindFirstChild("HumanoidRootPart")
+        local human=character and character:FindFirstChildOfClass("Humanoid")
+        if root and human then ensureMovementController(character,root,human,state.TravelHoldPosition);positionAlign.Position=state.TravelHoldPosition;pivotRoot(root,state.TravelHoldPosition)end
     end,
-    Status = function(message)
-        state.DodgeStatus = message
-    end,
-})
-state.WaveDodge = waveDodge
+    Status=function(text)state.DodgeStatus=text end})
+state.WaveDodge=waveDodge
 function state.SetAutoDodge(enabled)
     if state.StopEverything and enabled==true then return false end
-    state.AutoDodge = enabled == true
-    dodgeToggle.Text = state.AutoDodge and "Auto dodge · ON" or "Auto dodge · OFF"
-    dodgeToggle.BackgroundColor3 = state.AutoDodge and Color3.fromRGB(91,72,164) or Color3.fromRGB(45,48,63)
+    state.AutoDodge=enabled==true
+    dodgeToggle.Text=state.AutoDodge and "Auto dodge · ON"or "Auto dodge · OFF"
+    dodgeToggle.BackgroundColor3=state.AutoDodge and Color3.fromRGB(91,72,164)or Color3.fromRGB(45,48,63)
     requestSave()
 end
-bind(dodgeToggle.Activated, function() state.SetAutoDodge(not state.AutoDodge) end)
+bind(dodgeToggle.Activated,function()state.SetAutoDodge(not state.AutoDodge)end)
 state.SetAutoDodge(restore.AutoDodge)
 
 do
-    local oldZoom = player.CameraMaxZoomDistance
-    local restoringZoom = false
-    local function applyZoom()
-        if restoringZoom or state.StopEverything or not state.Running then return end
-        if player.CameraMaxZoomDistance < 1000000 then player.CameraMaxZoomDistance=1000000 end
+    local savedZoom=player.CameraMaxZoomDistance
+    local restoringZoom=false
+    local original={}
+    local roots={}
+    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
+    local function zoom()
+        if not restoringZoom and state.Running and not state.StopEverything and player.CameraMaxZoomDistance<1000000 then player.CameraMaxZoomDistance=1000000 end
     end
-    applyZoom()
-    bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"), applyZoom)
-    local original = {}
-    local excludedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
-    local excludedRoots={}
-    for name in pairs(excludedNames)do excludedRoots[name]=workspace:FindFirstChild(name)end
-    bind(workspace.ChildAdded,function(root)if excludedNames[root.Name]then excludedRoots[root.Name]=root end end)
-    bind(workspace.ChildRemoved,function(root)if excludedRoots[root.Name]==root then excludedRoots[root.Name]=nil end end)
+    for name in pairs(excluded)do roots[name]=workspace:FindFirstChild(name)end
+    bind(workspace.ChildAdded,function(object)if excluded[object.Name]then roots[object.Name]=object end end)
+    bind(workspace.ChildRemoved,function(object)if roots[object.Name]==object then roots[object.Name]=nil end end)
+    bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"),zoom);zoom()
     local function mapPart(part)
-        if state.StopEverything then return false end
-        if not part:IsA("BasePart") then return false end
-        if state.SkillVisuals and state.SkillVisuals.IsEffect(part) then return false end
-        if player.Character and part:IsDescendantOf(player.Character) then return false end
-        for _,root in pairs(excludedRoots)do
-            if part:IsDescendantOf(root)then return false end
-        end
+        if state.StopEverything or not part:IsA("BasePart")then return false end
+        if state.SkillVisuals and state.SkillVisuals.IsEffect(part)then return false end
+        if player.Character and part:IsDescendantOf(player.Character)then return false end
+        for _,root in pairs(roots)do if part:IsDescendantOf(root)then return false end end
         return not waveDodge.IsHazardPart(part)
     end
-    state.ExcludeMapPart=function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+    function state.ExcludeMapPart(part)
+        local before=original[part]
+        if before==nil then return end
+        original[part]=nil;part.LocalTransparencyModifier=before
     end
     local function applyPart(part)
-        if not mapPart(part) then return end
+        if not mapPart(part)then return end
         if state.TransparentMap and not state.StopEverything then
             if original[part]==nil then
                 local value=part.LocalTransparencyModifier
-                original[part]=math.abs(value-0.7)<0.0001 and 0 or value
+                original[part]=math.abs(value-.7)<.0001 and 0 or value
             end
-            part.LocalTransparencyModifier=0.7
-        elseif original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+            part.LocalTransparencyModifier=.7
+        else state.ExcludeMapPart(part)end
     end
     local scanGeneration=0
     function state.SetTransparentMap(enabled)
-    if state.StopEverything and enabled==true then return false end
-        state.TransparentMap=enabled==true
-        scanGeneration+=1
-        local generation=scanGeneration
+        if enabled==true and state.StopEverything then return false end
+        state.TransparentMap=enabled==true;scanGeneration+=1
+        local token=scanGeneration
         if state.TransparentMap then
             task.defer(function()
                 local slice=os.clock()
-                for _,part in ipairs(workspace:QueryDescendants("BasePart")) do
-                    if generation~=scanGeneration or not state.Running then return end
-                    if part.Parent then applyPart(part)end
+                for _,part in ipairs(workspace:QueryDescendants("BasePart"))do
+                    if token~=scanGeneration or not state.Running then return end
+                    if part.Parent then pcall(applyPart,part)end
                     if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
                 end
             end)
+        else
+            for part,value in pairs(original)do
+                original[part]=nil
+                if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
+            end
         end
-        if not state.TransparentMap then
-            for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end; original[part]=nil end
-        end
-        requestSave()
+        requestSave();return true
     end
-    local pendingParts,queuedParts={},setmetatable({}, {__mode="k"})
-    local pendingHead,pendingTail,streamWorker=1,0,false
+    local pendingParts,queuedParts=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
+    local pendingHead,pendingTail=1,0
+    local streamWorker=false
     bind(workspace.DescendantAdded,function(part)
         if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
-        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=true
+        if pendingTail-pendingHead>=8192 then return end
+        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=pendingTail
         if streamWorker then return end
         streamWorker=true
         task.defer(function()
             while state.Running and not restoringZoom and pendingHead<=pendingTail do
-                local deadline=os.clock()+.001
                 local count=0
-                while pendingHead<=pendingTail and count<48 and os.clock()<deadline do
-                    local current=pendingParts[pendingHead];pendingParts[pendingHead]=nil;pendingHead+=1;queuedParts[current]=nil
-                    if current.Parent and state.TransparentMap then pcall(applyPart,current)end
-                    count+=1
+                local expires=os.clock()+.001
+                while pendingHead<=pendingTail and count<48 and os.clock()<expires do
+                    local current=pendingParts[pendingHead]
+                    pendingParts[pendingHead]=nil;pendingHead+=1;count+=1
+                    if current then
+                        queuedParts[current]=nil
+                        if current.Parent and state.TransparentMap then pcall(applyPart,current)end
+                    end
                 end
                 task.wait()
             end
-            table.clear(pendingParts);table.clear(queuedParts);pendingHead,pendingTail=1,0;streamWorker=false
+            table.clear(pendingParts);table.clear(queuedParts);pendingHead=1;pendingTail=0;streamWorker=false
         end)
     end)
     bind(workspace.DescendantRemoving,function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+        local slot=queuedParts[part]
+        if slot then pendingParts[slot]=nil;queuedParts[part]=nil end
+        if original[part]~=nil then pcall(state.ExcludeMapPart,part)end
     end)
-    state.RestoreWorldVisuals=function()
-        scanGeneration+=1
-        restoringZoom=true
-        player.CameraMaxZoomDistance=oldZoom
-        for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
+    function state.RestoreWorldVisuals()
+        scanGeneration+=1;restoringZoom=true
+        player.CameraMaxZoomDistance=savedZoom
+        for part,value in pairs(original)do
+            original[part]=nil
+            if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
+        end
+        table.clear(pendingParts);table.clear(queuedParts)
     end
     local makeDeletion=(function()
 -- BEGIN BUNDLED MAP DELETION
 -- END BUNDLED MAP DELETION
     end)()
     state.MapDeletion=makeDeletion({State=state,Root=workspace,Players=Players,Now=os.clock,Defer=task.defer,Wait=task.wait,
-        ClearTerrain=function()workspace.Terrain:Clear()end,
-        Protected=function(part)return not mapPart(part)end})
-    state.MapDeletion.Set(state.PerformanceBoosters["Delete map"]==true or state.PerformanceBoosters["Remove everything"]==true)
+        ClearTerrain=function()workspace.Terrain:Clear()end,Protected=function(part)return not mapPart(part)end})
     local makeAnimations=(function()
 -- BEGIN BUNDLED ANIMATION REMOVAL
 -- END BUNDLED ANIMATION REMOVAL
     end)()
     state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
-    state.AnimationRemoval.Set(state.PerformanceBoosters["Remove animations"]==true or state.PerformanceBoosters["Remove everything"]==true)
+    local all=state.PerformanceBoosters["Remove everything"]==true
+    state.MapDeletion.Set(all or state.PerformanceBoosters["Delete map"]==true)
+    state.AnimationRemoval.Set(all or state.PerformanceBoosters["Remove animations"]==true)
     state.SetTransparentMap(restore.TransparentMap)
 end
 
@@ -736,27 +632,23 @@ do
 end
 
 -- Area coordinates remain usable when distance-based spawning removes the mob.
-local destinations = {}
+local destinations={}
 local destinationsDirty=false
 local function finitePoint(point)
-    return typeof(point) == "Vector3" and point.X == point.X and point.Y == point.Y and point.Z == point.Z
-        and math.abs(point.X) < 1000000 and math.abs(point.Y) < 1000000 and math.abs(point.Z) < 1000000
+    if typeof(point)~="Vector3"then return false end
+    for _,value in ipairs({point.X,point.Y,point.Z})do if value~=value or math.abs(value)>=1000000 then return false end end
+    return true
 end
-local function rememberDestination(id, name, kind, point)
-    if not finitePoint(point) then return end
-    local old=destinations[id]
-    if old and old.Name==name and old.Kind==kind and (old.Position-point).Magnitude<.01 then return end
-    destinations[id] = { Id = id, Name = name, Kind = kind, Position = point }
-    destinationsDirty=true
+local function rememberDestination(id,name,kind,point)
+    if not finitePoint(point)then return end
+    local previous=destinations[id]
+    if previous and previous.Name==name and previous.Kind==kind and (previous.Position-point).Magnitude<.01 then return end
+    destinations[id]={Id=id,Name=name,Kind=kind,Position=point};destinationsDirty=true
 end
--- Verified on the current Floor 7 map; independent of whether Frogazoid exists.
-if game.PlaceId == 582198062 then
-    rememberDestination("mob:Frogazoid", "Frogazoid", "Mini boss", Vector3.new(-154.811, 1214.301, -758.796))
-end
--- Only user-created spots use a position file; built-in arenas stay in source.
+if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid","Mini boss",Vector3.new(-154.811,1214.301,-758.796))end
 if importedConfig and filePersistence then
-    for id,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/custom-spots_"..id..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(id),Areas=areas}))
+    for floor,areas in pairs(importedConfig.CustomSpots or {})do
+        writefile(configFolder.."/custom-spots_"..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
     end
 end
 local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
@@ -766,15 +658,14 @@ if filePersistence then
         if not isfile(customSpotPath)then return end
         local raw=readfile(customSpotPath)
         assert(#raw<=32768,"Custom spots file exceeds size limit")
-        local data=HttpService:JSONDecode(raw)
-        if data.Version~=1 or data.PlaceId~=game.PlaceId or type(data.Areas)~="table"then return end
-        for index,area in ipairs(data.Areas)do
+        local saved=HttpService:JSONDecode(raw)
+        if saved.Version~=1 or saved.PlaceId~=game.PlaceId or type(saved.Areas)~="table"then return end
+        for index,entry in ipairs(saved.Areas)do
             if index>20 then break end
-            if type(area.Id)=="string"and area.Id:sub(1,16)=="saved:multispot:"and type(area.Name)=="string"and type(area.Position)=="table"then
-                local p=area.Position
-                if type(p[1])=="number"and type(p[2])=="number"and type(p[3])=="number"then
-                    rememberDestination(area.Id,area.Name,"Arena",Vector3.new(p[1],p[2],p[3]))
-                end
+            local at=entry.Position
+            if type(entry.Id)=="string"and entry.Id:sub(1,16)=="saved:multispot:"and type(entry.Name)=="string"and type(at)=="table"
+                and type(at[1])=="number"and type(at[2])=="number"and type(at[3])=="number"then
+                rememberDestination(entry.Id,entry.Name,"Arena",Vector3.new(at[1],at[2],at[3]))
             end
         end
         lastCustomSpots=raw
@@ -859,89 +750,76 @@ local function saveDestinations()
     destinationsDirty=false
     if not filePersistence then return end
     local areas={}
-    for id,area in pairs(destinations)do
+    for id,entry in pairs(destinations)do
         if id:sub(1,16)=="saved:multispot:"then
-            local p=area.Position
-            areas[#areas+1]={Id=id,Name=area.Name,Position={p.X,p.Y,p.Z}}
+            local at=entry.Position
+            areas[#areas+1]={Id=id,Name=entry.Name,Position={at.X,at.Y,at.Z}}
         end
     end
     if #areas==0 then return end
     table.sort(areas,function(a,b)return a.Id<b.Id end)
     local ok,reason=pcall(function()
-        local raw=HttpService:JSONEncode({Version=1,PlaceId=game.PlaceId,Areas=areas})
-        if raw~=lastCustomSpots then writefile(customSpotPath,raw);lastCustomSpots=raw end
+        local serialized=HttpService:JSONEncode({Version=1,PlaceId=game.PlaceId,Areas=areas})
+        if serialized~=lastCustomSpots then writefile(customSpotPath,serialized);lastCustomSpots=serialized end
     end)
     state.CustomSpotSaveError=not ok and tostring(reason)or nil
 end
 local function rankMob(mob)
-    local priority=targetPriority.Rank(mob)
-    return priority==1 and "Boss" or priority==2 and "Mini boss" or nil
+    local rank=targetPriority.Rank(mob)
+    if rank==1 then return "Boss"end
+    if rank==2 then return "Mini boss"end
 end
 local function discoverDestinations(onlyMobs)
-    if workspace:FindFirstChild("WaveDefenseStuff") then
-        local stage=tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if state.DestinationEnvironment~=stage then
-            for id in pairs(destinations) do if string.sub(id,1,4)=="mob:" or id=="wave:rift" then destinations[id]=nil; destinationsDirty=true end end
+    local wave=workspace:FindFirstChild("WaveDefenseStuff")
+    if wave then
+        local stage=tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")
+        if stage~=state.DestinationEnvironment then
+            for id in pairs(destinations)do if id:sub(1,4)=="mob:"or id=="wave:rift"then destinations[id]=nil;destinationsDirty=true end end
             state.DestinationEnvironment=stage
         end
-        local marker=workspace.WaveDefenseStuff:FindFirstChild("RiftBossSpawn")
-        if marker and string.find(string.lower(stage),"rift",1,true) then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position) end
+        local marker=wave:FindFirstChild("RiftBossSpawn")
+        if marker and stage:lower():find("rift",1,true)then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position)end
     end
     if not onlyMobs then
-    local mapContainers = { workspace }
-    for _, folderName in ipairs({ "Models", "OptimizedGame" }) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then mapContainers[#mapContainers + 1] = folder end
-    end
-    for _, models in ipairs(mapContainers) do
-        for _, model in ipairs(models:GetChildren()) do
-            if model:IsA("Model") or model:IsA("BasePart") then
-                local key = string.lower((string.gsub(model.Name, "[^%w]", "")))
-                local kind
-                if key == "bossroom" or key == "bossarena" or key == "bossspawn" or key == "aspawnboss" then kind = "Boss"
-                elseif key == "minibossroom" or key == "minibossarena" or key == "minibossspawn" or key == "aspawnminiboss" then kind = "Mini boss"
-                elseif key == "entryroom" or key == "dungeonentrance" then kind = "Dungeon"
-                elseif key == "exitteleportroom" or key == "exitportal" then kind = "Exit"
-                elseif string.match(key, "^bigdungeonroom%d+$") then kind = "Dungeon" end
-                if kind then
-                    local displayName = model.Name == "BossRoom" and "Boss room" or model.Name
-                    if key == "aspawnboss" then displayName = "Boss spawn area"
-                    elseif key == "aspawnminiboss" then displayName = "Mini-boss spawn area" end
-                    local room = string.match(key, "^bigdungeonroom(%d+)$")
-                    if room then displayName = "Room " .. room end
-                    rememberDestination("map:" .. model.Name, displayName, kind, model:GetPivot().Position)
+        local containers={workspace}
+        for _,name in ipairs({"Models","OptimizedGame"})do local folder=workspace:FindFirstChild(name);if folder then containers[#containers+1]=folder end end
+        local kinds={bossroom="Boss",bossarena="Boss",bossspawn="Boss",aspawnboss="Boss",minibossroom="Mini boss",minibossarena="Mini boss",
+            minibossspawn="Mini boss",aspawnminiboss="Mini boss",entryroom="Dungeon",dungeonentrance="Dungeon",exitteleportroom="Exit",exitportal="Exit"}
+        for _,container in ipairs(containers)do
+            for _,object in ipairs(container:GetChildren())do
+                if object:IsA("Model")or object:IsA("BasePart")then
+                    local normalized=object.Name:lower():gsub("[^%w]","")
+                    local room=normalized:match("^bigdungeonroom(%d+)$")
+                    local kind=kinds[normalized]or room and "Dungeon"
+                    if kind then
+                        local label=room and "Room "..room or normalized=="aspawnboss"and "Boss spawn area"or normalized=="aspawnminiboss"and "Mini-boss spawn area"or object.Name=="BossRoom"and "Boss room"or object.Name
+                        rememberDestination("map:"..object.Name,label,kind,object:GetPivot().Position)
+                    end
                 end
             end
         end
-    end
-    local checkpoints = workspace:FindFirstChild("CheckpointPortals")
-    if checkpoints then
-        local points = {}
-        for _, model in ipairs(checkpoints:GetChildren()) do
-            if model:IsA("Model") or model:IsA("BasePart") then points[#points + 1] = model:GetPivot().Position end
+        local portals=workspace:FindFirstChild("CheckpointPortals")
+        if portals then
+            local positions={}
+            for _,object in ipairs(portals:GetChildren())do if object:IsA("Model")or object:IsA("BasePart")then positions[#positions+1]=object:GetPivot().Position end end
+            table.sort(positions,function(a,b)return a.X~=b.X and a.X<b.X or a.X==b.X and a.Z<b.Z end)
+            for index,position in ipairs(positions)do rememberDestination("checkpoint:"..index,"Checkpoint "..index,"Checkpoint",position)end
         end
-        table.sort(points, function(a, b) if a.X ~= b.X then return a.X < b.X end; return a.Z < b.Z end)
-        for index, point in ipairs(points) do rememberDestination("checkpoint:" .. index, "Checkpoint " .. index, "Checkpoint", point) end
+        local spawns=workspace:QueryDescendants("SpawnLocation")
+        if #spawns>0 then
+            local average=Vector3.zero
+            for _,spawn in ipairs(spawns)do average+=spawn.Position end
+            rememberDestination("spawn","Floor spawn","Spawn",average/#spawns)
+        end
     end
-    local spawns = workspace:QueryDescendants("SpawnLocation")
-    if #spawns > 0 then
-        local total = Vector3.zero
-        for _, spawn in ipairs(spawns) do total += spawn.Position end
-        rememberDestination("spawn", "Floor spawn", "Spawn", total / #spawns)
-    end
-    end
-    for mob in pairs(trackedMobs) do
+    for mob in pairs(trackedMobs)do
         if mob.Parent then
-            local kind, root = rankMob(mob), mob:FindFirstChild("HumanoidRootPart")
-            if kind and root then
-                local id = "mob:" .. mob.Name
-                -- Keep the first observed spawn area instead of following a boss that chases players.
-                if not destinations[id] or workspace:FindFirstChild("WaveDefenseStuff") then rememberDestination(id, mob.Name, kind, root.Position) end
-            end
+            local kind=rankMob(mob);local root=mob:FindFirstChild("HumanoidRootPart")
+            local id="mob:"..mob.Name
+            if kind and root and (not destinations[id]or wave)then rememberDestination(id,mob.Name,kind,root.Position)end
         end
     end
-    state.FloorDestinations = destinations
-    saveDestinations()
+    state.FloorDestinations=destinations;saveDestinations()
 end
 local floorName = "Floor " .. tostring(game.PlaceId)
 pcall(function()
@@ -951,49 +829,43 @@ pcall(function()
 end)
 state.FloorName = floorName
 function state.ReadAutomationEncounter(spot)
-    local tracked=state.MultiSpotEncounter or {}
-    state.MultiSpotEncounter=tracked
+    local remembered=state.MultiSpotEncounter or {}
+    state.MultiSpotEncounter=remembered
     local now=os.clock()
-    local function scan()
+    local function eligible(mob)return not state.BossOnly or targetPriority.Rank(mob)<=2 end
+    local function living(data)return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)end
+    local function collect()
         state.MultiSpotNextScan=now+1
-        for mob in pairs(trackedMobs) do
-            if mob.Parent and (not state.BossOnly or targetPriority.Rank(mob)<=2)then
+        for mob in pairs(trackedMobs)do
+            if mob.Parent and eligible(mob)then
                 local data=getMobData(mob)
-                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-                if root and ((spot.EncounterNames and spot.EncounterNames[mob.Name]) or (root.Position-spot.Position).Magnitude<=220)
-                    and (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))) then
-                    tracked[mob]=true
-                end
-                if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1) end
+                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+                local belongs=root and ((spot.EncounterNames and spot.EncounterNames[mob.Name])or (root.Position-spot.Position).Magnitude<=220)
+                if belongs and living(data)then remembered[mob]=true end
+                if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1)end
             end
         end
     end
-    local function count()
-        local alive,seen=0,false
-        for mob in pairs(tracked) do
-            if not mob.Parent then
-                tracked[mob]=nil;seen=true
-            else
-            if not state.BossOnly or targetPriority.Rank(mob)<=2 then
-                local data=getMobData(mob)
-                -- Missing streamed health is not proof that a previously seen mob died.
-                if not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))then alive+=1
-                else tracked[mob]=nil end
-            seen=true
-            end
+    local function summarize()
+        local count,seen=0,false
+        for mob in pairs(remembered)do
+            if not mob.Parent then remembered[mob]=nil;seen=true
+            elseif eligible(mob)then
+                seen=true
+                if living(getMobData(mob))then count+=1 else remembered[mob]=nil end
             end
         end
-        return alive,seen
+        return count,seen
     end
-    local scanned=now>=(state.MultiSpotNextScan or 0)
-    if scanned then scan() end
-    local alive,seen=count()
-    -- A cached zero must never authorize travel without checking for new adds.
-    if alive==0 and not scanned then
-        scan();local refreshed,observed=count();alive=refreshed;seen=seen or observed
+    local refreshed=now>=(state.MultiSpotNextScan or 0)
+    if refreshed then collect()end
+    local alive,observed=summarize()
+    if alive==0 and not refreshed then
+        collect();local count,seen=summarize();alive=count;observed=observed or seen
     end
-    return alive,seen
+    return alive,observed
 end
+
 do
     local make=(function()
 -- BEGIN BUNDLED RESPAWN SCHEDULE
@@ -1013,13 +885,13 @@ do
 end
 function state.RegisterAutomationDestination(spot)
     if spot.PlaceId~=game.PlaceId then return false end
-    local existing=destinations[spot.DestinationId]
-    if existing then
-        if spot.MainBoss or spot.PositionLocked then rememberDestination(spot.DestinationId,existing.Name,spot.Kind,spot.Position)end
-        if spot.DestinationId:sub(1,4)=="mob:" then existing.Name=spot.DestinationId:sub(5) end
-        return true
+    local id=spot.DestinationId
+    local saved=destinations[id]
+    if not saved then rememberDestination(id,spot.Name,spot.Kind,spot.Position)
+    else
+        if spot.MainBoss or spot.PositionLocked then rememberDestination(id,saved.Name,spot.Kind,spot.Position)end
+        if id:sub(1,4)=="mob:"then saved.Name=id:sub(5)end
     end
-    rememberDestination(spot.DestinationId,spot.Name,spot.Kind,spot.Position)
     return true
 end
 travelHeading.Text = "TELEPORTS · " .. floorName
@@ -1072,372 +944,203 @@ function state.FinishMultiSpotArrival()
     return true
 end
 function state.HoldMultiSpotIdle()
-    if not state.AutoFarm or not state.MultiSpot or state.MultiSpotPriorityActive or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
-        or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
+    local blocked=not state.AutoFarm or not state.MultiSpot or state.MultiSpotPriorityActive or not state.MultiSpotAnchor
+        or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering
     local spot=state.MultiSpotController and state.MultiSpotController.Current
-    if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
-    if state.MultiSpotEmptyAnchor~=state.MultiSpotAnchor then
-        state.MultiSpotEmptyAnchor=state.MultiSpotAnchor;state.MultiSpotEmptySince=nil
-    end
-    local now=os.clock()
-    state.MultiSpotEmptySince=state.MultiSpotEmptySince or now
+    if blocked or not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
+    if state.MultiSpotEmptyAnchor~=state.MultiSpotAnchor then state.MultiSpotEmptyAnchor=state.MultiSpotAnchor;state.MultiSpotEmptySince=nil end
+    local now=os.clock();state.MultiSpotEmptySince=state.MultiSpotEmptySince or now
     if now-state.MultiSpotEmptySince<5 then return false end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-    if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-    waveDodge.Idle(state.MultiSpotAnchor)
-    return true
+    local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+    local human=character and character:FindFirstChildOfClass("Humanoid")
+    if not root or root.Anchored or not human or human.Health<=0 then return false end
+    waveDodge.Idle(state.MultiSpotAnchor);return true
 end
 function state.TeleportToDestination(id,urgent,automatic)
-    if state.SafeModePanic or state.StopEverything or state.TravelBusy or not state.Running then return false,"Another movement has priority" end
+    if state.SafeModePanic or state.StopEverything or state.TravelBusy or not state.Running then return false,"Another movement has priority"end
     discoverDestinations()
     local area=destinations[id]
-    if not area then setTravelStatus("Area not located on this floor yet");return false,"Arena is not available" end
-    state.TravelSerial=(state.TravelSerial or 0)+1
-    local serial=state.TravelSerial
-    state.TravelBusy=true;state.MultiSpotTravelPending=automatic==true
-    state.TravelStartedAt=os.clock()
-    state.LastTravelDestination=nil;state.LastTravelPosition=nil
-    state.TravelError=nil
+    if not area then setTravelStatus("Area not located on this floor yet");return false,"Arena is not available"end
+    local serial=(state.TravelSerial or 0)+1
+    state.TravelSerial=serial;state.TravelBusy=true;state.MultiSpotTravelPending=automatic==true;state.TravelStartedAt=os.clock()
+    state.LastTravelDestination=nil;state.LastTravelPosition=nil;state.TravelError=nil
     setTravelOpen(false)
-    -- Prevent continuous skills from taking a new lease before travel gets a turn.
-    if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena") end
+    if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena")end
     stopMovement("Travelling · farming will resume",true)
     task.spawn(function()
         state.TravelWorker=coroutine.running()
         local function current()return state.Running and not state.SafeModePanic and not state.StopEverything and state.TravelSerial==serial end
-        local ok,message=pcall(function()
+        local ok,reason=pcall(function()
             local deadline=os.clock()+4
-            while current() and (state.Recovering or state.SkillCastRunning) and os.clock()<deadline do task.wait(.05) end
-            if not current() then return end
+            while current()and (state.Recovering or state.SkillCastRunning)and os.clock()<deadline do task.wait(.05)end
+            if not current()then return end
             assert(not state.Recovering and not state.SkillCastRunning,"Wait for the current movement or skill to finish")
             setTravelStatus("Loading "..area.Name.."...")
             local landing=state.ArenaTravel.Move(area.Position,automatic==true,current)
-            if not current() then return end
-            local destination=landing.Position
-            state.LastTravelLanding={SourcePosition=area.Position,SurfaceY=landing.SurfaceY,Requested=destination,Actual=destination,Depth=landing.SurfaceY-destination.Y}
-            state.LastTravelDestination=id;state.LastTravelPosition=destination
-            state.MultiSpotLandingPosition=automatic and destination or nil
-            state.TeleportsSent+=1
-            state.TravelHold=automatic==true or not (state.AutoFarm and state.Enabled)
-            state.TravelHoldPosition=state.TravelHold and destination or nil
-            if area.Kind=="Boss" or area.Kind=="Mini boss" then
-                state.TravelFocus={Kind=area.Kind,Name=id:sub(1,4)=="mob:" and area.Name or nil,Until=os.clock()+8}
-                state.FollowTarget=nil
-            end
+            if not current()then return end
+            local at=landing.Position
+            state.LastTravelLanding={SourcePosition=area.Position,SurfaceY=landing.SurfaceY,Requested=at,Actual=at,Depth=landing.SurfaceY-at.Y}
+            state.LastTravelDestination=id;state.LastTravelPosition=at;state.MultiSpotLandingPosition=automatic and at or nil
+            state.TeleportsSent+=1;state.TravelHold=automatic==true or not(state.AutoFarm and state.Enabled)
+            state.TravelHoldPosition=state.TravelHold and at or nil
+            if area.Kind=="Boss"or area.Kind=="Mini boss"then state.TravelFocus={Kind=area.Kind,Name=id:sub(1,4)=="mob:"and area.Name or nil,Until=os.clock()+8};state.FollowTarget=nil end
             setTravelStatus("Arrived: "..area.Name.." · 20 studs below position")
-            if automatic and state.MultiSpotController and state.MultiSpotController.Current then
-                local _,seen=state.ReadAutomationEncounter(state.MultiSpotController.Current)
-                if seen then state.MultiSpotController.EncounterSeen=true end
-            end
+            local multi=state.MultiSpotController
+            if automatic and multi and multi.Current then local _,seen=state.ReadAutomationEncounter(multi.Current);if seen then multi.EncounterSeen=true end end
             lastSurfaceY=landing.SurfaceY+4
         end)
         if state.TravelSerial~=serial then return end
-        if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(message);setTravelStatus(state.TravelError) end
         state.TravelBusy=false;state.MultiSpotTravelPending=false;state.TravelStartedAt=nil;state.TravelWorker=nil
-        if ok and automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
-            local confirmed,reason=pcall(state.MultiSpotController.Update,state.FarmClock())
-            if not confirmed then state.MultiSpotController.Pause(tostring(reason)) end
+        if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(reason);setTravelStatus(state.TravelError);return end
+        if automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
+            local confirmed,error=pcall(state.MultiSpotController.Update,state.FarmClock())
+            if not confirmed then state.MultiSpotController.Pause(tostring(error))end
         end
     end)
     return true
 end
 local function refreshTravelChoices()
     discoverDestinations()
-    for _, child in ipairs(travelList:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
-    local choices, hasMini = {}, false
-    local order = { Boss = 1, ["Mini boss"] = 2, Spawn = 3, Checkpoint = 4, Dungeon = 5, Exit = 6 }
-    for _, area in pairs(destinations) do choices[#choices + 1] = area; if area.Kind == "Mini boss" then hasMini = true end end
-    table.sort(choices, function(a, b) local x,y=order[a.Kind] or 7,order[b.Kind] or 7; if x ~= y then return x < y end; return a.Name < b.Name end)
-    local function option(text, index, callback)
-        local button = create("TextButton", {
-            Name = "Destination" .. index, Text = text, Font = Enum.Font.Gotham, TextSize = 11,
-            Size = UDim2.new(1, -4, 0, 30), LayoutOrder = index, BorderSizePixel = 0,
-            BackgroundColor3 = Color3.fromRGB(41, 44, 59), TextColor3 = Color3.fromRGB(226, 229, 243),
-            TextTruncate = Enum.TextTruncate.AtEnd,
-        }, travelList)
-        corner(button, 6)
-        button.Activated:Connect(callback)
-    end
-    for index, area in ipairs(choices) do
-        option(area.Kind .. " · " .. area.Name, index, function() state.TeleportToDestination(area.Id) end)
-    end
-    if not hasMini then
-        option("Mini boss · area not discovered yet", 100, function() setTravelStatus("Visit the mini-boss area once, then save it below") end)
-        option("Save current spot as mini-boss area", 101, function()state.SaveCurrentMiniBossArea()end)
-    end
+    state.FloorDestinations=destinations
 end
 function state.SaveCurrentMiniBossArea()
     if state.StopEverything then return false end
-            local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if root then rememberDestination("saved:mini", "Saved mini-boss area", "Mini boss", root.Position); saveDestinations(); refreshTravelChoices(); setTravelStatus("Mini-boss area saved for " .. floorName) end
+    local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    rememberDestination("saved:mini","Saved mini-boss area","Mini boss",root.Position)
+    saveDestinations();refreshTravelChoices();setTravelStatus("Mini-boss area saved for "..floorName)
+    return true
 end
 function state.SaveMultiSpot()
     if state.StopEverything or state.TravelBusy or state.AutomationTeleporting then return false end
     local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
-    local point=root.Position
-    local surface=waveDodge.FloorY(point)
-    if type(surface)=="number"then point=Vector3.new(point.X,surface,point.Z)end
+    local point=root.Position;local floor=waveDodge.FloorY(point)
+    if type(floor)=="number"then point=Vector3.new(point.X,floor,point.Z)end
     if not finitePoint(point)then return false end
-    local count=0
-    for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
-    if count>=20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
+    local count=0;for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
+    if count==20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
     local id="saved:multispot:"..HttpService:GenerateGUID(false)
     rememberDestination(id,"Saved Spot "..(count+1),"Arena",point)
-    state.FloorDestinations=destinations
-    saveDestinations()
+    state.FloorDestinations=destinations;saveDestinations()
     if state.AutomationCatalog then state.AutomationCatalog.AddCurrent(destinations,game.PlaceId);state.AutomationCatalog.Sort()end
     state.MultiSpotStatus="Saved Spot "..(count+1).." saved · select it in arenas"
     if state.RefreshAutomationUI then state.RefreshAutomationUI()end
     return true
 end
-state.RefreshTeleportDestinations = refreshTravelChoices
-bind(travelDropdown.Activated, function()
-    if state.StopEverything or state.TravelBusy then return end
-    if not travelList.Visible then refreshTravelChoices() end
-    skillList.Visible = false
-    setTravelOpen(not travelList.Visible)
-end)
+state.RefreshTeleportDestinations=refreshTravelChoices
 refreshTravelChoices()
-local nextAreaDiscovery = 0
-
-local nextExploreAt, exploreAngle = 0, 0
-local exploredCenters = {}
-local function freshExplorePoint(position)
-    for _, center in ipairs(exploredCenters) do
-        local delta = (position - center) * Vector3.new(1, 0, 1)
-        if delta:Dot(delta) < 420 * 420 then return false end
-    end
-    return true
-end
-local function exploreEmptyArea(character, root, humanoid, now)
-    if now < nextExploreAt then movementStatus("Exploring · waiting for the new area to load"); return end
-    local destination, hint
-    local best = 1500 * 1500
-    for mob in pairs(trackedMobs) do
-        local mobRoot = validMob(mob, indexedMobFolder)
-        if mobRoot then
-            local delta = (mobRoot.Position - root.Position) * Vector3.new(1, 0, 1)
-            local distance = delta:Dot(delta)
-            if distance > 540 * 540 and distance < best and freshExplorePoint(mobRoot.Position) and mobRoot.Position.Y > workspace.FallenPartsDestroyHeight + 60 then
-                best = distance
-                destination = mobRoot.Position + Vector3.new(0, state.TeleportOffset, 0)
-                hint = mob
-            end
-        end
-    end
-    if hint then
-        local hintRoot = getMobRoot(hint)
-        if hintRoot then
-            local offset = state.ResolveAutoOffset(hint)
-            if not offset then return end
-            destination = state.AutoOffsetDestination or hintRoot.Position + Vector3.new(0, offset, 0)
-        end
-    end
-    if not destination then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { character, indexedMobFolder or character, workspace:FindFirstChild("Characters") or character }
-        params.RespectCanCollide = true
-        params.IgnoreWater = false
-        for index = 1, 12 do
-            local angle = exploreAngle + (index - 1) * math.pi / 6
-            local point = root.Position + Vector3.new(math.cos(angle) * 560, 0, math.sin(angle) * 560)
-            local floor = workspace:Raycast(point + Vector3.new(0, 400, 0), Vector3.new(0, -900, 0), params)
-            if floor and floor.Normal.Y >= 0.65 and floor.Material ~= Enum.Material.Water and floor.Position.Y > workspace.FallenPartsDestroyHeight + 60 and freshExplorePoint(floor.Position) then
-                destination = floor.Position + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2 + 1.5, 0)
-                exploreAngle = angle + 2.399963
-                break
-            end
-        end
-    end
-    if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused · no safe destination found"); return end
-    exploredCenters[#exploredCenters + 1] = root.Position
-    if #exploredCenters > 8 then table.remove(exploredCenters, 1) end
-    ensureMovementController(character, root, humanoid, destination)
-    positionAlign.Position = destination
-    positionAlign.Enabled, orientationAlign.Enabled = true, true
-    pivotRoot(root, destination)
-    teleportTarget, correctionTarget = nil, nil
-    correctionStrikes = 0
-    lastTeleportTime, lastTeleportPosition = now, destination
-    state.OffsetGraceUntil = now + 1
-    state.FollowTarget = hint
-    state.Exploring = true
-    state.LastExploreDestination = destination
-    state.ExploreConfirmAt = now + 0.6
-    state.ExploreHops += 1
-    state.TeleportsSent += 1
-    nextExploreAt = now + 4
-    nextAcquisition = now + (hint and 0.25 or 0.75)
-    targetMissingSince = now
-    state.AttackingTarget = nil
-    trackHealth(nil)
-    movementStatus("Exploring · moved beyond the previous spawn area")
-end
+local nextAreaDiscovery=0
 
 local function updateMovement(now)
     now=now or os.clock()
-    if now < nextMovementUpdate then return end
-    nextMovementUpdate = now + 0.08
+    if now<nextMovementUpdate then return end
+    nextMovementUpdate=now+.08
     if not state.MovementOwnership.CanFarm(now)then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
     end
-    state.TravelHold=false; state.TravelHoldPosition=nil
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local entity = character and character:FindFirstChild("Entity")
-    local health = entity and entity:FindFirstChild("Health")
-    local mobs = refreshMobIndex()
-    if not root or not humanoid or humanoid.Health <= 0 or (health and health.Value <= 0) or not mobs then
-        state.FollowTarget = nil
-        stopMovement("Waiting for a living character")
-        return
+    state.TravelHold=false;state.TravelHoldPosition=nil
+    local character=player.Character
+    local root=character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+    local entity=character and character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
+    local mobs=refreshMobIndex()
+    if not root or not humanoid or humanoid.Health<=0 or (health and health.Value<=0)or not mobs then state.FollowTarget=nil;stopMovement("Waiting for a living character");return end
+    if movementRoot and movementRoot~=root then stopMovement();return end
+    if (state.SkillCastRunning or Skills.usingSkill~="none")and not(state.SkillCastRunning and state.SuppressSkillMotion)then
+        if positionAlign then positionAlign.Enabled=false end
+        if orientationAlign then orientationAlign.Enabled=false end
+        state.SkillMovementSuspended=true;movementStatus("Casting "..tostring(state.SelectedSkill));return
     end
-    if root ~= movementRoot and movementRoot then stopMovement(); return end
-    if state.Exploring and state.LastExploreDestination and now >= (state.ExploreConfirmAt or 0) then
-        if (root.Position - state.LastExploreDestination).Magnitude > 18 then
-            state.ExploreFailures = (state.ExploreFailures or 0) + 1
-            if state.ExploreFailures >= 2 then state.FarmPauseUntil=os.clock()+1; state.ExploreFailures=0; state.FollowTarget=nil; pauseHold("Reacquiring after a corrected position"); return end
-        else state.ExploreFailures = 0 end
-        state.LastExploreDestination = nil
-    end
-    if (state.SkillCastRunning or Skills.usingSkill ~= "none") and not (state.SkillCastRunning and state.SuppressSkillMotion) then
-        if positionAlign then positionAlign.Enabled = false end
-        if orientationAlign then orientationAlign.Enabled = false end
-        state.SkillMovementSuspended = true
-        movementStatus("Casting " .. tostring(state.SelectedSkill))
-        return
-    end
-    if state.SkillMovementSuspended then
-        state.SkillMovementSuspended = false
-        teleportTarget = nil
-        state.OffsetGraceUntil = now + 0.5
-    end
-    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then pauseHold("Paused in place · waiting for lag"); return end
-    if root.Anchored or humanoid.SeatPart then stopMovement("Paused · character cannot move"); return end
-    if character:GetAttribute("Disabled") then pauseHold("Paused in place · character disabled"); return end
-    if holdPaused then
-        holdPaused = false
-        teleportTarget = nil
-        state.OffsetGraceUntil = now + 0.5
-    end
+    if state.SkillMovementSuspended then state.SkillMovementSuspended=false;teleportTarget=nil;state.OffsetGraceUntil=now+.5 end
+    if now<state.LagPauseUntil or (state.PingMs and state.PingMs>500)then pauseHold("Paused in place · waiting for lag");return end
+    if root.Anchored or humanoid.SeatPart then stopMovement("Paused · character cannot move");return end
+    if character:GetAttribute("Disabled")then pauseHold("Paused in place · character disabled");return end
+    if holdPaused then holdPaused=false;teleportTarget=nil;state.OffsetGraceUntil=now+.5 end
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
+    -- BEGIN TEST FARM SELECTION
     if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
-        nextAcquisition=now+0.15
+        nextAcquisition=now+.15
         local locked=state.FarmTargetLock
-        if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
-        if locked and locked.Parent==mobs then
-            local data=getMobData(locked)
-            -- Missing streamed data, invulnerability or a rejected offset is
-            -- not a confirmed kill. Wait for this enemy instead of retargeting.
-            if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
-        else locked=nil end
-        if not state.AccountProgression and state.CreditController then
-            locked=state.CreditController.FarmTarget(locked,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
-        end
-        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
-            local priority=state.GetFarmPriorityTarget(now)
-            if priority and targetPriority.Rank(priority)<targetPriority.Rank(locked)then locked=priority end
-        end
-        if locked then
-            state.FarmTargetLock=locked
-            state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
-            state.FollowTarget=locked
-            targetRoot=validMob(locked,mobs)
-            state.TargetPriority=targetPriority.Rank(locked)
+        local scopeMatches=state.FarmLockArena==state.MultiSpotAnchor and state.FarmLockProgression==state.ProgressionBossMob
+        if not scopeMatches or not locked or locked.Parent~=mobs then locked=nil
         else
-        local preferred=targetRoot and state.FollowTarget or nil
-        local best=preferred
-        state.TargetScans+=1
-        for mob in pairs(trackedMobs) do
-            local mobRoot=validMob(mob,mobs)
-            if mobRoot and (mobRoot.Position-root.Position).Magnitude<=state.FarmRange then
-                if not best or targetPriority.FarmLess(mob,best) then best=mob end
+            local data=getMobData(locked)
+            if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
+        end
+        local function admitted(mob)return validMob(mob,mobs)end
+        if not state.AccountProgression and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
+        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
+            local higher=state.GetFarmPriorityTarget(now)
+            if higher and targetPriority.Rank(higher)<targetPriority.Rank(locked)then locked=higher end
+        end
+        if not locked then
+            state.TargetScans+=1
+            for candidate in pairs(trackedMobs)do
+                local candidateRoot=admitted(candidate)
+                if candidateRoot and (candidateRoot.Position-root.Position).Magnitude<=state.FarmRange and (not locked or targetPriority.FarmLess(candidate,locked))then locked=candidate end
             end
         end
-        state.FollowTarget=best
-        targetRoot=best and validMob(best,mobs)
-        state.TargetPriority=best and targetPriority.Rank(best) or nil
-        state.FarmTargetLock=best
-        state.FarmLockArena=state.MultiSpotAnchor
-        state.FarmLockProgression=state.ProgressionBossMob
-        end
+        state.FarmTargetLock=locked;state.FollowTarget=locked
+        state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
+        state.TargetPriority=locked and targetPriority.Rank(locked)or nil
+        targetRoot=locked and admitted(locked)
     end
+    -- END TEST FARM SELECTION
     if not targetRoot then
         if state.AccountProgression and state.ProgressionAnchor then
-            state.FollowTarget=nil;waveDodge.Idle(state.ProgressionAnchor)
-            movementStatus("Account Progression · waiting for the main boss");return
+            state.FollowTarget=nil;waveDodge.Idle(state.ProgressionAnchor);movementStatus("Account Progression · waiting for the main boss");return
         end
         if state.MultiSpot and state.MultiSpotAnchor then
             state.FollowTarget=nil
-            if not state.HoldMultiSpotIdle() then waveDodge.Idle() end
+            if not state.HoldMultiSpotIdle()then waveDodge.Idle()end
             movementStatus("Multi Spot · waiting for selected arena mobs");return
         end
-        state.AutoOffsetTarget,state.AutoOffsetDestination = nil,nil
-        activeOffsetMob, offsetSample = nil, nil
-        targetMissingSince = targetMissingSince or now
-        if now - targetMissingSince > 0.9 then
-            waveDodge.Idle()
-            movementStatus("No loaded enemy · unlimited detection · idle -20")
-        else waveDodge.Idle(); movementStatus("Waiting below the map · 20 studs") end
+        state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;activeOffsetMob=nil;offsetSample=nil
+        targetMissingSince=targetMissingSince or now
+        waveDodge.Idle()
+        movementStatus(now-targetMissingSince>.9 and "No loaded enemy · unlimited detection · idle -20"or "Waiting below the map · 20 studs")
         return
     end
-    state.MultiSpotEmptySince=nil
-    targetMissingSince = nil
-    state.IdleBelowMap = false
-    state.Exploring = false
-    state.LastExploreDestination = nil
-    if correctionTarget ~= state.FollowTarget then correctionTarget = state.FollowTarget; correctionStrikes = 0 end
+    state.MultiSpotEmptySince=nil;targetMissingSince=nil;state.IdleBelowMap=false;state.Exploring=false;state.LastExploreDestination=nil
+    if correctionTarget~=state.FollowTarget then correctionTarget=state.FollowTarget;correctionStrikes=0 end
+    -- BEGIN TEST MOVEMENT BUDGET
     if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
-    local autoOffset = state.ResolveAutoOffset(state.FollowTarget)
+    local autoOffset=state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
-    local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)
-    lastSurfaceY = targetRoot.Position.Y + 3
-    if destination.Y <= workspace.FallenPartsDestroyHeight + 30 then stopMovement("Paused · destination is too low"); return end
-    if teleportTarget == state.FollowTarget and positionAlign and now > (state.OffsetGraceUntil or 0) and now - lastTeleportTime > 0.2 then
-        local errorDistance = (root.Position - positionAlign.Position).Magnitude
-        local tolerance = math.max(5, math.min(12, targetRoot.AssemblyLinearVelocity.Magnitude * 0.25 + 3))
-        if errorDistance > tolerance and now - correctionWindow > 0.35 then
-            if now - correctionWindow > 2.5 then correctionStrikes = 0 end
-            correctionStrikes += 1
-            correctionWindow = now
-            state.TeleportCorrections = (state.TeleportCorrections or 0) + 1
-            if correctionStrikes >= 3 then
-                state.FarmPauseUntil = os.clock()+1
-                correctionStrikes = 0
-                state.FollowTarget = nil
-                pauseHold("Reacquiring after position corrections")
-                return
+    -- END TEST MOVEMENT BUDGET
+    local destination = state.AutoOffsetDestination or targetRoot.Position+Vector3.new(0,autoOffset,0)
+    lastSurfaceY=targetRoot.Position.Y+3
+    if destination.Y<=workspace.FallenPartsDestroyHeight+30 then stopMovement("Paused · destination is too low");return end
+    local current=state.FollowTarget
+    local correction=teleportTarget==current and positionAlign and now>(state.OffsetGraceUntil or 0)and now-lastTeleportTime>.2
+    if correction then
+        local distance=(root.Position-positionAlign.Position).Magnitude
+        local tolerance=math.clamp(targetRoot.AssemblyLinearVelocity.Magnitude*.25+3,5,12)
+        if distance>tolerance and now-correctionWindow>.35 then
+            correctionStrikes=now-correctionWindow>2.5 and 1 or correctionStrikes+1;correctionWindow=now
+            state.TeleportCorrections=(state.TeleportCorrections or 0)+1
+            if correctionStrikes>=3 then
+                state.FarmPauseUntil=now+1;correctionStrikes=0;state.FollowTarget=nil;pauseHold("Reacquiring after position corrections");return
             end
-            teleportTarget = nil
-        elseif errorDistance < 2 and now - correctionWindow > 2.5 then correctionStrikes = 0 end
+            teleportTarget=nil
+        elseif distance<2 and now-correctionWindow>2.5 then correctionStrikes=0 end
     end
-    ensureMovementController(character, root, humanoid, destination)
-    positionAlign.Position = destination
-    positionAlign.Enabled = true
-    orientationAlign.Enabled = true
-    local changedTarget = teleportTarget ~= state.FollowTarget
-    if changedTarget or (now - lastTeleportTime >= state.TeleportInterval and (destination - root.Position).Magnitude > 3.5) then
-        pivotRoot(root, destination)
-        if changedTarget then state.OffsetGraceUntil = now + 0.35 end
-        teleportTarget = state.FollowTarget
-        lastTeleportTime, lastTeleportPosition = now, destination
-        state.TeleportsSent += 1
-        if state.DodgeReturnPending then
-            state.LastDodgeReturnDelay=os.clock()-(state.LastDodgeFinishedAt or os.clock())
-            state.DodgeReturnPending=false
-        end
+    ensureMovementController(character,root,humanoid,destination)
+    positionAlign.Position=destination;positionAlign.Enabled=true;orientationAlign.Enabled=true
+    local changed=teleportTarget~=current
+    if changed or (now-lastTeleportTime>=state.TeleportInterval and (destination-root.Position).Magnitude>3.5)then
+        pivotRoot(root,destination);teleportTarget=current;lastTeleportTime=now;lastTeleportPosition=destination;state.TeleportsSent+=1
+        if changed then state.OffsetGraceUntil=now+.35 end
+        if state.DodgeReturnPending then state.LastDodgeReturnDelay=os.clock()-(state.LastDodgeFinishedAt or os.clock());state.DodgeReturnPending=false end
     end
-    if now >= nextMovementStatusUpdate or changedTarget then
-        nextMovementStatusUpdate = now + 0.2
-        movementStatus(state.FixedFarmPosition and "Suspended Unborn · fixed arena position +10 studs"or string.format("Auto offset %.1f %s %s", math.abs(state.TeleportOffset),state.OffsetMode=="Above" and "above" or "below",state.FollowTarget.Name))
+    if changed or now>=nextMovementStatusUpdate then
+        nextMovementStatusUpdate=now+.2
+        movementStatus(state.FixedFarmPosition and "Suspended Unborn · fixed arena position +10 studs"or string.format("Auto offset %.1f %s %s",math.abs(state.TeleportOffset),state.OffsetMode=="Above"and "above"or "below",current.Name))
     end
 end
 

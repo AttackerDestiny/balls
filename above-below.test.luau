@@ -50,7 +50,7 @@ return function(rangeSource,offsetSource,scriptSource,payloadSource)
         assert(not string.find(scriptSource,'state.UI.AboveBelow',1,true))
         assert(not string.find(scriptSource,'function state.SetFarmAbove',1,true))
         assert(not string.find(scriptSource,'preference("FarmAbove"',1,true))
-        assert(string.find(scriptSource,'FarmAbove=false,OffsetMode="Below"',1,true))
+        assert(string.find(scriptSource,'FarmAbove=false',1,true)and string.find(scriptSource,'OffsetMode="Below"',1,true))
     end)
     test("Settings discard the removed Above preference",function()
         local position={X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}

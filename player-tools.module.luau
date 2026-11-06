@@ -1,167 +1,137 @@
--- Player/character/profile data paths adapted from the supplied source.
+-- Selection owns camera and inventory subscriptions as separate replaceable scopes.
 return function(ctx)
-    local state,players,localPlayer=ctx.State,ctx.Players,ctx.LocalPlayer
+    local state,players=ctx.State,ctx.Players
     local api={Viewing=false,InventoryVisible=false}
-    local connections,inventoryConnections,targetConnection={},{},nil
-    local selected,priorSubject,priorType
-    local disposed,inventoryQueued=false,false
-    local function connect(signal,callback,list)
-        local value=signal:Connect(callback)
-        table.insert(list or connections,value)
-        return value
+    local selected,selectedConnection=nil,nil
+    local closed,inventoryQueued=false,false
+    local inventoryConnections,subscriptions={},{}
+    local cameraLease
+    local function unsubscribe(list)
+        for _,connection in ipairs(list)do connection:Disconnect()end
+        table.clear(list)
     end
-    local function clearInventoryConnections()
-        for _,connection in ipairs(inventoryConnections) do connection:Disconnect() end
-        table.clear(inventoryConnections)
-    end
-    function api.GetSelected() return selected and selected.Parent==players and selected or nil end
+    local function listen(list,event,fn)list[#list+1]=event:Connect(fn)end
+    local function notify()if ctx.Changed then ctx.Changed()end end
+    function api.GetSelected()if selected and selected.Parent==players then return selected end end
     function api.Choices()
-        local result={}
-        for _,p in ipairs(players:GetPlayers()) do
-            if p~=localPlayer then result[#result+1]={UserId=p.UserId,Name=p.Name,DisplayName=p.DisplayName} end
-        end
-        table.sort(result,function(a,b) return string.lower(a.Name)<string.lower(b.Name) end)
-        return result
+        local rows={}
+        for _,person in ipairs(players:GetPlayers())do if person~=ctx.LocalPlayer then
+            rows[#rows+1]={UserId=person.UserId,Name=person.Name,DisplayName=person.DisplayName}
+        end end
+        table.sort(rows,function(a,b)return a.Name:lower()<b.Name:lower()end)
+        return rows
     end
-    local function attachCamera()
-        local target=api.GetSelected()
-        local character=target and target.Character
+    local function follow()
+        local person=api.GetSelected()
+        local character=person and person.Character
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
         local camera=ctx.Workspace.CurrentCamera
-        if api.Viewing and not disposed and not state.StopEverything and humanoid and humanoid.Health>0 and camera then
-            camera.CameraType=Enum.CameraType.Custom
-            camera.CameraSubject=humanoid
+        if not closed and api.Viewing and not state.StopEverything and humanoid and humanoid.Health>0 and camera then
+            camera.CameraSubject=humanoid;camera.CameraType=Enum.CameraType.Custom
         end
     end
-    function api.SetViewing(enabled)
-        if enabled and state.StopEverything then return false,"Stop Everything is on" end
-        if enabled and not api.GetSelected() then return false,"Select a player first" end
+    function api.SetViewing(value)
+        value=value==true
+        if value and state.StopEverything then return false,"Stop Everything is on"end
+        if value and not api.GetSelected()then return false,"Select a player first"end
         local camera=ctx.Workspace.CurrentCamera
-        local wasViewing=api.Viewing
-        if enabled and not api.Viewing and camera then priorSubject,priorType=camera.CameraSubject,camera.CameraType end
-        api.Viewing=enabled==true
-        state.ViewingPlayer=api.Viewing
-        if api.Viewing then attachCamera()
-        elseif camera and wasViewing then
-            local character=localPlayer.Character
-            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            local subject=humanoid or (priorSubject and priorSubject.Parent and priorSubject)
+        if value and not api.Viewing and camera then cameraLease={Subject=camera.CameraSubject,Type=camera.CameraType}end
+        local was=api.Viewing;api.Viewing=value;state.ViewingPlayer=value
+        if value then follow()
+        elseif was and camera then
+            local own=ctx.LocalPlayer.Character
+            local humanoid=own and own:FindFirstChildOfClass("Humanoid")
+            local subject=humanoid or (cameraLease and cameraLease.Subject and cameraLease.Subject.Parent and cameraLease.Subject)
             if subject then camera.CameraSubject=subject end
-            camera.CameraType=priorType or Enum.CameraType.Custom
-            priorSubject,priorType=nil,nil
+            camera.CameraType=cameraLease and cameraLease.Type or Enum.CameraType.Custom
+            cameraLease=nil
         end
-        if ctx.Changed then ctx.Changed() end
-        return true
+        notify();return true
     end
     function api.InventoryRows()
-        local target=api.GetSelected()
-        local profile=target and ctx.Profiles and ctx.Profiles:FindFirstChild(target.Name)
+        local person=api.GetSelected()
+        local profile=person and ctx.Profiles and ctx.Profiles:FindFirstChild(person.Name)
         local inventory=profile and profile:FindFirstChild("Inventory")
-        if not inventory then return {},"Inventory is not loaded for this player" end
-        local grouped={}
-        for _,item in ipairs(inventory:GetChildren()) do
-            local upgrade=item:FindFirstChild("Upgrade")
-            local level=upgrade and upgrade:IsA("ValueBase") and tonumber(upgrade.Value) or 0
-            local key=item.Name..":"..tostring(level)
-            local row=grouped[key]
-            if not row then row={Name=item.Name,Upgrade=level,Count=0}; grouped[key]=row end
-            row.Count+=1
+        if not inventory then return {},"Inventory is not loaded for this player"end
+        local groups={}
+        for _,item in ipairs(inventory:GetChildren())do
+            local value=item:FindFirstChild("Upgrade")
+            local upgrade=value and value:IsA("ValueBase")and tonumber(value.Value)or 0
+            local key=item.Name..":"..upgrade
+            if not groups[key]then groups[key]={Name=item.Name,Upgrade=upgrade,Count=0}end
+            groups[key].Count+=1
         end
-        local rows={}
-        for _,row in pairs(grouped) do rows[#rows+1]=row end
-        table.sort(rows,function(a,b) if a.Name~=b.Name then return a.Name<b.Name end; return a.Upgrade<b.Upgrade end)
+        local rows={};for _,row in pairs(groups)do rows[#rows+1]=row end
+        table.sort(rows,function(a,b)return a.Name==b.Name and a.Upgrade<b.Upgrade or a.Name<b.Name end)
         return rows,nil,inventory
     end
     function api.RefreshInventory()
-        if not api.InventoryVisible or disposed or state.StopEverything then return end
-        local rows,message=api.InventoryRows()
-        ctx.Inventory(rows,message,api.GetSelected())
+        if closed or not api.InventoryVisible or state.StopEverything then return end
+        local rows,message=api.InventoryRows();ctx.Inventory(rows,message,api.GetSelected())
     end
-    local function queueInventory()
-        if inventoryQueued or not api.InventoryVisible or disposed then return end
+    local function invalidateInventory()
+        if closed or not api.InventoryVisible or inventoryQueued then return end
         inventoryQueued=true
-        task.defer(function()
-            inventoryQueued=false
-            if not disposed then api.RefreshInventory() end
-        end)
+        task.defer(function()inventoryQueued=false;if not closed then api.RefreshInventory()end end)
     end
-    local function watchInventory()
-        clearInventoryConnections()
+    local function observeInventory()
+        unsubscribe(inventoryConnections)
         if not api.InventoryVisible then return end
         local _,_,inventory=api.InventoryRows()
         if inventory then
-            connect(inventory.ChildAdded,queueInventory,inventoryConnections)
-            connect(inventory.ChildRemoved,queueInventory,inventoryConnections)
-            connect(inventory.DescendantAdded,queueInventory,inventoryConnections)
-            connect(inventory.DescendantRemoving,queueInventory,inventoryConnections)
-            for _,item in ipairs(inventory:GetChildren()) do
-                connect(item:GetPropertyChangedSignal("Name"),queueInventory,inventoryConnections)
+            for _,event in ipairs({inventory.ChildAdded,inventory.ChildRemoved,inventory.DescendantAdded,inventory.DescendantRemoving})do listen(inventoryConnections,event,invalidateInventory)end
+            for _,item in ipairs(inventory:GetChildren())do
+                listen(inventoryConnections,item:GetPropertyChangedSignal("Name"),invalidateInventory)
                 local upgrade=item:FindFirstChild("Upgrade")
-                if upgrade and upgrade:IsA("ValueBase") then connect(upgrade.Changed,queueInventory,inventoryConnections) end
+                if upgrade and upgrade:IsA("ValueBase")then listen(inventoryConnections,upgrade.Changed,invalidateInventory)end
             end
         end
         api.RefreshInventory()
     end
-    function api.SetInventoryVisible(enabled)
-        if enabled and state.StopEverything then return false,"Stop Everything is on" end
-        if enabled and not api.GetSelected() then return false,"Select a player first" end
-        if ctx.NativeInventory then
-            local ok,reason=ctx.NativeInventory(enabled and api.GetSelected()or nil)
-            if not ok then return false,reason end
-        end
-        api.InventoryVisible=enabled==true
-        state.ViewingPlayerInventory=api.InventoryVisible
-        watchInventory()
-        if ctx.Changed then ctx.Changed() end
-        return true
+    function api.SetInventoryVisible(value)
+        value=value==true
+        if value and state.StopEverything then return false,"Stop Everything is on"end
+        if value and not api.GetSelected()then return false,"Select a player first"end
+        if ctx.NativeInventory then local ok,reason=ctx.NativeInventory(value and api.GetSelected()or nil);if not ok then return false,reason end end
+        api.InventoryVisible=value;state.ViewingPlayerInventory=value
+        observeInventory();notify();return true
     end
-    function api.Select(userId)
-        local target=players:GetPlayerByUserId(tonumber(userId) or 0)
-        if not target or target==localPlayer then return false,"Player is no longer in this server" end
-        if api.InventoryVisible and ctx.NativeInventory then
-            local ok,reason=ctx.NativeInventory(target)
-            if not ok then return false,reason end
-        end
-        if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
-        selected=target
-        state.SelectedPlayerId=target.UserId
-        targetConnection=target.CharacterAdded:Connect(function(character)
+    function api.Select(id)
+        local person=players:GetPlayerByUserId(tonumber(id)or 0)
+        if not person or person==ctx.LocalPlayer then return false,"Player is no longer in this server"end
+        if api.InventoryVisible and ctx.NativeInventory then local ok,reason=ctx.NativeInventory(person);if not ok then return false,reason end end
+        if selectedConnection then selectedConnection:Disconnect()end
+        selected=person;state.SelectedPlayerId=person.UserId
+        selectedConnection=person.CharacterAdded:Connect(function(character)
             task.defer(function()
-                local humanoid=character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid",3)
-                if humanoid and selected==target and not disposed then attachCamera() end
+                local humanoid=character:FindFirstChildOfClass("Humanoid")or character:WaitForChild("Humanoid",3)
+                if humanoid and selected==person and not closed then follow()end
             end)
         end)
-        attachCamera(); watchInventory()
-        if ctx.Changed then ctx.Changed() end
-        return true
+        follow();observeInventory();notify();return true
     end
     function api.Teleport()
-        if state.StopEverything then return false,"Stop Everything is on" end
-        local target=api.GetSelected()
-        if not target then return false,"Select a player first" end
-        return ctx.Teleport(target)
+        if state.StopEverything then return false,"Stop Everything is on"end
+        local person=api.GetSelected()
+        if not person then return false,"Select a player first"end
+        return ctx.Teleport(person)
     end
-    connect(players.PlayerAdded,function() if ctx.RosterChanged then ctx.RosterChanged() end end)
-    connect(players.PlayerRemoving,function(target)
-        if selected and target.UserId==selected.UserId then
-            api.SetViewing(false); api.SetInventoryVisible(false)
-            if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
-            selected=nil; state.SelectedPlayerId=nil
-            if ctx.Changed then ctx.Changed() end
+    listen(subscriptions,players.PlayerAdded,function()if ctx.RosterChanged then ctx.RosterChanged()end end)
+    listen(subscriptions,players.PlayerRemoving,function(person)
+        if selected==person then
+            api.SetViewing(false);api.SetInventoryVisible(false)
+            if selectedConnection then selectedConnection:Disconnect();selectedConnection=nil end
+            selected=nil;state.SelectedPlayerId=nil;notify()
         end
-        if ctx.RosterChanged then task.defer(function() if not disposed then ctx.RosterChanged() end end) end
+        if ctx.RosterChanged then task.defer(function()if not closed then ctx.RosterChanged()end end)end
     end)
-    connect(ctx.Workspace:GetPropertyChangedSignal("CurrentCamera"),attachCamera)
-    connect(localPlayer.CharacterAdded,function()
-        if api.Viewing then task.defer(attachCamera) end
-    end)
+    listen(subscriptions,ctx.Workspace:GetPropertyChangedSignal("CurrentCamera"),follow)
+    listen(subscriptions,ctx.LocalPlayer.CharacterAdded,function()if api.Viewing then task.defer(follow)end end)
     function api.Destroy()
-        if disposed then return end
-        api.SetViewing(false); api.SetInventoryVisible(false)
-        disposed=true
-        if targetConnection then targetConnection:Disconnect() end
-        clearInventoryConnections()
-        for _,connection in ipairs(connections) do connection:Disconnect() end
+        if closed then return end
+        api.SetViewing(false);api.SetInventoryVisible(false);closed=true
+        if selectedConnection then selectedConnection:Disconnect();selectedConnection=nil end
+        unsubscribe(inventoryConnections);unsubscribe(subscriptions);selected=nil;cameraLease=nil
     end
     return api
 end

@@ -1,6 +1,6 @@
--- A reload retains settings, never the previous runtime's instances or closures.
+-- Copy a schema of plain preferences using bounded iterative traversal.
 return function(previous,userId)
-    if not previous or previous.UserId~=userId then return nil end
+    if type(previous)~="table"or previous.UserId~=userId then return nil end
     local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
@@ -10,24 +10,35 @@ return function(previous,userId)
         "ResumeRequested","SafeFloorId","SafeMode","SafeWhitelistIds","SafeWhitelistText","SelectedMiscSkill",
         "SelectedPlayerId","SelectedSkill","SkillAura","SkillPerWeapon","SkillPerWeaponVersion","StopEverything",
         "Theme","TradeItems","TradeMode","UnsafeOffsetProfiles","UserId","ViewingPlayer","ViewingPlayerInventory","WindUIPosition"}
-    local count=0
-    local function copy(value,depth,seen)
+    local result={}
+    local budget=4096
+    local function primitive(value)
         local kind=type(value)
-        if kind=="boolean"or kind=="string"or kind=="number"then return value end
-        if kind~="table"or depth>8 or seen[value]then return nil end
-        local result={};seen[value]=true
-        for key,item in pairs(value)do
-            if count>=4096 then break end
-            if type(key)=="number"or type(key)=="string"then
-                count+=1
-                result[key]=copy(item,depth+1,seen)
+        return kind=="string"or kind=="number"or kind=="boolean"
+    end
+    for _,field in ipairs(fields)do
+        local value=previous[field]
+        if primitive(value)then result[field]=value
+        elseif type(value)=="table"then
+            local target={};result[field]=target
+            local stack={{Source=value,Target=target,Depth=0,Ancestors={[value]=true}}}
+            while #stack>0 and budget>0 do
+                local work=table.remove(stack)
+                for key,item in pairs(work.Source)do
+                    if budget==0 then break end
+                    if type(key)=="string"or type(key)=="number"then
+                        budget-=1
+                        if primitive(item)then work.Target[key]=item
+                        elseif type(item)=="table"and work.Depth<8 and not work.Ancestors[item]then
+                            local child={};work.Target[key]=child
+                            local ancestry=table.clone(work.Ancestors);ancestry[item]=true
+                            stack[#stack+1]={Source=item,Target=child,Depth=work.Depth+1,Ancestors=ancestry}
+                        end
+                    end
+                end
             end
         end
-        seen[value]=nil
-        return result
     end
-    local snapshot={}
-    for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
-    snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
-    return snapshot
+    if type(previous.UI)=="table"and type(previous.UI.ActiveTab)=="string"then result.ActiveTab=previous.UI.ActiveTab end
+    return result
 end

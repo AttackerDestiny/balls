@@ -1,179 +1,161 @@
--- Local rendering only. Never hide the local character or change physics.
+-- Visibility is a reversible property overlay scoped to remote player roots.
 return function(ctx)
     local api={BlockedEffects=0}
-    local enabled,disposed=false,false
-    local hideCharacters,hideEffects=false,false
-    local players,connections,characters={},{},{}
-    local itemFolder,itemConnections=nil,{}
-    local effectHooks={}
-    local selector="BasePart,Decal,ParticleEmitter,Beam,Trail,Light,Highlight,BillboardGui,SurfaceGui,Humanoid,Sound"
+    local modes={Characters=false,Effects=false,Closed=false}
+    local roster,roots,globalConnections,itemConnections,hooks={},{},{},{},{}
+    local itemFolder
     local invisible=NumberSequence.new(1)
-    local function restore(record)
-        for _,connection in ipairs(record.Connections) do connection:Disconnect() end
-        for _,connection in pairs(record.Guards) do connection:Disconnect() end
-        for instance,properties in pairs(record.Properties) do
-            for name,value in pairs(properties) do pcall(function() instance[name]=value end) end
+    local classes="BasePart,Decal,ParticleEmitter,Beam,Trail,Light,Highlight,BillboardGui,SurfaceGui,Humanoid,Sound"
+    local function disconnect(list)
+        for _,connection in pairs(list)do connection:Disconnect()end
+        table.clear(list)
+    end
+    local function enabled()return not modes.Closed and (modes.Characters or modes.Effects)end
+    local function restoreValue(layer,object)
+        local before=layer.Values[object]
+        layer.Values[object]=nil
+        local guard=layer.Guards[object]
+        if guard then guard:Disconnect();layer.Guards[object]=nil end
+        if before then for property,value in pairs(before)do pcall(function()object[property]=value end)end end
+    end
+    local function release(root)
+        local layer=roots[root]
+        if not layer then return end
+        roots[root]=nil;disconnect(layer.Connections)
+        for object in pairs(layer.Values)do restoreValue(layer,object)end
+        disconnect(layer.Guards)
+    end
+    local function properties(object)
+        if modes.Characters then
+            if object:IsA("BasePart")then return {Transparency=1,LocalTransparencyModifier=1,CastShadow=false}end
+            if object:IsA("Decal")then return {Transparency=1}end
+            if object:IsA("BillboardGui")or object:IsA("SurfaceGui")then return {Enabled=false}end
+            if object:IsA("Humanoid")then return {DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None}end
         end
+        if object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")then return {Enabled=false,Transparency=invisible}end
+        if object:IsA("Highlight")then return {Enabled=false}end
+        if object:IsA("Light")then return {Brightness=0}end
+        if object:IsA("Sound")then return {Volume=0}end
     end
-    local function detach(character)
-        local record=characters[character]
-        if record then characters[character]=nil; restore(record) end
-    end
-    local function attach(player,character)
-        if disposed or not enabled or player==ctx.Players.LocalPlayer or not character or characters[character] then return end
-        local record={Properties={},Connections={},Guards={}}
-        characters[character]=record
-        local function hide(instance)
-            if disposed or not enabled or characters[character]~=record or record.Properties[instance] then return end
-            local properties
-            if instance:IsA("BasePart") and hideCharacters then properties={Transparency=1,LocalTransparencyModifier=1,CastShadow=false}
-            elseif instance:IsA("Decal") and hideCharacters then properties={Transparency=1}
-            elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible}
-            elseif instance:IsA("Highlight") then properties={Enabled=false}
-            elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and hideCharacters then properties={Enabled=false}
-            elseif instance:IsA("Light") then properties={Brightness=0}
-            elseif instance:IsA("Sound") then properties={Volume=0}
-            elseif instance:IsA("Humanoid") and hideCharacters then properties={DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None} end
-            if not properties then return end
-            local before={}
-            for name,value in pairs(properties) do before[name]=instance[name]; instance[name]=value end
-            record.Properties[instance]=before
-            if properties.Enabled==false then
-                record.Guards[instance]=instance:GetPropertyChangedSignal("Enabled"):Connect(function()
-                    if enabled and not disposed and characters[character]==record and record.Properties[instance] and instance.Enabled then instance.Enabled=false end
+    local function overlay(person,root)
+        if not root or not enabled()or person==ctx.Players.LocalPlayer or roots[root]then return end
+        local layer={Owner=person,Values={},Guards={},Connections={}}
+        roots[root]=layer
+        local function apply(object)
+            if not enabled()or roots[root]~=layer or layer.Values[object]then return end
+            local changes=properties(object)
+            if not changes then return end
+            local old={}
+            for property,value in pairs(changes)do old[property]=object[property];object[property]=value end
+            layer.Values[object]=old
+            if changes.Enabled==false then
+                layer.Guards[object]=object:GetPropertyChangedSignal("Enabled"):Connect(function()
+                    if enabled()and roots[root]==layer and layer.Values[object]and object.Enabled then object.Enabled=false end
                 end)
             end
-            if instance:IsA("ParticleEmitter") then instance:Clear() end
+            if object:IsA("ParticleEmitter")then pcall(function()object:Clear()end)end
         end
-        record.Connections[1]=character.DescendantAdded:Connect(hide)
-        record.Connections[2]=character.DescendantRemoving:Connect(function(instance)
-            local before=record.Properties[instance]
-            if before then
-                record.Properties[instance]=nil
-                if record.Guards[instance] then record.Guards[instance]:Disconnect(); record.Guards[instance]=nil end
-                for name,value in pairs(before) do pcall(function() instance[name]=value end) end
-            end
-        end)
-        for _,instance in ipairs(character:QueryDescendants(selector)) do hide(instance) end
+        layer.Connections={root.DescendantAdded:Connect(apply),root.DescendantRemoving:Connect(function(object)restoreValue(layer,object)end)}
+        for _,object in ipairs(root:QueryDescendants(classes))do apply(object)end
     end
-    local function removePlayer(player)
-        local record=players[player]
+    local function unwatch(person)
+        local record=roster[person]
         if not record then return end
-        for _,connection in ipairs(record.Connections) do connection:Disconnect() end
-        if record.Character then detach(record.Character) end
-        if record.Items then detach(record.Items) end
-        players[player]=nil
+        roster[person]=nil;disconnect(record.Connections)
+        if record.Character then release(record.Character)end
+        if record.Items then release(record.Items)end
     end
-    local function attachItems(player)
-        local record=players[player]
+    local function updateItems(person)
+        local record=roster[person]
         if not record then return end
-        local items=itemFolder and itemFolder:FindFirstChild(tostring(player.UserId))
-        if items==record.Items then return end
-        if record.Items then detach(record.Items) end
-        record.Items=items
-        attach(player,items)
+        local nextRoot=itemFolder and itemFolder:FindFirstChild(tostring(person.UserId))
+        if record.Items==nextRoot then return end
+        if record.Items then release(record.Items)end
+        record.Items=nextRoot;overlay(person,nextRoot)
     end
-    local function watchItems()
-        local folder=ctx.Workspace and ctx.Workspace:FindFirstChild("CharacterItems")
-        if folder==itemFolder then return end
-        for _,connection in ipairs(itemConnections) do connection:Disconnect() end
-        table.clear(itemConnections)
-        itemFolder=folder
-        if folder then
-            itemConnections[1]=folder.ChildAdded:Connect(function(child)
-                for player in pairs(players) do if child.Name==tostring(player.UserId) then attachItems(player) end end
-            end)
-            itemConnections[2]=folder.ChildRemoved:Connect(function(child)
-                for _,record in pairs(players) do if record.Items==child then detach(child); record.Items=nil end end
-            end)
+    local function itemFolderChanged()
+        local current=ctx.Workspace and ctx.Workspace:FindFirstChild("CharacterItems")
+        if current==itemFolder then return end
+        disconnect(itemConnections);itemFolder=current
+        if current then
+            itemConnections={current.ChildAdded:Connect(function(child)
+                for person in pairs(roster)do if tostring(person.UserId)==child.Name then updateItems(person)end end
+            end),current.ChildRemoved:Connect(function(child)
+                for _,record in pairs(roster)do if record.Items==child then release(child);record.Items=nil end end
+            end)}
         end
-        for player in pairs(players) do attachItems(player) end
+        for person in pairs(roster)do updateItems(person)end
     end
-    local function addPlayer(player)
-        if disposed or not enabled or player==ctx.Players.LocalPlayer or players[player] then return end
+    local function watch(person)
+        if not enabled()or person==ctx.Players.LocalPlayer or roster[person]then return end
         local record={Connections={}}
-        players[player]=record
-        local function changed(character)
-            if record.Character then detach(record.Character) end
-            record.Character=character; attach(player,character)
+        roster[person]=record
+        local function characterChanged(character)
+            if record.Character then release(record.Character)end
+            record.Character=character;overlay(person,character)
         end
-        record.Connections[1]=player.CharacterAdded:Connect(changed)
-        record.Connections[2]=player.CharacterRemoving:Connect(function(character)
-            detach(character); if record.Character==character then record.Character=nil end
-        end)
-        changed(player.Character)
-        attachItems(player)
+        record.Connections={person.CharacterAdded:Connect(characterChanged),person.CharacterRemoving:Connect(function(character)
+            release(character);if record.Character==character then record.Character=nil end
+        end)}
+        characterChanged(person.Character);updateItems(person)
     end
     local function owner(value)
-        if typeof(value)~="Instance" and type(value)~="table" then return nil end
+        local kind=typeof(value)
+        if kind~="Instance"and type(value)~="table"then return nil end
         if value==ctx.Players.LocalPlayer then return false end
-        for player,record in pairs(players) do
-            if value==player then return true end
-            if typeof(value)=="Instance" then
-                if record.Character and (value==record.Character or value:IsDescendantOf(record.Character)) then return true end
-                if record.Items and (value==record.Items or value:IsDescendantOf(record.Items)) then return true end
+        local localCharacter=ctx.Players.LocalPlayer.Character
+        if kind=="Instance"and localCharacter and (value==localCharacter or value:IsDescendantOf(localCharacter))then return false end
+        for person,record in pairs(roster)do
+            if value==person then return true end
+            if kind=="Instance"then
+                for _,root in pairs({record.Character,record.Items})do if value==root or value:IsDescendantOf(root)then return true end end
             end
         end
-        local localCharacter=ctx.Players.LocalPlayer.Character
-        if typeof(value)=="Instance" and localCharacter and (value==localCharacter or value:IsDescendantOf(localCharacter)) then return false end
         return nil
     end
-    function api.IsOtherEffect(data)
-        if type(data)~="table" then return owner(data)==true end
-        -- Only source/caster fields; target ownership must not suppress hazards.
-        for _,field in ipairs({"Character","Player","SourceCharacter","SourcePlayer","Caster"}) do
-            local result=owner(data[field])
-            if result~=nil then return result end
+    function api.IsOtherEffect(payload)
+        if type(payload)~="table"then return owner(payload)==true end
+        for _,field in ipairs({"Character","Player","SourceCharacter","SourcePlayer","Caster"})do
+            local found=owner(payload[field]);if found~=nil then return found end
         end
         return false
     end
-    local function hookEffects()
-        for _,service in ipairs(ctx.EffectServices or {}) do
-            if type(service.DoEffect)=="function" then
-                local previous=service.DoEffect
-                local wrapper=function(name,data,...)
-                    if enabled and not disposed and name~="Damage Text" and api.IsOtherEffect(data) then api.BlockedEffects+=1; return end
-                    return previous(name,data,...)
+    local function cleanup()
+        disconnect(globalConnections);disconnect(itemConnections);itemFolder=nil
+        for _,hook in ipairs(hooks)do if hook.Service.DoEffect==hook.Wrapper then hook.Service.DoEffect=hook.Previous end end
+        table.clear(hooks)
+        for person in pairs(roster)do unwatch(person)end
+        for root in pairs(roots)do release(root)end
+    end
+    local function initialize()
+        globalConnections={ctx.Players.PlayerAdded:Connect(watch),ctx.Players.PlayerRemoving:Connect(unwatch)}
+        if ctx.Workspace then
+            globalConnections[#globalConnections+1]=ctx.Workspace.ChildAdded:Connect(function(child)if child.Name=="CharacterItems"then itemFolderChanged()end end)
+            globalConnections[#globalConnections+1]=ctx.Workspace.ChildRemoved:Connect(function(child)if child==itemFolder then itemFolderChanged()end end)
+        end
+        itemFolderChanged()
+        for _,person in ipairs(ctx.Players:GetPlayers())do watch(person)end
+        for _,service in ipairs(ctx.EffectServices or {})do
+            if type(service.DoEffect)=="function"then
+                local old=service.DoEffect
+                local wrapper=function(name,payload,...)
+                    if enabled()and name~="Damage Text"and api.IsOtherEffect(payload)then api.BlockedEffects+=1;return end
+                    return old(name,payload,...)
                 end
-                service.DoEffect=wrapper
-                effectHooks[#effectHooks+1]={Service=service,Previous=previous,Wrapper=wrapper}
+                service.DoEffect=wrapper;hooks[#hooks+1]={Service=service,Previous=old,Wrapper=wrapper}
             end
         end
     end
-    local function clear()
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        table.clear(connections)
-        for _,connection in ipairs(itemConnections) do connection:Disconnect() end
-        table.clear(itemConnections); itemFolder=nil
-        for _,hook in ipairs(effectHooks) do if hook.Service.DoEffect==hook.Wrapper then hook.Service.DoEffect=hook.Previous end end
-        table.clear(effectHooks)
-        for player in pairs(players) do removePlayer(player) end
-        for character in pairs(characters) do detach(character) end
-    end
-    local function setMode(charactersValue,effectsValue)
-        if disposed then return false end
-        charactersValue=charactersValue==true; effectsValue=effectsValue==true
-        local wasEnabled,wasCharacters=enabled,hideCharacters
-        hideCharacters,hideEffects=charactersValue,effectsValue
-        enabled=hideCharacters or hideEffects
-        if wasEnabled==enabled and wasCharacters==hideCharacters then return true end
-        clear()
-        if not enabled then return true end
-        connections[1]=ctx.Players.PlayerAdded:Connect(addPlayer)
-        connections[2]=ctx.Players.PlayerRemoving:Connect(removePlayer)
-        if ctx.Workspace then
-            connections[3]=ctx.Workspace.ChildAdded:Connect(function(child) if child.Name=="CharacterItems" then watchItems() end end)
-            connections[4]=ctx.Workspace.ChildRemoved:Connect(function(child) if child==itemFolder then watchItems() end end)
-        end
-        watchItems(); hookEffects()
-        for _,player in ipairs(ctx.Players:GetPlayers()) do addPlayer(player) end
+    local function mode(characters,effects)
+        if modes.Closed then return false end
+        characters,effects=characters==true,effects==true
+        if modes.Characters==characters and modes.Effects==effects then return true end
+        cleanup();modes.Characters=characters;modes.Effects=effects
+        if enabled()then initialize()end
         return true
     end
-    function api.Set(value) return setMode(value,hideEffects) end
-    function api.SetEffects(value) return setMode(hideCharacters,value) end
-    function api.Destroy()
-        if disposed then return end
-        disposed=true; enabled=false; clear()
-    end
+    function api.Set(value)return mode(value,modes.Effects)end
+    function api.SetEffects(value)return mode(modes.Characters,value)end
+    function api.Destroy()if modes.Closed then return end;modes.Closed=true;cleanup()end
     return api
 end

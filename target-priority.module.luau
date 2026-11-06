@@ -1,55 +1,48 @@
+-- Rank metadata is merged across model/entity markers; tie ordering is deterministic.
 return function()
     local api={}
-    local cache=setmetatable({}, {__mode="k"})
-    local function clean(value) return string.lower((string.gsub(tostring(value or ""),"[^%w]",""))) end
+    local memo=setmetatable({}, {__mode="k"})
+    local function normalize(value)return tostring(value or ""):lower():gsub("[^%w]","")end
+    local function root(mob)return mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")end
+    local function marker(value)
+        local key=normalize(value)
+        if key:find("mainboss",1,true)or key:find("floorboss",1,true)then return 8 end
+        if key:find("mini",1,true)and key:find("boss",1,true)then return 4 end
+        return key:find("boss",1,true)and 2 or 0
+    end
     function api.Rank(mob)
         if not mob then return 3 end
         local entity=mob:FindFirstChild("Entity")
         local difficulty=entity and entity:FindFirstChild("Difficulty")
-        local modelRank=mob:GetAttribute("Rank")
-        local entityRank=entity and entity:GetAttribute("Rank")
-        local difficultyRank=difficulty and difficulty.Value
-        local cached=cache[mob]
-        if cached and os.clock()<cached.Until and cached.Entity==entity and cached.ModelRank==modelRank
-            and cached.EntityRank==entityRank and cached.Difficulty==difficultyRank then return cached.Rank end
-        local main,boss,mini=false,false,false
-        local function mark(value)
-            local key=clean(value)
-            if string.find(key,"mainboss",1,true)or string.find(key,"floorboss",1,true)then main=true
-            elseif string.find(key,"mini",1,true)and string.find(key,"boss",1,true)then mini=true
-            elseif string.find(key,"boss",1,true)then boss=true end
-        end
-        -- Read every native rank source: an unrelated model Rank must not
-        -- mask the boss Difficulty or rank stored on its Entity.
-        mark(modelRank);mark(entityRank);mark(difficultyRank)
-        for _,instance in ipairs(entity and {mob,entity} or {mob}) do
-            for _,tag in ipairs(instance:GetTags()) do mark(tag)end
-        end
-        local priority=3
-        if main then priority=1
-        elseif mini or clean(mob.Name)=="frogazoid" then priority=2
-        elseif boss then priority=1 end
-        cache[mob]={Rank=priority,Until=os.clock()+.15,Entity=entity,ModelRank=modelRank,EntityRank=entityRank,Difficulty=difficultyRank}
+        local modelTag=mob:GetAttribute("Rank")
+        local entityTag=entity and entity:GetAttribute("Rank")
+        local level=difficulty and difficulty.Value
+        local old=memo[mob]
+        if old and old.At>os.clock()and old.Entity==entity and old.Model==modelTag and old.EntityRank==entityTag and old.Difficulty==level then return old.Priority end
+        local flags={}
+        local function include(value)local code=marker(value);if code>0 then flags[code]=true end end
+        include(modelTag);include(entityTag);include(level)
+        for _,tag in ipairs(mob:GetTags())do include(tag)end
+        if entity then for _,tag in ipairs(entity:GetTags())do include(tag)end end
+        local priority=flags[8]and 1 or (flags[4]or normalize(mob.Name)=="frogazoid")and 2 or flags[2]and 1 or 3
+        memo[mob]={At=os.clock()+.15,Entity=entity,Model=modelTag,EntityRank=entityTag,Difficulty=level,Priority=priority}
         return priority
     end
     function api.Less(a,b,origin,preferred)
         local ar,br=api.Rank(a),api.Rank(b)
         if ar~=br then return ar<br end
-        if a==preferred then return b~=preferred end
-        if b==preferred then return false end
-        local ap=a:FindFirstChild("HumanoidRootPart")
-        local bp=b:FindFirstChild("HumanoidRootPart")
-        return (ap and (ap.Position-origin).Magnitude or math.huge)<(bp and (bp.Position-origin).Magnitude or math.huge)
+        if a==preferred or b==preferred then return a==preferred and b~=preferred end
+        local ap,bp=a:FindFirstChild("HumanoidRootPart"),b:FindFirstChild("HumanoidRootPart")
+        local ad=ap and (ap.Position-origin).Magnitude or math.huge
+        local bd=bp and (bp.Position-origin).Magnitude or math.huge
+        return ad<bd
     end
-    -- A common order for farming: never use a particular account's position
-    -- or previous target to break ties between otherwise eligible enemies.
     function api.FarmLess(a,b)
         if a==b then return false end
         local ar,br=api.Rank(a),api.Rank(b)
         if ar~=br then return ar<br end
         if a.Name~=b.Name then return a.Name<b.Name end
-        local ap=a:FindFirstChild("HumanoidRootPart")or a.PrimaryPart or a:FindFirstChild("RootPart")
-        local bp=b:FindFirstChild("HumanoidRootPart")or b.PrimaryPart or b:FindFirstChild("RootPart")
+        local ap,bp=root(a),root(b)
         if not ap or not bp then return ap~=nil and bp==nil end
         local av,bv=ap.Position,bp.Position
         if av.X~=bv.X then return av.X<bv.X end

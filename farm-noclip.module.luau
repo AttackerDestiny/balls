@@ -1,49 +1,50 @@
--- Auto Farm owns collision changes across idle, travel and farming handoffs.
+-- Character-scoped collision ownership survives farm/travel handoffs and respawns.
 return function(ctx)
     local api={}
-    local character,added,pulse
-    local originals={}
-    local disposed=false
-    local function restore()
-        if added then added:Disconnect();added=nil end
-        for part,value in pairs(originals)do if part.Parent then part.CanCollide=value end end
-        originals={};character=nil
+    local ledger={}
+    local owner,partsAdded,physics
+    local closed=false
+    local function restorePart(part)
+        local value=ledger[part]
+        ledger[part]=nil
+        if part.Parent then part.CanCollide=value end
     end
-    local function remember(part)
-        if part:IsA("BasePart")then
-            if originals[part]==nil then originals[part]=part.CanCollide end
-            part.CanCollide=false
-        end
+    local function detach()
+        if partsAdded then partsAdded:Disconnect();partsAdded=nil end
+        for part in pairs(ledger)do restorePart(part)end
+        owner=nil
     end
-    function api.Original(part)return originals[part]end
+    local function claim(part)
+        if not part:IsA("BasePart")then return end
+        if ledger[part]==nil then ledger[part]=part.CanCollide end
+        part.CanCollide=false
+    end
+    function api.Original(part)return ledger[part]end
     function api.Update()
-        if disposed then return end
+        if closed then return end
         if not ctx.Enabled()then
-            restore()
-            if pulse then pulse:Disconnect();pulse=nil end
-            return
+            detach();if physics then physics:Disconnect();physics=nil end;return
         end
         local current=ctx.Player.Character
-        if current~=character then
-            restore();character=current
-            if current then
-                for _,part in ipairs(current:QueryDescendants("BasePart"))do remember(part)end
-                added=current.DescendantAdded:Connect(remember)
+        if current~=owner then
+            detach();owner=current
+            if owner then
+                for _,part in ipairs(owner:QueryDescendants("BasePart"))do claim(part)end
+                partsAdded=owner.DescendantAdded:Connect(claim)
             end
         end
-        for part in pairs(originals)do
-            if not part.Parent then originals[part]=nil
-            elseif character and not part:IsDescendantOf(character)then
-                part.CanCollide=originals[part];originals[part]=nil
-            elseif part.CanCollide then part.CanCollide=false end
+        for part in pairs(ledger)do
+            if not part.Parent then ledger[part]=nil
+            elseif owner and not part:IsDescendantOf(owner)then restorePart(part)
+            else part.CanCollide=false end
         end
-        if not pulse then pulse=ctx.Pulse:Connect(api.Update)end
+        if not physics then physics=ctx.Pulse:Connect(api.Update)end
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        if pulse then pulse:Disconnect();pulse=nil end
-        restore()
+        if closed then return end
+        closed=true
+        if physics then physics:Disconnect();physics=nil end
+        detach()
     end
     return api
 end

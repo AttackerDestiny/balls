@@ -1,18 +1,21 @@
--- Status only; no gameplay work or world scans.
+-- A passive HUD projection never owns world state or movement.
 return function(ctx)
-    local disposed,nextUpdate=false,0
+    local nextPaint=0
+    local alive=true
     local api={}
-    function api.Update(now)
-        if disposed or now<nextUpdate then return end
-        nextUpdate=now+.2
-        local visible=ctx.State.Running and ctx.State.MultiSpot==true
-        ctx.Visible(visible==true)
-        if visible then ctx.Text(ctx.State.MultiSpotStatus or "Starting arena rotation...")end
+    function api.Update(stamp)
+        if not alive or stamp<nextPaint then return end
+        nextPaint=stamp+.2
+        local show=ctx.State.Running==true and ctx.State.MultiSpot==true
+        ctx.Visible(show)
+        if show then ctx.Text(ctx.State.MultiSpotStatus or "Starting arena rotation...")end
     end
-    local connection=ctx.Pulse:Connect(function()api.Update(ctx.Now())end)
+    local subscription=ctx.Pulse:Connect(function()api.Update(ctx.Now())end)
     function api.Destroy()
-        if disposed then return end
-        disposed=true;connection:Disconnect();ctx.Destroy()
+        if not alive then return end
+        alive=false
+        subscription:Disconnect();subscription=nil
+        ctx.Destroy()
     end
     api.Update(ctx.Now())
     return api

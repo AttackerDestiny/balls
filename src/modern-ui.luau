@@ -1,4 +1,5 @@
--- WindUI is bundled at a fixed release; queued rejoins need no library download.
+-- WindUI is bundled at a fixed release; no compatibility window exists.
+-- Executor adapter for the sole modern presentation.
 do
     local librarySource=(function()
 -- BEGIN BUNDLED WINDUI SOURCE
@@ -8,116 +9,113 @@ do
 -- BEGIN BUNDLED WINDUI
 -- END BUNDLED WINDUI
     end)()
-    local parent=gui.Parent
-    local retryVisibility=state.SetUIVisible
-    local before={};for _,child in ipairs(parent:GetChildren())do before[child]=true end
-    local library,uiMemory
-    local ownedNames={WindUI=true,["WindUI/Notifications"]=true,["WindUI/Dropdowns"]=true,["WindUI/Tooltips"]=true}
-    local function roots(fn)
-        if library then
-            for _,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui"})do
-                local root=library[key]
-                if root then pcall(fn,root)end
-            end
-        end
-    end
-    local ok,result=pcall(function()
-        state.WindUIStartedAt=os.clock()
-        local run=assert(loadstring(librarySource,"WindUI 1.6.66"))
-        local base=getfenv()
-        local nativeMake=makefolder
-        setfenv(run,setmetatable({gethui=function()return parent end,makefolder=function(path)
-            if type(isfolder)=="function"and isfolder(path)then return end
-            assert(type(nativeMake)=="function","Executor filesystem is unavailable")
-            return nativeMake(path)
-        end},{__index=base}))
-        library=run()
-        pcall(function()
-            local icon=library.Creator.Icon("feather")
-            if icon then
-                create("ImageLabel",{Name="FeatherIcon",BackgroundTransparency=1,Size=UDim2.fromOffset(26,26),
-                    Position=UDim2.fromScale(.5,.5),AnchorPoint=Vector2.new(.5,.5),Image=icon[1],
-                    ImageRectSize=icon[2].ImageRectSize,ImageRectOffset=icon[2].ImageRectPosition,
-                    ImageColor3=Color3.fromRGB(239,239,241)},showUI)
-                showUI.Text=""
-            end
-        end)
-        roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
-        local camera=workspace.CurrentCamera
-        local size=camera and camera.ViewportSize or Vector2.new(1280,720)
-        state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
-        state.WindUIPosition=preference("WindUIPosition",nil)
-        local makeMemory=(function()
+    local makeMemory=(function()
 -- BEGIN BUNDLED UI MEMORY
 -- END BUNDLED UI MEMORY
-        end)()
+    end)()
+    local parent=gui.Parent
+    local retryVisibility=state.SetUIVisible
+    local before={};for _,object in ipairs(parent:GetChildren())do before[object]=true end
+    local library,uiMemory
+    local ownedNames={WindUI=true,["WindUI/Notifications"]=true,["WindUI/Dropdowns"]=true,["WindUI/Tooltips"]=true}
+    local rootNames={"ScreenGui","NotificationGui","DropdownGui","TooltipGui"}
+    local function roots(fn)
+        if not library then return end
+        for _,name in ipairs(rootNames)do if library[name]then pcall(fn,library[name])end end
+    end
+    local function viewport()
+        local camera=workspace.CurrentCamera
+        return camera and camera.ViewportSize or Vector2.new(1280,720)
+    end
+    local function validPosition(value)
+        if type(value)~="table"or #value~=4 then return false end
+        for _,coordinate in ipairs(value)do if type(coordinate)~="number"or coordinate~=coordinate or math.abs(coordinate)>100000 then return false end end
+        return true
+    end
+    local function positionWindow(frame,size)
+        local saved=state.WindUIPosition
+        if validPosition(saved)then
+            local x=saved[1]*size.X+saved[2]
+            local y=saved[3]*size.Y+saved[4]
+            frame.Position=UDim2.fromOffset(math.clamp(x,math.min(150,size.X/2),math.max(size.X-150,size.X/2)),
+                math.clamp(y,math.min(100,size.Y/2),math.max(size.Y-100,size.Y/2)))
+        end
+        bind(frame:GetPropertyChangedSignal("Position"),function()
+            if not state.Running then return end
+            local p=frame.Position
+            state.WindUIPosition={p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset};requestSave()
+        end)
+    end
+    local function installFeather()
+        local icon=library.Creator.Icon("feather")
+        if not icon then return end
+        create("ImageLabel",{Name="FeatherIcon",BackgroundTransparency=1,Size=UDim2.fromOffset(26,26),Position=UDim2.fromScale(.5,.5),
+            AnchorPoint=Vector2.new(.5,.5),Image=icon[1],ImageRectSize=icon[2].ImageRectSize,ImageRectOffset=icon[2].ImageRectPosition,
+            ImageColor3=Color3.fromRGB(239,239,241)},showUI)
+        showUI.Text=""
+    end
+    local function mark(button,on)
+        local indicator=button:FindFirstChild("AutoHideIndicator")
+        if not indicator then
+            indicator=create("Frame",{Name="AutoHideIndicator",Size=UDim2.fromOffset(6,6),Position=UDim2.new(1,-8,1,-8),BorderSizePixel=0},button)
+            corner(indicator,3)
+        end
+        indicator.BackgroundColor3=on and Color3.fromRGB(51,199,89)or Color3.fromRGB(110,110,115)
+    end
+    local function clearButton(control,callback)
+        local host=control.InputFrame.UIElements.Main
+        local title=host:FindFirstChild("TitleFrame",true)
+        if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
+        local button=library.Creator.New("TextButton",{Name="ClearWhitelist",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
+            BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(28,36),Position=UDim2.new(1,-158,.5,0),
+            AnchorPoint=Vector2.new(1,.5),ThemeTag={TextColor3="Text"},ZIndex=host.ZIndex+2},nil)
+        button.Parent=host;bind(button.Activated,callback)
+        return button
+    end
+    local function visible(show)
+        if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(show)end
+        showUI.Visible=state.Running==true
+        roots(function(root)root.Enabled=show end)
+    end
+    local function loadLibrary()
+        local chunk=assert(loadstring(librarySource,"Feather WindUI"))
+        local nativeMake=makefolder
+        local environment=setmetatable({gethui=function()return parent end,makefolder=function(path)
+            if type(isfolder)=="function"and isfolder(path)then return end
+            assert(type(nativeMake)=="function","Executor filesystem is unavailable")
+            nativeMake(path)
+        end},{__index=getfenv()})
+        setfenv(chunk,environment)
+        return chunk()
+    end
+    local ok,result=pcall(function()
+        state.WindUIStartedAt=os.clock();library=loadLibrary();uiMemory=makeMemory(library.Creator)
+        roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
+        pcall(installFeather)
+        local size=viewport()
+        state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
+        state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        uiMemory=makeMemory(library.Creator)
-        local controller=make({Memory=uiMemory,State=state,WindUI=library,PlaceId=game.PlaceId,Defer=task.defer,
+        local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,
+            Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
+            MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
+            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,
             DestroyRoots=function()roots(function(root)root:Destroy()end)end,
             FriendPresent=function(name)
                 if name==""then return false end
-                for _,person in ipairs(Players:GetPlayers())do
-                    if person~=player and person.Name:lower()==name:lower()then return true end
-                end
+                local wanted=name:lower()
+                for _,person in ipairs(Players:GetPlayers())do if person~=player and person.Name:lower()==wanted then return true end end
                 return false
-            end,
-            Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
-            MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
-            AddWhitelistClear=function(control,clear)
-                local main=control.InputFrame.UIElements.Main
-                local title=main:FindFirstChild("TitleFrame",true)
-                if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
-                local button=library.Creator.New("TextButton",{
-                    Name="ClearWhitelist",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
-                    BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(28,36),
-                    Position=UDim2.new(1,-158,.5,0),AnchorPoint=Vector2.new(1,.5),
-                    ThemeTag={TextColor3="Text"},ZIndex=main.ZIndex+2},nil)
-                button.Parent=main
-                bind(button.Activated,clear)
-                return button
-            end,
-            MarkAutoHide=function(button,on)
-                local dot=button:FindFirstChild("AutoHideIndicator")
-                if not dot then
-                    dot=create("Frame",{Name="AutoHideIndicator",Size=UDim2.fromOffset(6,6),Position=UDim2.new(1,-8,1,-8),BorderSizePixel=0},button)
-                    corner(dot,3)
-                end
-                dot.BackgroundColor3=on and Color3.fromRGB(51,199,89)or Color3.fromRGB(110,110,115)
-            end,
-            Visibility=function(visible)
-                if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(visible)end
-                if state.Running then showUI.Visible=true else showUI.Visible=false end
-                roots(function(root)root.Enabled=visible end)
             end})
-        state.WindUI=controller
-        state.WindUIMainReadySeconds=os.clock()-state.WindUIStartedAt
-        state.UI.WindWindow=controller.Window;state.UI.WindControls=controller.Controls
-        state.SetUIVisible=controller.SetVisible
+        state.WindUI=controller;state.WindUIMainReadySeconds=os.clock()-state.WindUIStartedAt
+        state.UI.WindWindow=controller.Window;state.UI.WindControls=controller.Controls;state.SetUIVisible=controller.SetVisible
         local frame=controller.Window.UIElements and controller.Window.UIElements.Main
-        local saved=state.WindUIPosition
-        if frame then
-            if type(saved)=="table"and #saved==4 then
-                local valid=true
-                for _,value in ipairs(saved)do if type(value)~="number"or value~=value or math.abs(value)>100000 then valid=false end end
-                if valid then
-                    local x=saved[1]*size.X+saved[2]
-                    local y=saved[3]*size.Y+saved[4]
-                    frame.Position=UDim2.fromOffset(math.clamp(x,math.min(150,size.X/2),math.max(size.X-150,size.X/2)),
-                        math.clamp(y,math.min(100,size.Y/2),math.max(size.Y-100,size.Y/2)))
-                end
-            end
-            bind(frame:GetPropertyChangedSignal("Position"),function()
-                if not state.Running then return end
-                local p=frame.Position
-                state.WindUIPosition={p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset};requestSave()
-            end)
-        end
+        if frame then positionWindow(frame,size)end
         controller.SetVisible(not state.AutoHideUI and not state.UIHidden)
         task.spawn(function()
-            while state.Running do
-                local updated,reason=pcall(controller.Update,os.clock())
-                if not updated then state.WindUIError=tostring(reason)end
+            while state.Running and state.WindUI==controller do
+                local painted,reason=pcall(controller.Update,os.clock())
+                if not painted then state.WindUIError=tostring(reason)end
                 task.wait(.25)
             end
         end)

@@ -1,64 +1,61 @@
--- Respawn estimates are based only on observed living -> dead transitions in this runtime/job.
+-- A respawn record advances only after a living sample is observed dead.
 return function(ctx)
-    local api={Records={}}
-    local nextScan=0
-    local descriptors=setmetatable({}, {__mode="k"})
-    local names=setmetatable({}, {__mode="k"})
-    api.NameNormalizations=0
-    local function clean(text)
+    local api={Records={},NameNormalizations=0}
+    local due=0
+    local definitions=setmetatable({}, {__mode="k"})
+    local normalized=setmetatable({}, {__mode="k"})
+    local function name(text)
         api.NameNormalizations+=1
         return tostring(text or ""):lower():gsub("[^%w]","")
     end
-    local function descriptor(spot)
-        local value=descriptors[spot]
-        if value and value.Name==spot.Name and value.Source==spot.EncounterNames then return value end
-        value={Name=spot.Name,Source=spot.EncounterNames,Expected={},Count=0}
+    local function describe(spot)
+        local old=definitions[spot]
+        if old and old.Name==spot.Name and old.Source==spot.EncounterNames then return old end
+        local definition={Name=spot.Name,Source=spot.EncounterNames,Keys={},Count=0}
         if spot.EncounterNames then
-            for expected in pairs(spot.EncounterNames)do
-                local key=clean(expected);value.Expected[key]=true;value.Count+=1;value.Only=key
-            end
-        else local key=clean(spot.Name);value.Expected[key]=true;value.Count=1;value.Only=key end
-        descriptors[spot]=value
-        return value
+            for key in pairs(spot.EncounterNames)do local value=name(key);definition.Keys[value]=true;definition.Only=value;definition.Count+=1 end
+        else definition.Only=name(spot.Name);definition.Keys[definition.Only]=true;definition.Count=1 end
+        definitions[spot]=definition;return definition
     end
-    local function slotName(spot,sample,definition)
-        local cached=sample.Model and names[sample.Model]
-        if not cached or cached.Name~=sample.Name then
-            cached={Name=sample.Name,Key=clean(sample.Name)}
-            if sample.Model then names[sample.Model]=cached end
+    local function match(spot,sample,definition)
+        local found=sample.Model and normalized[sample.Model]
+        if not found or found.Name~=sample.Name then
+            found={Name=sample.Name,Key=name(sample.Name)}
+            if sample.Model then normalized[sample.Model]=found end
         end
-        if definition.Expected[cached.Key]then return cached.Key end
-        if definition.Count==1 and spot.Position and sample.Position then
-            local a,b=spot.Position,sample.Position
-            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return definition.Only end
+        if definition.Keys[found.Key]then return found.Key end
+        if definition.Count~=1 or not spot.Position or not sample.Position then return nil end
+        local a,b=spot.Position,sample.Position
+        if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=48400 then return definition.Only end
+    end
+    local function observe(record,key,sample,seconds,now)
+        local slot=record.Slots[key]
+        if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
+        if sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)then
+            slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
+        elseif slot.WasAlive and not slot.Dead then
+            slot.Dead=true;slot.KilledAt=now
+            slot.DueAt=ctx.Deadline and ctx.Deadline(now,seconds)or now+seconds
         end
     end
     function api.Update(now,spots)
-        if now<nextScan then return end
-        nextScan=now+.1
-        local samples
-        local floor=ctx.CurrentFloor()
+        if now<due then return end
+        due=now+.1
+        local floor=ctx.CurrentFloor();local samples
         for _,spot in ipairs(spots)do
-            if spot.PlaceId==floor and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
-                samples=samples or ctx.Samples()
-                local definition=descriptor(spot)
+            local seconds=spot.RespawnSeconds
+            if spot.PlaceId==floor and type(seconds)=="number"and seconds>0 then
+                if not samples then samples=ctx.Samples()end
                 local record=api.Records[spot.Id]
                 if not record then record={Slots={}};api.Records[spot.Id]=record end
+                local definition=describe(spot)
                 for _,sample in ipairs(samples)do
-                    local key=slotName(spot,sample,definition)
-                    if key then
-                        local slot=record.Slots[key]
-                        if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
-                        local living=sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)
-                        if living then slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
-                        elseif slot.WasAlive and not slot.Dead then
-                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=ctx.Deadline and ctx.Deadline(now,spot.RespawnSeconds)or now+spot.RespawnSeconds
-                        end
-                    end
+                    local key=match(spot,sample,definition)
+                    if key then observe(record,key,sample,seconds,now)end
                 end
                 record.HasLive=false;record.DueAt=nil
                 for _,slot in pairs(record.Slots)do
-                    if slot.WasAlive and not slot.Dead then record.HasLive=true end
+                    record.HasLive=record.HasLive or (slot.WasAlive and not slot.Dead)or false
                     if slot.DueAt then record.DueAt=math.min(record.DueAt or math.huge,slot.DueAt)end
                     if slot.KilledAt then record.KilledAt=math.max(record.KilledAt or -math.huge,slot.KilledAt)end
                 end

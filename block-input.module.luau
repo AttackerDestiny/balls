@@ -1,5 +1,6 @@
--- Live Core FoundationOverlay input needs GuiService's inset, even when the
--- overlay reports IgnoreGuiInset=true (58 px in the observed client).
+-- FoundationOverlay's native coordinate space includes the GuiService inset.
 return function(button,inset)
-    return button.AbsolutePosition+button.AbsoluteSize/2+inset
+    local origin=button.AbsolutePosition
+    local half=button.AbsoluteSize*.5
+    return origin+inset+half
 end

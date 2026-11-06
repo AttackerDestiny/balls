@@ -97,125 +97,140 @@ return function(ctx)
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
         [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14}
     local catalog={Floors={},FloorById={},Spots={},SpotById={},Aliases={}}
-    -- Identities and positions verified in the new-account live progression test.
-    local mainBossNames={
-        [542351431]={["Rahjin the Thief King"]=true},
-        [548231754]={["Borik the BeeKeeper"]=true},
-    }
+    local function clean(name)return tostring(name or ""):lower():gsub("[^%w]","")end
     local function accepts(spot,name)
         if not spot.EncounterNames then return true end
-        local cleaned=tostring(name or ""):lower():gsub("[^%w]","")
-        for expected in pairs(spot.EncounterNames)do
-            if expected:lower():gsub("[^%w]","")==cleaned then return true end
-        end
+        local identity=clean(name)
+        for expected in pairs(spot.EncounterNames)do if clean(expected)==identity then return true end end
         return false
     end
-    for _,floor in ipairs(ctx.Floors) do
-        local n=numbers[floor.PlaceId]
-        if n then
-            local item={Id=floor.PlaceId,Number=n,Name=floor.Name,Label=floor.PlaceId==134019705603409 and floor.Name or ("F"..n.." · "..floor.Name),Unlocked=ctx.Unlocked(floor)}
-            catalog.Floors[#catalog.Floors+1]=item;catalog.FloorById[item.Id]=item
+    local function register(spot)
+        catalog.Spots[#catalog.Spots+1]=spot
+        catalog.SpotById[spot.Id]=spot
+        return spot
+    end
+    local function alias(key,spot)
+        catalog.Aliases[key]=spot.Id
+        catalog.SpotById[key]=spot
+    end
+    local function label(floor,name)return floor.Label.." · "..name end
+    for _,definition in ipairs(ctx.Floors)do
+        local number=numbers[definition.PlaceId]
+        if number then
+            local floor={Id=definition.PlaceId,Number=number,Name=definition.Name,Unlocked=ctx.Unlocked(definition)}
+            floor.Label=floor.Id==134019705603409 and floor.Name or "F"..number.." · "..floor.Name
+            catalog.Floors[#catalog.Floors+1]=floor;catalog.FloorById[floor.Id]=floor
         end
     end
     table.sort(catalog.Floors,function(a,b)return a.Number<b.Number end)
-    local extraKinds={Leviathan='Boss',['Suspended Unborn']='Arena',['Limor the Devourer']='Arena',['Radioactive Experiment']='Arena',
-        ['Za, the Eldest']='Mini boss',['Wa, the Curious']='Arena',['Duality Reaper']='Mini boss',['Atheon arena']='Arena'}
-    for placeId,areas in pairs(source) do
-        local floor=catalog.FloorById[placeId]
-        if floor then for original,point in pairs(areas) do
-            local key=original:match('^%s*(.-)%s*$')
-            local info=supplied[placeId]and supplied[placeId][key]
-            local kind=info and info.Kind or key=='Boss' and 'Boss' or (key=='Miniboss' or key=='Second miniboss') and 'Mini boss' or extraKinds[key]
-            if kind then
-                local name=info and info.Name or key=='Boss' and 'Boss arena' or key=='Miniboss' and 'Mini-boss arena' or key
-                local spot={Id=tostring(placeId)..'/'..key,PlaceId=placeId,Name=name,Kind=kind,Position=point,
-                    DestinationId='source:'..key,Floor=floor,Label=floor.Label..' · '..name,
-                    RespawnSeconds=info and info.RespawnSeconds,MainBoss=key=='Boss',PositionLocked=info~=nil or placeId==13965775911,
-                    EncounterNames=info and info.EncounterNames or placeId==13965775911 and {Atheon=true,['Corrupted Atheon']=true}
-                        or (placeId==134019705603409 and key=='Leviathan' and {Leviathan=true})
-                        or (key=='Boss' and mainBossNames[placeId]) or nil}
-                catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[spot.Id]=spot
-            end
-        end end
-    end
-    function catalog.AddCurrent(areas,placeId)
-        local floor=catalog.FloorById[placeId];if not floor then return end
-        for id,area in pairs(areas or {})do
-            if id:sub(1,16)=="saved:multispot:" then
-                local key=tostring(placeId).."/"..id
-                local spot=catalog.SpotById[key]
-                if not spot then
-                    spot={Id=key,PlaceId=placeId,Name=area.Name,Kind="Arena",Position=area.Position,
-                        DestinationId=id,Floor=floor,Label=floor.Label.." · "..area.Name,PositionLocked=true}
-                    catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
-                else spot.Position=area.Position end
-            end
-        end
-        for _,kind in ipairs({'Boss','Mini boss'}) do
-            local generic=catalog.SpotById[tostring(placeId)..'/'..(kind=='Boss' and 'Boss' or 'Miniboss')]
-            -- Keep the user's explicit F9 first-arena location even if only the second mini-boss is loaded.
-            if generic and not generic.PositionLocked then
-                local closest,distance
-                for id,area in pairs(areas or {}) do
-                    if id:sub(1,4)=='mob:' and area.Kind==kind and accepts(generic,id:sub(5)) then
-                        local d=(area.Position-generic.Position).Magnitude
-                        if not distance or d<distance then closest,distance=area,d end
-                    end
-                end
-                if closest then generic.Position=closest.Position;generic.DestinationId=closest.Id;generic.SourceRefined=true end
-            end
-        end
-        for id,area in pairs(areas or {}) do
-            if area.Kind=='Boss' or area.Kind=='Mini boss' then
-                local key=tostring(placeId)..'/'..id
-                if id:sub(1,7)~='source:' then
-                    local name=id:sub(1,4)=='mob:' and id:sub(5) or area.Name
-                    local primary
-                    if placeId==13965775911 and (name=='Atheon' or name=='Corrupted Atheon') then
-                        primary=catalog.SpotById[tostring(placeId)..'/Atheon arena']
-                    end
-                    for _,spot in ipairs(catalog.Spots) do
-                        if not primary and spot.PlaceId==placeId and (spot.Name:lower()==name:lower() or (spot.EncounterNames and spot.EncounterNames[name])) then primary=spot;break end
-                    end
-                    if primary then
-                        if not primary.PositionLocked then
-                            primary.Position=area.Position;primary.DestinationId=id;primary.Kind=area.Kind;primary.SourceRefined=true
-                        end
-                    else
-                        local nearest
-                        for _,spot in ipairs(catalog.Spots) do
-                            if spot.PlaceId==placeId and accepts(spot,name)
-                                and (spot.Kind==area.Kind or (spot.PositionLocked and spot.Kind=='Arena')) then
-                                local distance=(spot.Position-area.Position).Magnitude
-                                if distance<=220 and (not nearest or distance<nearest) then primary,nearest=spot,distance end
-                            end
-                        end
-                    end
-                    if primary then
-                        catalog.Aliases[key]=primary.Id;catalog.SpotById[key]=primary
-                    elseif not supplied[placeId] then
-                        local spot={Id=key,PlaceId=placeId,Name=name,Kind=area.Kind,Position=area.Position,
-                            DestinationId=id,Floor=floor,Label=floor.Label..' · '..name}
-                        catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
-                    end
+    local specialKinds={Leviathan="Boss",["Suspended Unborn"]="Arena",["Limor the Devourer"]="Arena",
+        ["Radioactive Experiment"]="Arena",["Za, the Eldest"]="Mini boss",["Wa, the Curious"]="Arena",
+        ["Duality Reaper"]="Mini boss",["Atheon arena"]="Arena"}
+    for place,points in pairs(source)do
+        local floor=catalog.FloorById[place]
+        if floor then
+            for raw,position in pairs(points)do
+                local key=raw:match("^%s*(.-)%s*$")
+                local info=supplied[place]and supplied[place][key]
+                local kind=info and info.Kind or (key=="Boss"and "Boss")
+                    or ((key=="Miniboss"or key=="Second miniboss")and "Mini boss")or specialKinds[key]
+                if kind then
+                    local name=info and info.Name or (key=="Boss"and "Boss arena")or (key=="Miniboss"and "Mini-boss arena")or key
+                    local encounters=info and info.EncounterNames
+                    if not encounters and place==13965775911 then encounters={Atheon=true,["Corrupted Atheon"]=true}end
+                    if not encounters and place==134019705603409 and key=="Leviathan"then encounters={Leviathan=true}end
+                    register({Id=tostring(place).."/"..key,PlaceId=place,Name=name,Kind=kind,Position=position,
+                        DestinationId="source:"..key,Floor=floor,Label=label(floor,name),
+                        RespawnSeconds=info and info.RespawnSeconds,MainBoss=key=="Boss",
+                        PositionLocked=info~=nil or place==13965775911,EncounterNames=encounters})
                 end
             end
         end
     end
-    function catalog.NormalizeSelection(selected)
-        local result={}
-        for id,on in pairs(selected or {}) do
-            if on then result[catalog.Aliases[id] or id]=true end
+    local function customAreas(areas,place,floor)
+        for id,area in pairs(areas)do
+            if id:sub(1,16)=="saved:multispot:"then
+                local key=tostring(place).."/"..id
+                local existing=catalog.SpotById[key]
+                if existing then existing.Position=area.Position
+                else register({Id=key,PlaceId=place,Name=area.Name,Kind="Arena",Position=area.Position,
+                    DestinationId=id,Floor=floor,Label=label(floor,area.Name),PositionLocked=true})end
+            end
         end
-        return result
     end
+    local function refineGeneric(areas,place)
+        for _,kind in ipairs({"Boss","Mini boss"})do
+            local key=kind=="Boss"and "Boss"or "Miniboss"
+            local spot=catalog.SpotById[tostring(place).."/"..key]
+            if spot and not spot.PositionLocked then
+                local nearest,distance
+                for id,area in pairs(areas)do
+                    if id:sub(1,4)=="mob:"and area.Kind==kind and accepts(spot,id:sub(5))then
+                        local current=(area.Position-spot.Position).Magnitude
+                        if not distance or current<distance then nearest,distance=area,current end
+                    end
+                end
+                if nearest then spot.Position=nearest.Position;spot.DestinationId=nearest.Id;spot.SourceRefined=true end
+            end
+        end
+    end
+    local function matchArea(area,id,place)
+        local name=id:sub(1,4)=="mob:"and id:sub(5)or area.Name
+        local primary
+        if place==13965775911 and (name=="Atheon"or name=="Corrupted Atheon")then
+            primary=catalog.SpotById[tostring(place).."/Atheon arena"]
+        end
+        if not primary then
+            for _,spot in ipairs(catalog.Spots)do
+                if spot.PlaceId==place and (spot.Name:lower()==name:lower()or spot.EncounterNames and spot.EncounterNames[name])then
+                    primary=spot;break
+                end
+            end
+        end
+        if primary then
+            if not primary.PositionLocked then
+                primary.Position=area.Position;primary.DestinationId=id;primary.Kind=area.Kind;primary.SourceRefined=true
+            end
+            return primary,name
+        end
+        local closest
+        for _,spot in ipairs(catalog.Spots)do
+            if spot.PlaceId==place and accepts(spot,name)
+                and (spot.Kind==area.Kind or spot.PositionLocked and spot.Kind=="Arena")then
+                local distance=(spot.Position-area.Position).Magnitude
+                if distance<=220 and (not closest or distance<closest)then primary,closest=spot,distance end
+            end
+        end
+        return primary,name
+    end
+    function catalog.AddCurrent(areas,place)
+        local floor=catalog.FloorById[place]
+        if not floor then return end
+        areas=areas or {}
+        customAreas(areas,place,floor)
+        refineGeneric(areas,place)
+        for id,area in pairs(areas)do
+            if (area.Kind=="Boss"or area.Kind=="Mini boss")and id:sub(1,7)~="source:"then
+                local key=tostring(place).."/"..id
+                local spot,name=matchArea(area,id,place)
+                if spot then alias(key,spot)
+                elseif not supplied[place]then
+                    register({Id=key,PlaceId=place,Name=name,Kind=area.Kind,Position=area.Position,
+                        DestinationId=id,Floor=floor,Label=label(floor,name)})
+                end
+            end
+        end
+    end
+    function catalog.NormalizeSelection(selection)
+        local normalized={}
+        for id,on in pairs(selection or {})do if on then normalized[catalog.Aliases[id]or id]=true end end
+        return normalized
+    end
+    local kindOrder={Boss=1,["Mini boss"]=2,Arena=3}
     function catalog.Sort()
         table.sort(catalog.Spots,function(a,b)
             if a.Floor.Number~=b.Floor.Number then return a.Floor.Number<b.Floor.Number end
-            if a.Kind~=b.Kind then
-                local ranks={Boss=1,['Mini boss']=2,Arena=3}
-                return (ranks[a.Kind] or 4)<(ranks[b.Kind] or 4)
-            end
+            if a.Kind~=b.Kind then return (kindOrder[a.Kind]or 4)<(kindOrder[b.Kind]or 4)end
             if a.Name~=b.Name then return a.Name<b.Name end
             return a.Id<b.Id
         end)

@@ -1,25 +1,25 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
+local BUILD="2026-11-05.complete-source-v3.0.0"
+local VERSION="3.0.0"
 if not game:IsLoaded()then game.Loaded:Wait()end
--- Swordburst 2: automation controllers with the modern WindUI interface.
--- Repeated execution reuses the active UI. Closing stops the runtime and saves preferences.
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Stats = game:GetService("Stats")
-local HttpService = game:GetService("HttpService")
-local TweenService = game:GetService("TweenService")
-local player = Players.LocalPlayer
-while not player do task.wait(.1);player=Players.LocalPlayer end
-local env = getgenv()
+local Players=game:GetService("Players")
+local ReplicatedStorage=game:GetService("ReplicatedStorage")
+local UserInputService=game:GetService("UserInputService")
+local RunService=game:GetService("RunService")
+local Stats=game:GetService("Stats")
+local HttpService=game:GetService("HttpService")
+local TweenService=game:GetService("TweenService")
+local player=Players.LocalPlayer
+repeat if not player then task.wait(.1);player=Players.LocalPlayer end until player
+local env=getgenv()
 local previousRuntime=env.SB2KillAura
 local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
--- A reload retains settings, never the previous runtime's instances or closures.
+-- Copy a schema of plain preferences using bounded iterative traversal.
 return function(previous,userId)
-    if not previous or previous.UserId~=userId then return nil end
+    if type(previous)~="table"or previous.UserId~=userId then return nil end
     local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
@@ -29,88 +29,92 @@ return function(previous,userId)
         "ResumeRequested","SafeFloorId","SafeMode","SafeWhitelistIds","SafeWhitelistText","SelectedMiscSkill",
         "SelectedPlayerId","SelectedSkill","SkillAura","SkillPerWeapon","SkillPerWeaponVersion","StopEverything",
         "Theme","TradeItems","TradeMode","UnsafeOffsetProfiles","UserId","ViewingPlayer","ViewingPlayerInventory","WindUIPosition"}
-    local count=0
-    local function copy(value,depth,seen)
+    local result={}
+    local budget=4096
+    local function primitive(value)
         local kind=type(value)
-        if kind=="boolean"or kind=="string"or kind=="number"then return value end
-        if kind~="table"or depth>8 or seen[value]then return nil end
-        local result={};seen[value]=true
-        for key,item in pairs(value)do
-            if count>=4096 then break end
-            if type(key)=="number"or type(key)=="string"then
-                count+=1
-                result[key]=copy(item,depth+1,seen)
+        return kind=="string"or kind=="number"or kind=="boolean"
+    end
+    for _,field in ipairs(fields)do
+        local value=previous[field]
+        if primitive(value)then result[field]=value
+        elseif type(value)=="table"then
+            local target={};result[field]=target
+            local stack={{Source=value,Target=target,Depth=0,Ancestors={[value]=true}}}
+            while #stack>0 and budget>0 do
+                local work=table.remove(stack)
+                for key,item in pairs(work.Source)do
+                    if budget==0 then break end
+                    if type(key)=="string"or type(key)=="number"then
+                        budget-=1
+                        if primitive(item)then work.Target[key]=item
+                        elseif type(item)=="table"and work.Depth<8 and not work.Ancestors[item]then
+                            local child={};work.Target[key]=child
+                            local ancestry=table.clone(work.Ancestors);ancestry[item]=true
+                            stack[#stack+1]={Source=item,Target=child,Depth=work.Depth+1,Ancestors=ancestry}
+                        end
+                    end
+                end
             end
         end
-        seen[value]=nil
-        return result
     end
-    local snapshot={}
-    for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
-    snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
-    return snapshot
+    if type(previous.UI)=="table"and type(previous.UI.ActiveTab)=="string"then result.ActiveTab=previous.UI.ActiveTab end
+    return result
 end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-05.runtime-rewrite-v2.0.0"
-local VERSION="2.0.0"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
--- Executor paths are relative to its workspace; never add a second "workspace".
--- Existing account settings/tickets are preserved. The runnable entry passes its
--- own embedded body so this can persist a complete, dependency-free loader.
+-- Self-installation is a small journal of idempotent writes, not a reset.
 return function(ctx)
-    local api={Ready=false,Generation=0,Created={}}
-    local folder="SB2Codex"
-    local sourcePath=folder.."/kill-aura.luau"
-    local cachedPath=type(ctx.Build)=="string"and (folder.."/source_"..ctx.Build:gsub("[^%w_-]","_")..".luau")or sourcePath
-    api.SourcePath=cachedPath
-    local saved=false
-    local fullSource=type(ctx.Source)=="string"and ctx.Prefix..ctx.Source..ctx.Suffix or nil
-    local function ensureFile(path,value)
-        if not ctx.IsFile(path)then
-            ctx.Write(path,value);api.Generation+=1;api.Created[path]=true
-        end
+    local directory="SB2Codex"
+    local stable=directory.."/kill-aura.luau"
+    local versioned=type(ctx.Build)=="string"and directory.."/source_"..ctx.Build:gsub("[^%w_-]","_")..".luau"or stable
+    local entry=type(ctx.Source)=="string"and ctx.Prefix..ctx.Source..ctx.Suffix or nil
+    local api={Ready=false,Generation=0,Created={},SourcePath=versioned}
+    local installed=false
+    local function write(path,text)
+        ctx.Write(path,text)
+        api.Generation+=1;api.Created[path]=true
     end
-    function api.Ensure(verifySource)
-        local ok,message=pcall(function()
-            assert(type(ctx.IsFile)=="function"and type(ctx.Read)=="function"and type(ctx.Write)=="function",
-                "This executor does not provide file storage for automatic rejoin")
-            assert(fullSource,"Run the complete kill-aura.luau entry to install automatic rejoin")
-            if type(ctx.IsFolder)=="function"then
-                if not ctx.IsFolder(folder)then
-                    assert(type(ctx.MakeFolder)=="function","This executor cannot create SB2Codex")
-                    local made,reason=pcall(ctx.MakeFolder,folder)
-                    assert(made or ctx.IsFolder(folder),tostring(reason))
-                end
-            elseif type(ctx.MakeFolder)=="function"then
-                -- Executors without isfolder may report an existing folder as an error.
-                pcall(ctx.MakeFolder,folder)
-            end
-            if (verifySource and cachedPath==sourcePath)or not saved or not ctx.IsFile(sourcePath)then
-                if not ctx.IsFile(sourcePath)or ctx.Read(sourcePath)~=fullSource then
-                    ctx.Write(sourcePath,fullSource);api.Generation+=1;api.Created[sourcePath]=true
-                end
-                saved=true
-            end
-            if cachedPath~=sourcePath and (verifySource or not ctx.IsFile(cachedPath))then
-                if not ctx.IsFile(cachedPath)or ctx.Read(cachedPath)~=fullSource then
-                    ctx.Write(cachedPath,fullSource);api.Generation+=1;api.Created[cachedPath]=true
-                end
-            end
-            ensureFile(folder.."/settings_"..ctx.UserId..".json",ctx.Encode({Version=1}))
-            ensureFile(folder.."/solo-search_"..ctx.UserId..".json",ctx.Encode({Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId}))
-        end)
-        api.Ready=ok;api.Error=not ok and tostring(message)or nil
-        return ok,api.Error
+    local function source(path,inspect)
+        local exists=ctx.IsFile(path)
+        if not exists or (inspect and ctx.Read(path)~=entry)then write(path,entry)end
+    end
+    local function directoryReady()
+        if ctx.IsFolder then
+            if ctx.IsFolder(directory)then return end
+            assert(type(ctx.MakeFolder)=="function","This executor cannot create SB2Codex")
+            local ok,reason=pcall(ctx.MakeFolder,directory)
+            assert(ok or ctx.IsFolder(directory),tostring(reason))
+        elseif ctx.MakeFolder then pcall(ctx.MakeFolder,directory)end
+    end
+    local function newFile(path,value)
+        if not ctx.IsFile(path)then write(path,ctx.Encode(value))end
+    end
+    local function synchronize(verify)
+        for _,name in ipairs({"IsFile","Read","Write"})do
+            assert(type(ctx[name])=="function","This executor does not provide file storage for automatic rejoin")
+        end
+        assert(entry,"Run the complete kill-aura.luau entry to install automatic rejoin")
+        directoryReady()
+        if not installed or not ctx.IsFile(stable)or (verify and stable==versioned)then source(stable,true);installed=true end
+        if versioned~=stable then source(versioned,verify==true)end
+        newFile(directory.."/settings_"..ctx.UserId..".json",{Version=1})
+        newFile(directory.."/solo-search_"..ctx.UserId..".json",{Version=1,Active=false,UserId=ctx.UserId,PlaceId=ctx.PlaceId})
+    end
+    function api.Ensure(verify)
+        local ok,reason=pcall(synchronize,verify)
+        api.Ready=ok;api.Error=not ok and tostring(reason)or nil
+        return api.Ready,api.Error
     end
     api.Ensure(true)
     return api
 end
 
 -- END BUNDLED STORAGE BOOTSTRAP
-end)()({Source=embeddedSource,Build=BUILD,UserId=player.UserId,PlaceId=game.PlaceId,
+end)()({Build=BUILD,Source=embeddedSource,UserId=player.UserId,PlaceId=game.PlaceId,
     Prefix="local SB2_SOURCE=["..string.rep("=",12).."[\n",
     Suffix="]"..string.rep("=",12).."]\nreturn assert(loadstring(SB2_SOURCE, \"SB2\"))(SB2_SOURCE)\n",
     IsFile=isfile,Read=readfile,Write=writefile,IsFolder=isfolder,MakeFolder=makefolder,
@@ -119,735 +123,675 @@ env.SB2StorageBootstrap=storageBootstrap
 local playerGui=player:WaitForChild("PlayerGui")
 local runtimeOwner=(function()
 -- BEGIN BUNDLED RUNTIME OWNER
--- Engine-instance ownership works even when getgenv is isolated per execution.
-return function(ctx)
-    local retired,existing={},nil
-    for _,gui in ipairs(ctx.Parent:GetChildren()) do
-        if gui.Name=="SB2KillAuraUI" and gui:IsA("ScreenGui") then
-            local heartbeat=gui:GetAttribute("SB2Heartbeat")
-            local phase=gui:GetAttribute("SB2Phase")
-            if not existing and gui:GetAttribute("SB2Build")==ctx.Build and gui:GetAttribute("SB2Job")==ctx.Job
-                and (phase=="Loading" or phase=="Running") and type(heartbeat)=="number"
-                and ctx.Now()-heartbeat<10 then existing=gui
-            else retired[#retired+1]=gui end
+-- GUI ownership is shared across executor environments through instance attributes.
+return function(context)
+    local rootName="SB2KillAuraUI"
+    local obsolete={}
+    local incumbent
+    local timestamp=context.Now()
+    local function fresh(candidate)
+        local phase=candidate:GetAttribute("SB2Phase")
+        local heartbeat=candidate:GetAttribute("SB2Heartbeat")
+        return candidate:GetAttribute("SB2Build")==context.Build
+            and candidate:GetAttribute("SB2Job")==context.Job
+            and (phase=="Loading"or phase=="Running")
+            and type(heartbeat)=="number"and timestamp-heartbeat<10
+    end
+    for _,candidate in ipairs(context.Parent:GetChildren())do
+        if candidate.Name==rootName and candidate:IsA("ScreenGui")then
+            if incumbent==nil and fresh(candidate)then incumbent=candidate
+            else obsolete[#obsolete+1]=candidate end
         end
     end
-    if existing then
-        for _,gui in ipairs(retired) do gui:Destroy() end
-        -- Repeated auto-execute is a no-op; do not turn a hidden panel back on.
-        return nil,existing
+    local function discardObsolete()
+        for index=#obsolete,1,-1 do local candidate=obsolete[index];obsolete[index]=nil;pcall(function()candidate:Destroy()end)end
     end
-    local root=ctx.Create()
-    root.Name="SB2KillAuraUI"
-    root:SetAttribute("SB2Build",ctx.Build);root:SetAttribute("SB2Job",ctx.Job)
-    root:SetAttribute("SB2Phase","Loading");root:SetAttribute("SB2Heartbeat",ctx.Now())
-    root.Parent=ctx.Parent
+    if incumbent then discardObsolete();return nil,incumbent end
+    local root=context.Create();root.Name=rootName
+    for name,value in pairs({SB2Build=context.Build,SB2Job=context.Job,SB2Phase="Loading",SB2Heartbeat=timestamp})do
+        root:SetAttribute(name,value)
+    end
+    root.Parent=context.Parent
     local lease={Root=root}
-    local connection,lastPulse,disposed=nil,ctx.Now(),false
-    function lease.Alive()return not disposed and root.Parent==ctx.Parent end
-    function lease.Retire()
-        for _,gui in ipairs(retired) do gui:Destroy() end
-        retired={}
-    end
-    function lease.Ready()
-        if lease.Alive()then root:SetAttribute("SB2Phase","Running")end
-    end
+    local released=false
+    local pulse
+    local due=timestamp+2
+    function lease.Alive()return not released and root.Parent==context.Parent end
+    lease.Retire=discardObsolete
+    function lease.Ready()if lease.Alive()then root:SetAttribute("SB2Phase","Running")end end
     function lease.Release()
-        if disposed then return end
-        disposed=true
-        if connection then connection:Disconnect()end
-        root:SetAttribute("SB2Phase","Stopped")
+        if released then return end
+        released=true
+        if pulse then pulse:Disconnect();pulse=nil end
+        pcall(function()root:SetAttribute("SB2Phase","Stopped")end)
     end
-    connection=ctx.Pulse:Connect(function()
-        if not lease.Alive()then lease.Release();return end
-        local now=ctx.Now()
-        if now-lastPulse>=2 then lastPulse=now;root:SetAttribute("SB2Heartbeat",now)end
+    pulse=context.Pulse:Connect(function()
+        if released then return end
+        if root.Parent~=context.Parent then lease.Release();return end
+        local now=context.Now()
+        if now>=due then due=now+2;root:SetAttribute("SB2Heartbeat",now)end
     end)
     return lease
 end
 
 -- END BUNDLED RUNTIME OWNER
-end)()({Parent=playerGui,Build=BUILD,Job=game.JobId,Now=os.clock,Pulse=RunService.Heartbeat,
-    Create=function()local root=Instance.new("ScreenGui");root.ResetOnSpawn=false;root.DisplayOrder=100;root.ZIndexBehavior=Enum.ZIndexBehavior.Sibling;return root end})
+end)()({Build=BUILD,Job=game.JobId,Parent=playerGui,Pulse=RunService.Heartbeat,Now=os.clock,
+    Create=function()
+        local root=Instance.new("ScreenGui")
+        root.ResetOnSpawn=false;root.DisplayOrder=100;root.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+        return root
+    end})
 if not runtimeOwner then return end
 local loadToken={}
 env.SB2LoadToken=loadToken
--- The native login place has no combat profile. Handle Play before waiting for it.
+local function startupCurrent()
+    return env.SB2LoadToken==loadToken and runtimeOwner.Alive()
+end
 if game.PlaceId==659222129 and game.GameId==212154879 then
-    local make=(function()
+    local makeLobby=(function()
 -- BEGIN BUNDLED LOBBY PLAY
--- Bounded login-screen helper; no frame connection or floor-runtime polling.
+-- Observe readiness, queue recovery once, then pace attempts until the menu leaves.
 return function(ctx)
     local api={Attempts=0,Done=false}
-    local deadline,nextTry,queued=ctx.Now()+60,0,false
+    local expires=ctx.Now()+60
+    local nextActivation=0
+    local prepared=false
+    local function call(fn,...)
+        local ok,result=pcall(fn,...)
+        if not ok then api.Error=tostring(result);api.Done=true end
+        return ok,result
+    end
     function api.Update()
         if api.Done then return end
         local now=ctx.Now()
-        if not ctx.Alive() or now>=deadline then api.Done=true;return end
+        if now>=expires or not ctx.Alive() then api.Done=true;return end
         local button=ctx.Find()
         if not button or not ctx.Ready(button) then
-            if api.Attempts>0 then api.Done=true end
+            api.Done=api.Attempts>0
             return
         end
-        if now<nextTry then return end
-        nextTry=now+1
-        if not queued then
-            local ok,err=pcall(ctx.Queue)
-            if not ok then api.Error=tostring(err);api.Done=true;return end
-            queued=true
+        if now<nextActivation then return end
+        nextActivation=now+1
+        if not prepared then
+            if not call(ctx.Queue) then return end
+            prepared=true
         end
-        local ok,err=pcall(ctx.Activate,button)
-        if not ok then api.Error=tostring(err);api.Done=true;return end
-        if err~=false then api.Attempts+=1 end
+        local ok,activated=call(ctx.Activate,button)
+        if ok and activated~=false then api.Attempts=api.Attempts+1 end
     end
     return api
 end
 
 -- END BUNDLED LOBBY PLAY
-end)()
-    local helper=make({Now=os.clock,Alive=function()return env.SB2LoadToken==loadToken and runtimeOwner.Alive()end,
-        Find=function()
-            local gui=playerGui:FindFirstChild("ScreenGui")
-            local frame=gui and gui:FindFirstChild("Frame")
-            local buttons=frame and frame:FindFirstChild("Buttons")
-            return buttons and buttons:FindFirstChild("Play")
-        end,
-        Ready=function(button)
-            if not button:IsA("GuiButton") or not button.Visible or not button.Active then return false end
-            if button.Position.Y.Scale==0 and button.Position.Y.Offset<0 then return false end
-            local ancestor=button.Parent
-            while ancestor and ancestor~=playerGui do
-                if ancestor:IsA("GuiObject") and not ancestor.Visible then return false end
-                if ancestor:IsA("ScreenGui") and not ancestor.Enabled then return false end
-                ancestor=ancestor.Parent
-            end
-            local camera=workspace.CurrentCamera
-            local position,size=button.AbsolutePosition,button.AbsoluteSize
-            return camera and size.X>0 and size.Y>0 and position.X>=0 and position.Y>=0
-                and position.X+size.X<=camera.ViewportSize.X and position.Y+size.Y<=camera.ViewportSize.Y
-        end,
-        Queue=function()
-            local ready,reason=storageBootstrap.Ensure();assert(ready,reason)
-            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-            assert(type(queue)=="function","Auto Play requires teleport queue support")
-            assert(type(readfile)=="function" and type(isfile)=="function" and isfile("SB2Codex/kill-aura.luau"),"Save the source before Auto Play")
-            queue(string.format([==[
-if not game:IsLoaded() then game.Loaded:Wait() end
+    end)()
+    local function findPlay()
+        local node=playerGui:FindFirstChild("ScreenGui")
+        for _,name in ipairs({"Frame","Buttons","Play"})do node=node and node:FindFirstChild(name)end
+        return node
+    end
+    local function playReady(button)
+        if not(button:IsA("GuiButton")and button.Active and button.Visible)then return false end
+        if button.Position.Y.Scale==0 and button.Position.Y.Offset<0 then return false end
+        local node=button.Parent
+        while node and node~=playerGui do
+            if(node:IsA("GuiObject")and not node.Visible)or(node:IsA("ScreenGui")and not node.Enabled)then return false end
+            node=node.Parent
+        end
+        local camera=workspace.CurrentCamera
+        if not camera then return false end
+        local point,extent=button.AbsolutePosition,button.AbsoluteSize
+        return extent.X>0 and extent.Y>0 and point.X>=0 and point.Y>=0
+            and point.X+extent.X<=camera.ViewportSize.X and point.Y+extent.Y<=camera.ViewportSize.Y
+    end
+    local function queueLobby()
+        local ready,reason=storageBootstrap.Ensure();assert(ready,reason)
+        local queue=queue_on_teleport or queueonteleport or(syn and syn.queue_on_teleport)or(fluxus and fluxus.queue_on_teleport)
+        assert(type(queue)=="function","Auto Play requires teleport queue support")
+        assert(type(readfile)=="function"and type(isfile)=="function"and isfile("SB2Codex/kill-aura.luau"),"Saved source is unavailable")
+        queue(string.format([==[
+if not game:IsLoaded()then game.Loaded:Wait()end
 local p=game:GetService("Players").LocalPlayer
 while not p do task.wait();p=game:GetService("Players").LocalPlayer end
-if p.UserId==%s and game.GameId==212154879 and isfile("SB2Codex/kill-aura.luau") then
-    local source=readfile("SB2Codex/kill-aura.luau")
-    if string.find(source,%q,1,true) then local run=loadstring(source);if run then run()end end
+if p.UserId==%s and game.GameId==212154879 and isfile("SB2Codex/kill-aura.luau")then
+    local code=readfile("SB2Codex/kill-aura.luau")
+    if code:find(%q,1,true)then assert(loadstring(code))()end
 end
 ]==],tostring(player.UserId),BUILD))
-        end,
+    end
+    local lobby=makeLobby({Now=os.clock,Alive=startupCurrent,Find=findPlay,Ready=playReady,Queue=queueLobby,
         Activate=function(button)
-            -- Potassium firesignal cannot resume this native callback after wait().
-            -- Spawn its connected function on a real scheduler-owned thread instead.
             assert(type(getconnections)=="function","Native Play activation is unavailable")
-            local fired=false
-            for _,connection in ipairs(getconnections(button.MouseButton1Click)) do
-                if connection.Enabled~=false and type(connection.Function)=="function" then task.spawn(connection.Function);fired=true end
+            local count=0
+            for _,listener in ipairs(getconnections(button.MouseButton1Click))do
+                if listener.Enabled~=false and type(listener.Function)=="function"then task.spawn(listener.Function);count+=1 end
             end
-            return fired
+            return count>0
         end})
-    env.SB2LobbyPlay=helper
-    repeat helper.Update();if not helper.Done then task.wait(.25)end until helper.Done
+    env.SB2LobbyPlay=lobby
+    while not lobby.Done and startupCurrent()do lobby.Update();if not lobby.Done then task.wait(.25)end end
     runtimeOwner.Release();runtimeOwner.Root:Destroy()
     return
 end
-local configFolder = "SB2Codex"
-local configPath = configFolder .. "/settings_" .. tostring(player.UserId) .. ".json"
-local configData, configLoadError = {}, nil
-local filePersistence = typeof(readfile) == "function" and typeof(writefile) == "function" and typeof(isfile) == "function"
-if filePersistence then
-    local ok, result = pcall(function()
-        if not isfile(configPath) then return {} end
-        local raw = readfile(configPath)
-        if #raw > 32768 then error("Settings file exceeds its size limit") end
-        local decodedOK, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
-        if not decodedOK or type(decoded) ~= "table" or decoded.Version ~= 1 then
-            if not isfile(configPath .. ".bak") then writefile(configPath .. ".bak", raw) end
-            error("Invalid settings backed up; defaults restored")
-        end
-        return decoded
+local configFolder="SB2Codex"
+local configPath=configFolder.."/settings_"..player.UserId..".json"
+local configData,configLoadError={},nil
+local filePersistence=type(readfile)=="function"and type(writefile)=="function"and type(isfile)=="function"
+if filePersistence and isfile(configPath)then
+    local ok,value=pcall(function()
+        local text=readfile(configPath)
+        assert(#text<=32768,"Settings file exceeds its size limit")
+        local decoded,settings=pcall(HttpService.JSONDecode,HttpService,text)
+        if decoded and type(settings)=="table"and settings.Version==1 then return settings end
+        if not isfile(configPath..".bak")then writefile(configPath..".bak",text)end
+        error("Invalid settings backed up; defaults restored")
     end)
-    if ok then configData = result else configLoadError = tostring(result) end
+    if ok then configData=value else configLoadError=tostring(value)end
 end
 local sharedSettings,sharedPreferences=nil,{}
 if filePersistence then
-    local make=(function()
+    local attachShared=(function()
 -- BEGIN BUNDLED SHARED SETTINGS
--- Shared preferences only; account progress and resume tickets remain private.
+-- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
-    local api={Values={}}
-    local path="SB2Codex/shared-settings.json"
-    local keys={"CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
-        "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
-        "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
-    local function select(value)
+    local file="SB2Codex/shared-settings.json"
+    local fields={"CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
+    local function project(settings)
         local result={Version=1}
-        for _,key in ipairs(keys)do result[key]=value[key]end
+        for _,name in ipairs(fields)do result[name]=settings[name]end
         return result
     end
-    local function read(file)
-        local raw=ctx.Read(file);assert(#raw<=32768,"Settings file exceeds its size limit")
-        local value=ctx.Decode(raw);assert(type(value)=="table"and value.Version==1,"Invalid shared settings")
-        return value
+    local function decode(path)
+        local bytes=ctx.Read(path)
+        assert(#bytes<=32768,"Settings file exceeds its size limit")
+        local value=ctx.Decode(bytes)
+        assert(type(value)=="table"and value.Version==1,"Invalid shared settings")
+        return project(value)
     end
-    local function score(value)
-        return (type(value.SafeWhitelistText)=="string"and value.SafeWhitelistText:find("%S")and 1000 or 0)
-            +(value.SafeMode==true and 10 or 0)+(value.AccountProgression==true and 5 or 0)
-            +(value.Enabled==true and 1 or 0)+(value.AutoFarm==true and 1 or 0)
+    local function rank(settings)
+        local whitelist=type(settings.SafeWhitelistText)=="string"and settings.SafeWhitelistText:find("%S")
+        local points=whitelist and 1000 or 0
+        for key,weight in pairs({SafeMode=10,AccountProgression=5,Enabled=1,AutoFarm=1})do if settings[key]==true then points+=weight end end
+        return points
     end
-    if ctx.IsFile(path)then api.Values=select(read(path))
-    else
-        local seed=ctx.Current or{}
-        if type(ctx.List)=="function"and score(seed)<1000 then
-            local ok,files=pcall(ctx.List,"SB2Codex")
-            if ok and type(files)=="table"then
-                table.sort(files)
-                for index,file in ipairs(files)do
-                    if index>200 then break end
-                    if file:match("settings_%d+%.json$")then
-                        local valid,value=pcall(read,file)
-                        if valid and score(value)>score(seed)then seed=value end
+    local function migrate()
+        local best=ctx.Current or {}
+        if ctx.List and rank(best)<1000 then
+            local ok,paths=pcall(ctx.List,"SB2Codex")
+            if ok and type(paths)=="table"then
+                table.sort(paths)
+                for i=1,math.min(200,#paths)do
+                    if paths[i]:match("settings_%d+%.json$")then
+                        local readable,candidate=pcall(decode,paths[i])
+                        if readable and rank(candidate)>rank(best)then best=candidate end
                     end
                 end
             end
         end
-        api.Values=select(seed);ctx.Write(path,ctx.Encode(api.Values))
+        local value=project(best);ctx.Write(file,ctx.Encode(value));return value
     end
+    local api={Values=ctx.IsFile(file)and decode(file)or migrate()}
     if api.Values.SafeFloorId==nil and ctx.Current and type(ctx.Current.SafeFloorId)=="number"then
-        api.Values.SafeFloorId=ctx.Current.SafeFloorId
-        ctx.Write(path,ctx.Encode(api.Values))
+        api.Values.SafeFloorId=ctx.Current.SafeFloorId;ctx.Write(file,ctx.Encode(api.Values))
     end
-    function api.ReadSafeFloor()
-        if not ctx.IsFile(path)then return nil end
-        return tonumber(read(path).SafeFloorId)
-    end
-    local function signatures(value)
+    local function fingerprint(settings)
         local result={}
-        for _,key in ipairs(keys)do result[key]=ctx.Encode({Value=value[key]})end
+        for _,name in ipairs(fields)do result[name]=ctx.Encode({Value=settings[name]})end
         return result
     end
-    -- Keep this runtime's last local values, separately from other accounts' edits.
-    local last=signatures(api.Values)
-    function api.Save(value)
-        local shared=select(value)
-        local current=signatures(shared)
-        local changed={}
-        for _,key in ipairs(keys)do if current[key]~=last[key]then changed[#changed+1]=key end end
-        local exists=ctx.IsFile(path)
-        if #changed==0 and exists then return end
-        local merged=exists and select(read(path))or select(api.Values)
-        for _,key in ipairs(changed)do merged[key]=shared[key]end
-        ctx.Write(path,ctx.Encode(merged))
-        last=current;api.Values=merged
+    local localRevision=fingerprint(api.Values)
+    function api.ReadSafeFloor()
+        if ctx.IsFile(file)then return tonumber(decode(file).SafeFloorId)end
+        return nil
+    end
+    function api.Save(settings)
+        local nextLocal=project(settings)
+        local revision=fingerprint(nextLocal)
+        local edits={}
+        for _,name in ipairs(fields)do if revision[name]~=localRevision[name]then edits[#edits+1]=name end end
+        local exists=ctx.IsFile(file)
+        if exists and #edits==0 then return end
+        local merged=exists and decode(file)or project(api.Values)
+        for _,name in ipairs(edits)do merged[name]=nextLocal[name]end
+        ctx.Write(file,ctx.Encode(merged))
+        localRevision=revision;api.Values=merged
     end
     return api
 end
 
 -- END BUNDLED SHARED SETTINGS
     end)()
-    local ok,value=pcall(make,{Current=configData,IsFile=isfile,Read=readfile,Write=writefile,List=listfiles,
-        Encode=function(v)return HttpService:JSONEncode(v)end,Decode=function(v)return HttpService:JSONDecode(v)end})
+    local ok,value=pcall(attachShared,{Current=configData,IsFile=isfile,Read=readfile,Write=writefile,List=listfiles,
+        Encode=function(data)return HttpService:JSONEncode(data)end,Decode=function(text)return HttpService:JSONDecode(text)end})
     if ok then sharedSettings=value;sharedPreferences=value.Values else configLoadError=tostring(value)end
 end
 local importedConfig=env.SB2ConfigImport
-if importedConfig and importedConfig.UserId~=player.UserId then importedConfig=nil end
 env.SB2ConfigImport=nil
-local function preference(key, fallback)
-    if importedConfig then
-        local value=importedConfig.Settings[key]
-        if value~=nil then return value end
-        return fallback
-    end
-    if sharedPreferences[key]~=nil then return sharedPreferences[key]end
-    if previous and key=="StopEverything" and previous.ResumeRequested then return false end
-    if previous and previous.StopEverything and previous.ResumeFeatures and previous.ResumeFeatures[key]~=nil then return previous.ResumeFeatures[key] end
-    if previous and previous[key] ~= nil then return previous[key] end
-    if configData[key] ~= nil then return configData[key] end
+if type(importedConfig)~="table"or importedConfig.UserId~=player.UserId then importedConfig=nil end
+local function preference(key,fallback)
+    if importedConfig then local value=importedConfig.Settings[key];if value~=nil then return value end;return fallback end
+    local sources={sharedPreferences,previous and previous.StopEverything and previous.ResumeFeatures or {},previous or {},configData}
+    if key=="StopEverything"and previous and previous.ResumeRequested then return false end
+    for _,source in ipairs(sources)do if source[key]~=nil then return source[key]end end
     return fallback
 end
-local function numericPreference(key, fallback, minimum, maximum)
-    local value = preference(key, fallback)
-    if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then value = fallback end
-    return math.clamp(value, minimum, maximum)
+local function numericPreference(key,fallback,minimum,maximum)
+    local number=tonumber(preference(key,fallback))
+    if not number or number~=number or math.abs(number)==math.huge then number=fallback end
+    return math.clamp(number,minimum,maximum)
 end
-local restore = {
-    Enabled=preference("Enabled",false)==true,
-    Radius=30,
-    SkillRange=30,
-    AutoSwing=preference("AutoSwing",true)==true,
-    AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
-    AutoCraft=preference("AutoCraft",{}),
-    AutoDismantle=preference("AutoDismantle",{}),
-    AutoEquipBestSword=preference("AutoEquipBestSword",true)==true,
-    AutoFarm=preference("AutoFarm",false)==true,BossOnly=preference("BossOnly",false)==true,CreditCheck=preference("CreditCheck",false)==true,CreditWhitelistText=preference("CreditWhitelistText",""),
-    FarmRange=math.huge,
-    Threat=3,
-    SkillAura=preference("SkillAura",false)==true,
-    MiscSkillEnabled=preference("MiscSkillEnabled",false)==true,
-    SelectedMiscSkill=preference("SelectedMiscSkill","Cursed Enhancement"),
-    SelectedPlayerId=preference("SelectedPlayerId",nil),
-    ViewingPlayer=preference("ViewingPlayer",false)==true,
-    ViewingPlayerInventory=preference("ViewingPlayerInventory",false)==true,
-    Skill=preference("SelectedSkill","Piercing Dash"),
-    AutoExplore=preference("AutoExplore",true)==true,
-    AutoDodge=preference("AutoDodge",true)==true,
-    AtheonDodge=preference("AtheonDodge",false)==true,
-    TransparentMap=true,
-    PerformanceBoosters=preference("PerformanceBoosters",{}),
-    AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
-    SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
-    SafeWhitelistText=preference("SafeWhitelistText",""),SafeWhitelistIds=preference("SafeWhitelistIds",{}),
-    MultiSpot=preference("MultiSpot",false)==true,MultiSpotSelected=preference("MultiSpotSelected",{}),MultiSpotOrder=preference("MultiSpotOrder",{}),
-    MultiSpotCursor=preference("MultiSpotCursor",nil),MultiSpotPending=preference("MultiSpotPending",nil),
-    AccountProgression=preference("AccountProgression",false)==true,
-    ProgressionFloor=math.floor(numericPreference("ProgressionFloor",1,1,12)),
-    ProgressionBossCleared=preference("ProgressionBossCleared",false)==true,
-    ProgressionBossClearedName=preference("ProgressionBossClearedName",nil),
-    ProgressionComplete=preference("ProgressionComplete",false)==true,
-    ProgressionRestore=preference("ProgressionRestore",nil),
-    AutomationRunId=preference("AutomationRunId",nil),AutomationResumeFeatures=preference("AutomationResumeFeatures",nil),
-}
-if type(restore.Skill)~="string" then restore.Skill="Piercing Dash" end
+local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3,TransparentMap=true}
+local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
+    CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
+    AutoExplore=true,AutoDodge=true,AtheonDodge=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
+    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false}
+for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
+local textDefaults={TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
+for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
+for _,key in ipairs({"TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
+    local value=preference(key,{})
+    restore[key]=type(value)=="table"and value or {}
+end
+for _,key in ipairs({"SelectedPlayerId","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures"})do
+    restore[key]=preference(key,nil)
+end
+restore.Skill=preference("SelectedSkill","Piercing Dash")
+if type(restore.Skill)~="string"then restore.Skill="Piercing Dash"end
+restore.SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId))or game.PlaceId
+restore.ProgressionFloor=math.floor(numericPreference("ProgressionFloor",1,1,12))
 if type(restore.ProgressionRestore)~="table"then restore.ProgressionRestore=nil end
 if restore.ProgressionFloor~=12 then restore.ProgressionComplete=false end
 if previousRuntime and previousRuntime.Destroy then
-    local retired,reason=pcall(previousRuntime.Destroy,true)
-    if not retired then
-        previousRuntime.Running=false
-        env.SB2LastReplacementError=tostring(reason)
-        warn("[SB2] Previous runtime cleanup failed; continuing replacement: "..tostring(reason))
-    end
+    local ok,reason=pcall(previousRuntime.Destroy,true)
+    if not ok then previousRuntime.Running=false;env.SB2LastReplacementError=tostring(reason);warn("[SB2] Continuing after cleanup failure: "..tostring(reason))end
 end
 previousRuntime=nil
 runtimeOwner.Retire()
-if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
-    task.wait(math.min(3, env.SB2FarmRecoveryUntil - os.clock()))
-end
-
-do
-    local moveBelow=(function()
+local recoveryUntil=env.SB2FarmRecoveryUntil
+if type(recoveryUntil)=="number"and recoveryUntil>os.clock()then task.wait(math.min(3,recoveryUntil-os.clock()))end
+local placeBelow=(function()
 -- BEGIN BUNDLED STARTUP BELOW
--- One startup placement, then release movement entirely to the normal controllers.
+-- The startup transaction owns exactly one checked ground-relative placement.
 return function(ctx)
-    local deadline=ctx.Now()+8
-    repeat
-        if not ctx.Alive()then return false,"Startup cancelled"end
-        local root=ctx.Root()
-        if root then
-            local point=ctx.Position(root)
-            local floor=ctx.Surface(root,point)
-            assert(type(floor)=="number"and floor==floor and math.abs(floor)<1e8,"Startup ground height is unavailable")
-            if not ctx.Alive()or ctx.Root()~=root then return false,"Character changed during startup"end
-            ctx.Move(root,point.X,floor-20,point.Z)
+    local expires=ctx.Now()+8
+    while ctx.Alive()do
+        local characterRoot=ctx.Root()
+        if characterRoot then
+            local at=ctx.Position(characterRoot)
+            local ground=ctx.Surface(characterRoot,at)
+            assert(type(ground)=="number"and ground==ground and math.abs(ground)<1e8,"Startup ground height is unavailable")
+            if not ctx.Alive()or ctx.Root()~=characterRoot then return false,"Character changed during startup"end
+            ctx.Move(characterRoot,at.X,ground-20,at.Z)
             return true
         end
-        if ctx.Now()>=deadline then return false,"Waiting for a living character timed out"end
+        if ctx.Now()>=expires then return false,"Waiting for a living character timed out"end
         ctx.Sleep(.05)
-    until false
+    end
+    return false,"Startup cancelled"
 end
 
 -- END BUNDLED STARTUP BELOW
-    end)()
-    local ok,moved,reason=pcall(moveBelow,{Now=os.clock,Sleep=task.wait,
-        Alive=function()return env.SB2LoadToken==loadToken and runtimeOwner.Alive()end,
-        Root=function()
-            local character=player.Character
-            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            return humanoid and humanoid.Health>0 and character:FindFirstChild("HumanoidRootPart")or nil
-        end,
-        Position=function(root)return root.Position end,
-        Surface=function(root,point)
-            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
-            local excluded={root.Parent}
-            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","MobSpawnEffects"})do
-                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
-            end
-            params.FilterDescendantsInstances=excluded
-            local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
-            if hit then return hit.Position.Y end
-            local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
-            return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
-        end,
-        Move=function(root,x,y,z)
-            root.CFrame=CFrame.new(x,y,z)*root.CFrame.Rotation
-            root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
-        end})
-    env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
-end
-if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive()then return end
-
-do
-    local profile=ReplicatedStorage:WaitForChild("Profiles"):WaitForChild(player.Name)
-    profile:WaitForChild("Inventory")
-    profile:WaitForChild("Locations")
-end
-local services = ReplicatedStorage:WaitForChild("CardinalClient"):WaitForChild("MainModule")
--- Teleport queues can run before Profiles exist. The game's main module waits
--- for its profile handshake and finishes service initialization before returning.
+end)()
+local ok,moved,reason=pcall(placeBelow,{Now=os.clock,Sleep=task.wait,Alive=startupCurrent,
+    Root=function()
+        local character=player.Character
+        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health>0 then return character:FindFirstChild("HumanoidRootPart")end
+    end,
+    Position=function(root)return root.Position end,
+    Surface=function(root,point)
+        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local excluded={root.Parent}
+        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","MobSpawnEffects"})do
+            local object=workspace:FindFirstChild(name);if object then excluded[#excluded+1]=object end
+        end
+        params.FilterDescendantsInstances=excluded
+        local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
+        if hit then return hit.Position.Y end
+        local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
+        return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
+    end,
+    Move=function(root,x,y,z)
+        root.CFrame=CFrame.new(x,y,z)*root.CFrame.Rotation
+        root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+    end})
+env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or(not moved and reason or nil)}
+if not startupCurrent()then return end
+local profile=ReplicatedStorage:WaitForChild("Profiles"):WaitForChild(player.Name)
+for _,name in ipairs({"Inventory","Locations"})do profile:WaitForChild(name)end
+local services=ReplicatedStorage:WaitForChild("CardinalClient"):WaitForChild("MainModule")
 require(services)
-services = services:WaitForChild("Services")
-if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
-local Combat = require(services.Combat)
-local Actions = require(services.Actions)
-local Skills = require(services.Skills)
-local GameUI = require(services.UI)
-local CanRunSkill = require(ReplicatedStorage.Shared.Util.CanRunSkill)
-if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive() then runtimeOwner.Release();return end
-local state = {
-    CreditCheck=restore.CreditCheck,CreditWhitelistText=restore.CreditWhitelistText,
-    BossOnly=restore.BossOnly,Build=BUILD, Version=VERSION, Theme=preference("Theme","Dark"), UserId=player.UserId, StopEverything=false,AutoHideUI=preference("AutoHideUI",false)==true,
-    Enabled = false, Radius = restore.Radius, SkillRange=restore.SkillRange, Running = true, Nearby = 0,
-    HitsSent = 0, LastTarget = "None", LastError = nil,
-    AttackInterval = 0.30, ThreatCycle = 0.12, MaxRequestsPerSecond = 48, EffectiveInterval = 0.30,
-    Threat = math.clamp(math.floor(restore.Threat), 1, 3), BurstsSent = 0, LastBurstSize = 0,
-    AttackBurstInterval = 0.30, AttackBurstActive = false, AttackBurstHistory = {},
-    BurstProgress = 0, LastPulseAt = nil, MinimumPulseGap = nil,
-    AutoSwing = restore.AutoSwing, SwordSwinging = false, SwingStarts = 0,
-    LagPauseUntil = 0, PingMs = nil, Backoff = 1,
-    AutoTrade=restore.AutoTrade,TradeMode=restore.TradeMode,TradeItems=type(restore.TradeItems)=="table"and restore.TradeItems or {},
-    AutoCraft=type(restore.AutoCraft)=="table"and restore.AutoCraft or {},
-    AutoDismantle=type(restore.AutoDismantle)=="table"and restore.AutoDismantle or {},
-    AutoEquipBestSword=restore.AutoEquipBestSword,
-    AutoFarm = false, FarmRange = math.huge, Recovering = false,
-    TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
-    FarmAbove=false,OffsetMode="Below",
-    OffsetProfiles = {}, UnsafeOffsetProfiles = {}, ProtectionStatus = "Retreat on health loss",
-    ProtectionRetreats = 0, TeleportInterval = 0.18, TeleportsSent = 0,
-    AverageFrameTime = 1 / 60, AverageLoopCost = 0, TargetScans = 0,
-    Moving = false, FollowTarget = nil, MovementStatus = "Auto farm is off",
-    ConfigPath = configPath, ConfigLoadError = configLoadError, ConfigLoadedFromDisk = configData.Version == 1,
-    SavedScriptPath = storageBootstrap.SourcePath or (configFolder .. "/kill-aura.luau"),StorageBootstrap=storageBootstrap,
-    MiscSkillEnabled=false, SelectedMiscSkill=type(restore.SelectedMiscSkill)=="string" and restore.SelectedMiscSkill or "Cursed Enhancement",
-    MiscSkillRequests=0, MiscSkillCasts=0, MiscCastRunning=false, MiscReserveStamina=false,
-    SkillPerWeapon=preference("SkillPerWeapon",{}), SkillPerWeaponVersion=preference("SkillPerWeaponVersion",0), SkillWeaponVersion=0,
-    SkillAura = false, SelectedSkill = restore.Skill, SkillCasts = 0, SkillStatus = "Skill aura is off",
-    AttackingTarget = nil, HealthUpdates = 0,
-    HideSkillAnimation = true, SuppressSkillMotion = true, HiddenSkillAnimations = 0,
-    SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
-    AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
-    AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, TransparentMap = restore.TransparentMap, Dodging = false,
-    PerformanceBoosters=restore.PerformanceBoosters,
-    AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
-    SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
-    MultiSpot=restore.MultiSpot,MultiSpotSelected=restore.MultiSpotSelected,MultiSpotOrder=restore.MultiSpotOrder,MultiSpotCursor=restore.MultiSpotCursor,MultiSpotPending=restore.MultiSpotPending,
-    AutomationRunId=restore.AutomationRunId,AutomationResumeFeatures=restore.AutomationResumeFeatures,
-    AccountProgression=restore.AccountProgression,ProgressionFloor=restore.ProgressionFloor,
-    ProgressionBossCleared=restore.ProgressionBossCleared,ProgressionComplete=restore.ProgressionComplete,
+services=services:WaitForChild("Services")
+if not startupCurrent()then runtimeOwner.Release();return end
+local Combat=require(services.Combat)
+local Actions=require(services.Actions)
+local Skills=require(services.Skills)
+local GameUI=require(services.UI)
+local CanRunSkill=require(ReplicatedStorage.Shared.Util.CanRunSkill)
+if not startupCurrent()then runtimeOwner.Release();return end
+local state={
+    Build=BUILD,Version=VERSION,UserId=player.UserId,Running=true,StopEverything=false,
+    Enabled=false,AutoFarm=false,SkillAura=false,MiscSkillEnabled=false,
+    Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3,OffsetMode="Below",FarmAbove=false,
+    AttackInterval=.3,AttackBurstInterval=.3,SkillBurstInterval=.3,EffectiveInterval=.3,
+    ThreatCycle=.12,MaxRequestsPerSecond=48,Backoff=1,TeleportInterval=.18,TeleportOffset=-6,
+    AutoOffset=true,HideSkillAnimation=true,SuppressSkillMotion=true,
+    OffsetStatus="Waiting for a target",MovementStatus="Auto farm is off",LastTarget="None",
+    SkillStatus="Skill aura is off",ProtectionStatus="Retreat on health loss",ProgressionPhase="Loading",
+    AverageFrameTime=1/60,AverageLoopCost=0,ConfigPath=configPath,ConfigLoadError=configLoadError,
+    ConfigLoadedFromDisk=configData.Version==1,StorageBootstrap=storageBootstrap,
+    SavedScriptPath=storageBootstrap.SourcePath or(configFolder.."/kill-aura.luau"),
+    Theme=preference("Theme","Dark"),AutoHideUI=preference("AutoHideUI",false)==true,
+    SelectedMiscSkill=type(restore.SelectedMiscSkill)=="string"and restore.SelectedMiscSkill or "Cursed Enhancement",
+    SelectedSkill=restore.Skill,SkillPerWeapon=preference("SkillPerWeapon",{}),SkillPerWeaponVersion=preference("SkillPerWeaponVersion",0),
     ProgressionBossClearedName=type(restore.ProgressionBossClearedName)=="string"and restore.ProgressionBossClearedName or nil,
-    ProgressionRestore=restore.ProgressionRestore,ProgressionPhase="Loading",
-    AutoSaveStatus = filePersistence and "Auto-save · ready" or "Auto-save · file access unavailable",
+    SharedSafeFloorId=restore.SafeFloorId,
+    AutoSaveStatus=filePersistence and "Auto-save · ready"or "Auto-save · file access unavailable",
 }
-do
-    local profiles = preference("OffsetProfiles", {})
-    local count = 0
-    if type(profiles) == "table" then
-        for key, value in pairs(profiles) do
-            if count >= 32 then break end
-            if type(key) == "string" and #key < 200 and string.find(key,":offset-v6:",1,true) and type(value) == "number" and value < 0 and value > -math.huge then
-                state.OffsetProfiles[key] = value
-                count += 1
-            end
-        end
-    end
-    local unsafe = preference("UnsafeOffsetProfiles", {})
-    count = 0
-    if type(unsafe) == "table" then
-        for key, value in pairs(unsafe) do
-            if count >= 32 then break end
-            if type(key) == "string" and #key < 200 and string.find(key,":offset-v6:",1,true) and type(value) == "number" and value > 0 and value < math.huge then
-                state.UnsafeOffsetProfiles[key] = value
-                count += 1
-            end
-        end
-    end
+for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
+    "AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
+    "SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
+    "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
+    state[key]=restore[key]
 end
+for _,key in ipairs({"TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters"})do
+    state[key]=type(restore[key])=="table"and restore[key]or {}
+end
+for _,key in ipairs({"HitsSent","BurstsSent","LastBurstSize","BurstProgress","SwingStarts","LagPauseUntil","ProtectionRetreats",
+    "TeleportsSent","TargetScans","MiscSkillRequests","MiscSkillCasts","SkillWeaponVersion","SkillCasts","HealthUpdates",
+    "HiddenSkillAnimations","HiddenSkillEffects","SkillHitRequests","LastSkillBurstSize","ExploreHops"})do state[key]=0 end
+for _,key in ipairs({"AttackBurstActive","SwordSwinging","Recovering","Moving","MiscCastRunning","MiscReserveStamina","Exploring","Dodging"})do state[key]=false end
+state.AttackBurstHistory={};state.SkillBurstHistory={}
+local function savedOffsets(key,positive)
+    local result={};local total=0
+    local input=preference(key,{})
+    if type(input)~="table"then return result end
+    for signature,value in pairs(input)do
+        local valid=type(signature)=="string"and #signature<200 and signature:find(":offset-v6:",1,true)
+            and type(value)=="number"and value==value and math.abs(value)<math.huge
+        if valid and ((positive and value>0)or(not positive and value<0))then
+            result[signature]=value;total+=1
+            if total==32 then break end
+        end
+    end
+    return result
+end
+state.OffsetProfiles=savedOffsets("OffsetProfiles",false)
+state.UnsafeOffsetProfiles=savedOffsets("UnsafeOffsetProfiles",true)
 function state.FarmClock()
     local ok,value=pcall(workspace.GetServerTimeNow,workspace)
-    return ok and value or os.clock()
+    if ok and type(value)=="number"then return value end
+    return os.clock()
 end
 do
-    local make=(function()
+    local factory=(function()
 -- BEGIN BUNDLED FARM COORDINATION
--- Lua-only coordination: shared server-time beats and common destination geometry.
--- This does not exchange state between clients or promise a network barrier.
+-- Server-clock beats and roster-indexed formation slots require no external service.
 return function(ctx)
     local api={}
-    local last={}
-    local step=.25
+    local beats={}
+    local formation={Due=0,Index=1,Count=1}
+    local holds=setmetatable({}, {__mode="k"})
     function api.Ready(channel)
-        local epoch=math.floor(ctx.Now()/step)
-        local previous=last[channel]
-        if previous==nil then last[channel]=epoch;return false end
-        if epoch>previous then last[channel]=epoch;return true end
-        return false
+        local beat=math.floor(ctx.Now()*4)
+        local seen=beats[channel]
+        if seen==nil then beats[channel]=beat;return false end
+        if beat<=seen then return false end
+        beats[channel]=beat;return true
     end
-    function api.Position(point)
-        local function snap(value)return math.floor(value*2+.5)/2 end
-        return ctx.Vector(snap(point.X),snap(point.Y),snap(point.Z))
+    local function quantize(value)return math.floor(value*2+.5)/2 end
+    function api.Position(point)return ctx.Vector(quantize(point.X),quantize(point.Y),quantize(point.Z))end
+    local function refreshRoster(now)
+        if formation.Roster and now<formation.Due then return end
+        local roster=ctx.Members()
+        table.sort(roster,function(a,b)return a.UserId<b.UserId end)
+        formation.Roster=roster;formation.Due=now+1;formation.Count=math.max(1,#roster);formation.Index=1
+        for index,person in ipairs(roster)do if person.UserId==ctx.UserId then formation.Index=index;break end end
     end
-    local roster,rosterAt,slot,count=nil,0,1,1
-    local held=setmetatable({}, {__mode="k"})
-    function api.Spread(point,mob,center,reach)
+    function api.Spread(point,target,center,reach)
         if not ctx.Members then return point end
-        local now=ctx.Now()
-        if not roster or now>=rosterAt then
-            rosterAt=now+1
-            roster=ctx.Members()
-            table.sort(roster,function(a,b)return a.UserId<b.UserId end)
-            slot,count=1,math.max(1,#roster)
-            for i,person in ipairs(roster)do if person.UserId==ctx.UserId then slot=i;break end end
-        end
-        local radius=count>1 and math.min(12,4/(2*math.sin(math.pi/count)))or 0
+        refreshRoster(ctx.Now())
+        local count,index=formation.Count,formation.Index
+        local sine=count>1 and math.sin(math.pi/count)or 0
+        local radius=count>1 and math.min(12,2/sine)or 0
         if center and reach then
-            -- Preserve vertical body clearance. Reserve space for position snapping.
             local vertical=math.abs(point.Y-center.Y)+.5
-            radius=math.min(radius,math.sqrt(math.max(0,(math.max(0,reach-1))^2-vertical^2))-.5)
-            radius=math.max(0,radius)
+            local usable=math.max(0,reach-1)
+            radius=math.max(0,math.min(radius,math.sqrt(math.max(0,usable*usable-vertical*vertical))-.5))
         end
-        local angle=(slot-1)*2*math.pi/count
-        local result=api.Position(ctx.Vector(point.X+math.cos(angle)*radius,point.Y,point.Z+math.sin(angle)*radius))
-        local previous=held[mob]
-        if previous and previous.Slot==slot and previous.Count==count then
-            local p=previous.Point
-            local distance=(result.X-p.X)^2+(result.Y-p.Y)^2+(result.Z-p.Z)^2
-            if distance<.75^2 then return p end
+        local angle=(index-1)*2*math.pi/count
+        local proposed=api.Position(ctx.Vector(point.X+math.cos(angle)*radius,point.Y,point.Z+math.sin(angle)*radius))
+        local old=holds[target]
+        if old and old.Index==index and old.Count==count then
+            local delta=(proposed.X-old.Point.X)^2+(proposed.Y-old.Point.Y)^2+(proposed.Z-old.Point.Z)^2
+            if delta<.5625 then return old.Point end
         end
-        held[mob]={Point=result,Slot=slot,Count=count}
-        api.Slot,api.Count,api.Spacing=slot,count,count>1 and 2*radius*math.sin(math.pi/count)or 0
-        return result
+        holds[target]={Point=proposed,Index=index,Count=count}
+        api.Slot=index;api.Count=count;api.Spacing=2*radius*sine
+        return proposed
     end
-    function api.Deadline(killedAt,seconds)
-        return math.ceil((killedAt+seconds)*2)/2
-    end
+    function api.Deadline(killedAt,seconds)return math.ceil((killedAt+seconds)*2)/2 end
     return api
 end
 
 -- END BUNDLED FARM COORDINATION
     end)()
-    state.FarmCoordination=make({Now=state.FarmClock,Vector=Vector3.new,UserId=player.UserId,
-        Members=function()return Players:GetPlayers()end})
+    state.FarmCoordination=factory({Now=state.FarmClock,Vector=Vector3.new,UserId=player.UserId,Members=function()return Players:GetPlayers()end})
 end
-env.SB2KillAura = state
-local connections = {}
-local lastHit = setmetatable({}, { __mode = "k" })
-local consecutiveErrors = 0
-local nextTargetRefresh = 0
-local nextPingCheck = 0
-local candidates = {}
+env.SB2KillAura=state
+local connections={}
+local lastHit=setmetatable({}, {__mode="k"})
+local pendingDamage=setmetatable({}, {__mode="k"})
+local candidates={}
+local consecutiveErrors,nextTargetRefresh,nextPingCheck=0,0,0
+local candidatePrimary
+local configReady=false
+local requestSave=function()end
+local enemyHUD
+local combatStatus="Paused"
+local stopMovement=function()end
 local normalScheduler=(function()
 -- BEGIN BUNDLED ATTACK SCHEDULER
--- Supplied-source rule: one damage call per target, then a 0.3s cooldown.
--- Timestamps replace a delayed coroutine per hit; skills share these timers.
+-- Normal-hit admission combines a global token bucket with target-local deadlines.
 return function(state)
     local api={}
-    local nextHit=setmetatable({}, {__mode="k"})
-    local tokens,refill=4,os.clock()
-    local nextReserveHit=0
-    local ctx
-    function api.Bind(value)ctx=value end
-    function api.Ready(mob,now)return now>=(nextHit[mob] or 0)end
-    function api.Next(mob)return nextHit[mob] or 0 end
-    function api.Mark(mob,now,gap)nextHit[mob]=now+math.max(.3,gap or 0)end
+    local deadlines=setmetatable({}, {__mode="k"})
+    local context,closed
+    local bucket={Balance=4,At=os.clock(),ReserveAt=0}
+    local function blocked()
+        return closed or state.StopEverything or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy
+    end
+    function api.Bind(adapter)context=adapter end
+    function api.Next(target)return deadlines[target]or 0 end
+    function api.Ready(target,now)return now>=api.Next(target)end
+    function api.Mark(target,now,delay)deadlines[target]=now+math.max(.3,delay or 0)end
     function api.Cancel(reason)
         state.AttackBurstActive=false
         state.ThreatReason=reason or "Paused"
     end
-    function api.Destroy()api.Cancel("Script closed");table.clear(nextHit)end
-    function api.Update(now,candidates,root,folder)
+    function api.Destroy()
+        closed=true;api.Cancel("Script closed");table.clear(deadlines);context=nil
+    end
+    local function admissible(target,now,root,folder)
+        if not api.Ready(target,now)or target.Parent~=folder then return nil end
+        if state.SkillRegistrationTarget and not state.Enabled and target~=state.SkillRegistrationTarget then return nil end
+        local data=context.GetData(target)
+        if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)then return nil end
+        if data.Entity:FindFirstChild("Immortal")then return nil end
+        local delta=context.Delta and context.Delta(data,root)or data.Root.Position-root.Position
+        local radius=context.Radius(target)
+        if delta:Dot(delta)>radius*radius then return nil end
+        return data
+    end
+    function api.Update(now,targets,root,folder)
         state.AttackBurstActive=false
-        if state.StopEverything or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy then return end
-        local reserve=state.ReserveGunStamina==true
-        if state.SkillWantsWindow and not reserve then return "Skill aura owns damage" end
-        if reserve and now<nextReserveHit then return end
-        local batch=reserve and 1 or math.clamp(state.FrameRequestCap or 4,1,4)
-        tokens=math.min(batch,tokens+math.max(0,now-refill)*(state.MaxRequestsPerSecond or 48))
-        refill=now
-        local gap=math.max(.3,state.AttackInterval or 0)
-        state.EffectiveInterval=gap
-        state.CurrentThreat=1;state.ThreatReason="Source per-target cooldown"
-        local sent=0
-        for _,mob in ipairs(candidates)do
-            if sent>=batch or tokens<1 then break end
-            if state.SkillRegistrationTarget and not state.Enabled and mob~=state.SkillRegistrationTarget then continue end
-            if not api.Ready(mob,now)then continue end
-            local data=mob.Parent==folder and ctx.GetData(mob)
-            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
-                or data.Entity:FindFirstChild("Immortal")then continue end
-            local delta=ctx.Delta and ctx.Delta(data,root)or data.Root.Position-root.Position
-            local range=ctx.Radius(mob)
-            if delta:Dot(delta)>range*range then continue end
-            if ctx.Damage(mob)==false then continue end
-            api.Mark(mob,now,gap*math.max(1,data.AttackBackoff or 1))
-            ctx.Sent(mob,data,now)
-            sent+=1;tokens-=1
-            if reserve then nextReserveHit=now+.5 end
+        if blocked()or not context then return end
+        local reserving=state.ReserveGunStamina==true
+        if state.SkillWantsWindow and not reserving then return "Skill aura owns damage"end
+        if reserving and now<bucket.ReserveAt then return end
+        local limit=reserving and 1 or math.clamp(state.FrameRequestCap or 4,1,4)
+        bucket.Balance=math.min(limit,bucket.Balance+math.max(0,now-bucket.At)*(state.MaxRequestsPerSecond or 48))
+        bucket.At=now
+        local interval=math.max(.3,state.AttackInterval or 0)
+        state.EffectiveInterval=interval;state.CurrentThreat=1;state.ThreatReason="Source per-target cooldown"
+        local accepted=0
+        for _,target in ipairs(targets)do
+            if accepted==limit or bucket.Balance<1 then break end
+            local data=admissible(target,now,root,folder)
+            if data and context.Damage(target)~=false then
+                api.Mark(target,now,interval*math.max(1,data.AttackBackoff or 1))
+                context.Sent(target,data,now)
+                accepted+=1;bucket.Balance-=1
+                if reserving then bucket.ReserveAt=now+.5 end
+            end
         end
-        if sent>0 then
-            state.LastBurstSize=1
-            state.BurstsSent=(state.BurstsSent or 0)+sent
-            ctx.Visual()
+        if accepted>0 then
+            state.LastBurstSize=1;state.BurstsSent=(state.BurstsSent or 0)+accepted;context.Visual()
         end
-        return #candidates>0 and string.format("Active · %d targets · %d requests",#candidates,state.HitsSent or 0)or "Active · waiting for mobs"
+        if #targets==0 then return "Active · waiting for mobs"end
+        return string.format("Active · %d targets · %d requests",#targets,state.HitsSent or 0)
     end
     return api
 end
 
 -- END BUNDLED ATTACK SCHEDULER
 end)()(state)
-local function finishAttackBurst(reason) normalScheduler.Cancel(reason) end
+local function finishAttackBurst(reason)return normalScheduler.Cancel(reason)end
 local createSkillBurst=(function()
 -- BEGIN BUNDLED SKILL BURST
+-- A cast owns a bounded observation ledger and one paced sender.
 return function(ctx)
     local api={Started=false}
     local state,record=ctx.State,ctx.Record
-    local observers={}
+    local entries,listeners={},{}
     local cancelled=false
     local rounds=math.clamp(ctx.Rounds or 3,1,ctx.RepeatWindow and 12 or 3)
-    local seen={}
-    record.Desired=ctx.SourceWindow and "Active window" or rounds
-    record.Targets={}
-    record.TotalRequests=0
-    local function captureTargets(first)
-        local current={}
-        local included={}
-        for _,mob in ipairs(ctx.Targets(first)) do
-            local data=ctx.Valid(mob)
-            local item=seen[mob]
-            if data and not item and (ctx.SourceWindow or #record.Targets<(ctx.RefreshTargets and 16 or 8)) then
-                item={Target=mob,TargetName=mob.Name,Health=data.Health,Before=data.Health.Value,Requested=0,HealthDrops=0}
-                seen[mob]=item
-                item.Distance=ctx.Distance and ctx.Distance(mob,data) or nil
-                item.RangeDistance=ctx.RangeDistance and ctx.RangeDistance(mob,data) or item.Distance
-                item.Distances={}
-                if ctx.Contribution then item.BeforeContribution,item.Counter=ctx.Contribution(data.Health) end
-                local previous=data.Health.Value
-                observers[#observers+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(function()
-                    local hp=data.Health.Value
-                    if hp<previous then
-                        local drop=previous-hp
-                        item.MinimumHealthDrop=item.MinimumHealthDrop and math.min(item.MinimumHealthDrop,drop) or drop
-                        item.HealthDrops+=1; record.HealthDrops+=1
-                    end
-                    previous=hp
-                end)
-                record.Targets[#record.Targets+1]=item
-                record.Before=(record.Before or 0)+item.Before
+    local perTarget=setmetatable({}, {__mode="k"})
+    record.Desired=ctx.SourceWindow and "Active window"or rounds
+    record.Targets={};record.TotalRequests=0
+    local function observe(target,data)
+        local entry={Target=target,TargetName=target.Name,Health=data.Health,Before=data.Health.Value,Requested=0,HealthDrops=0,Distances={}}
+        entry.Distance=ctx.Distance and ctx.Distance(target,data)
+        entry.RangeDistance=ctx.RangeDistance and ctx.RangeDistance(target,data)or entry.Distance
+        if ctx.Contribution then entry.BeforeContribution,entry.Counter=ctx.Contribution(data.Health)end
+        local last=data.Health.Value
+        listeners[#listeners+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(function()
+            local hp=data.Health.Value
+            if hp<last then
+                local delta=last-hp
+                entry.MinimumHealthDrop=entry.MinimumHealthDrop and math.min(entry.MinimumHealthDrop,delta)or delta
+                entry.HealthDrops+=1;record.HealthDrops=(record.HealthDrops or 0)+1
             end
-            if data and item and not included[mob] then
-                included[mob]=true
-                current[#current+1]=item
-                if not ctx.SourceWindow and #current>=8 then break end
+            last=hp
+        end)
+        entries[target]=entry;record.Targets[#record.Targets+1]=entry;record.Before=(record.Before or 0)+entry.Before
+        return entry
+    end
+    local function targets(first)
+        local result,visited={},{}
+        for _,target in ipairs(ctx.Targets(first))do
+            local data=ctx.Valid(target)
+            local entry=entries[target]
+            local capacity=ctx.SourceWindow or #record.Targets<(ctx.RefreshTargets and 16 or 8)
+            if data and not entry and capacity then entry=observe(target,data)end
+            if data and entry and not visited[target]then
+                visited[target]=true;result[#result+1]=entry
+                if not ctx.SourceWindow and #result==8 then break end
             end
         end
         record.TargetCount=#record.Targets
-        return current
+        return result
     end
-    local function runSourceWindow(extra)
-        local nextScan=0
-        local targets={}
-        local tokens,refill=math.clamp(state.FrameRequestCap or 4,1,4),os.clock()
-        local nextHit=setmetatable({}, {__mode="k"})
+    local function permitted()
+        return not cancelled and not state.StopEverything and ctx.CanRun()and (not ctx.ExpiresAt or os.clock()<ctx.ExpiresAt)
+    end
+    local function reserve(entry,data,before,now)
+        if not ctx.Budget then return end
+        local estimate=ctx.EstimateDamage and ctx.EstimateDamage(entry.Target,data)or 0
+        ctx.Budget.Reserve(entry,before,estimate,now,math.max(.35,(state.PingMs or 100)/1000+.15))
+    end
+    local function recordSend(entry,now)
+        if record.LastTarget and record.LastTarget~=entry.Target then record.Retargets=(record.Retargets or 0)+1 end
+        record.LastTarget=entry.Target;record.LastRequestAt=now
+        entry.Requested+=1;record.TotalRequests+=1;state.SkillHitRequests=(state.SkillHitRequests or 0)+1
+    end
+    local function remaining(entry,data,now)
+        return not ctx.Budget or ctx.Budget.Remaining(entry,data.Health.Value,now)>0
+    end
+    local function window(extra)
+        local active,nextRefresh={},0
+        local credits=math.clamp(state.FrameRequestCap or 4,1,4)
+        local refill=os.clock()
         record.Status="Source skill window"
-        while not cancelled and not state.StopEverything and ctx.CanRun() and os.clock()<ctx.ExpiresAt do
+        while permitted()do
             local now=os.clock()
-            if now>=nextScan then targets=captureTargets();nextScan=now+.08 end
-            local batch=math.clamp(state.FrameRequestCap or 4,1,4)
-            tokens=math.min(batch,tokens+math.max(0,now-refill)*(state.MaxRequestsPerSecond or 48));refill=now
+            if now>=nextRefresh then active=targets();nextRefresh=now+.08 end
+            local cap=math.clamp(state.FrameRequestCap or 4,1,4)
+            credits=math.min(cap,credits+math.max(0,now-refill)*(state.MaxRequestsPerSecond or 48));refill=now
             local sent=0
-            for _,item in ipairs(targets)do
-                if sent>=batch or tokens<1 then break end
-                if cancelled or state.StopEverything or not ctx.CanRun() or os.clock()>=ctx.ExpiresAt then break end
+            for _,entry in ipairs(active)do
+                if credits<1 or sent==cap or not permitted()then break end
                 now=os.clock()
-                if ctx.Pacing and not ctx.Pacing.Ready(item.Target,now)or now<(nextHit[item.Target]or 0)then continue end
-                local data=ctx.Valid(item.Target)
+                local target=entry.Target
+                if now<(perTarget[target]or 0)or (ctx.Pacing and not ctx.Pacing.Ready(target,now))then continue end
+                local data=ctx.Valid(target)
                 if not data then continue end
-                if ctx.Budget and ctx.Budget.Remaining(item,data.Health.Value,now)<=0 then
-                    record.SkippedOverkill=(record.SkippedOverkill or 0)+1;continue
-                end
-                local hp=data.Health.Value
-                if ctx.Send(item.Target,data,extra)==false then continue end
-                local gap=math.max(.3,ctx.Spacing or 0)
-                if ctx.Pacing then ctx.Pacing.Mark(item.Target,now,gap)end
-                nextHit[item.Target]=now+gap
-                if ctx.Budget then
-                    local estimate=ctx.EstimateDamage and ctx.EstimateDamage(item.Target,data)or 0
-                    ctx.Budget.Reserve(item,hp,estimate,now,math.max(.35,(state.PingMs or 100)/1000+.15))
-                end
-                if record.LastTarget and record.LastTarget~=item.Target then record.Retargets=(record.Retargets or 0)+1 end
-                record.LastTarget=item.Target;record.LastRequestAt=now
-                item.Requested+=1;record.TotalRequests+=1
-                state.SkillHitRequests=(state.SkillHitRequests or 0)+1
+                if not remaining(entry,data,now)then record.SkippedOverkill=(record.SkippedOverkill or 0)+1;continue end
+                local before=data.Health.Value
+                if ctx.Send(target,data,extra)==false then continue end
+                local delay=math.max(.3,ctx.Spacing or 0)
+                perTarget[target]=now+delay
+                if ctx.Pacing then ctx.Pacing.Mark(target,now,delay)end
+                reserve(entry,data,before,now);recordSend(entry,now)
                 record.Requested=record.TotalRequests;state.LastSkillBurstSize=record.TotalRequests
-                sent+=1;tokens-=1
+                sent+=1;credits-=1
             end
             task.wait(.03)
         end
-        record.Status=cancelled and record.Status or "Source skill window completed"
+        if not cancelled then record.Status="Source skill window completed"end
+    end
+    local function sequence(first,extra)
+        for round=1,rounds do
+            if round>1 then
+                local waitFor=(record.LastRequestAt or os.clock())+ctx.Spacing-os.clock()
+                if waitFor>0 then task.wait(waitFor)end
+            end
+            if ctx.ExpiresAt and os.clock()>=ctx.ExpiresAt then record.Status="Skill firing window completed";break end
+            if not permitted()then record.Status="Paused for movement, dodge or network";break end
+            local active=(ctx.RefreshTargets or ctx.FocusBudget)and targets(first)or record.Targets
+            local sent=0
+            for _,entry in ipairs(active)do
+                local data=ctx.Valid(entry.Target)
+                if data and ctx.FocusBudget and not remaining(entry,data,os.clock())then record.SkippedOverkill=(record.SkippedOverkill or 0)+1;data=nil end
+                if not data then continue end
+                if sent>0 and sent%math.clamp(state.FrameRequestCap or 4,1,4)==0 then task.wait(.015)end
+                if not permitted()then break end
+                if ctx.Distance then entry.Distances[#entry.Distances+1]=ctx.Distance(entry.Target,data)end
+                local before=data.Health.Value
+                ctx.Send(entry.Target,data,extra)
+                if ctx.FocusBudget then reserve(entry,data,before,os.clock())end
+                recordSend(entry,os.clock());sent+=1
+                if ctx.FocusBudget then break end
+            end
+            if sent==0 and not ctx.RefreshTargets then record.Status="Targets defeated or out of skill range";break end
+            record.Requested=round;state.LastSkillBurstSize=round
+        end
+        if record.Requested==rounds then record.Status=ctx.RepeatWindow and "Rifle firing sequence completed"or rounds==1 and "Skill shot sent"or "Three skill rounds sent"end
     end
     function api.Start(first,extra)
-        if cancelled or state.StopEverything or api.Started or (not ctx.RefreshTargets and not ctx.Valid(first)) then return false end
-        captureTargets(first)
+        if cancelled or api.Started or state.StopEverything or (not ctx.RefreshTargets and not ctx.Valid(first))then return false end
+        targets(first)
         if #record.Targets==0 then return false end
         api.Started=true
-        api.Deadline=ctx.ExpiresAt and ctx.ExpiresAt+.15 or os.clock()+3*(ctx.Spacing+0.4)+0.5
+        api.Deadline=ctx.ExpiresAt and ctx.ExpiresAt+.15 or os.clock()+3*(ctx.Spacing+.4)+.5
         record.Status="Sending area skill burst"
         task.spawn(function()
-            local ok,message=pcall(function()
-                local delay=math.max(0,(ctx.FirstHitAt or 0)-os.clock())
-                if delay>0 then task.wait(delay) end
-                if ctx.SourceWindow then runSourceWindow(extra);return end
-                for round=1,rounds do
-                    if round>1 then
-                        local due=(record.LastRequestAt or os.clock())+ctx.Spacing
-                        local remaining=due-os.clock()
-                        if remaining>0 then task.wait(remaining) end
-                    end
-                    if ctx.ExpiresAt and os.clock()>=ctx.ExpiresAt then record.Status="Skill firing window completed"; break end
-                    if cancelled or state.StopEverything or not ctx.CanRun() then record.Status="Paused for movement, dodge or network"; break end
-                    local targets=(ctx.RefreshTargets or ctx.FocusBudget) and captureTargets(first) or record.Targets
-                    local sent=0
-                    for _,item in ipairs(targets) do
-                        local data=ctx.Valid(item.Target)
-                        if data and ctx.FocusBudget and ctx.Budget and ctx.Budget.Remaining(item,data.Health.Value,os.clock())<=0 then
-                            record.SkippedOverkill=(record.SkippedOverkill or 0)+1
-                            data=nil
-                        end
-                        if data then
-                            local batch=math.clamp(state.FrameRequestCap or 4,1,4)
-                            if sent>0 and sent%batch==0 then task.wait(0.015) end
-                            if cancelled or state.StopEverything or not ctx.CanRun() then break end
-                            if ctx.Distance then item.Distances[#item.Distances+1]=ctx.Distance(item.Target,data) end
-                            local healthBefore=data.Health.Value
-                            ctx.Send(item.Target,data,extra)
-                            if ctx.FocusBudget and ctx.Budget then
-                                local estimate=ctx.EstimateDamage and ctx.EstimateDamage(item.Target,data) or 0
-                                ctx.Budget.Reserve(item,healthBefore,estimate,os.clock(),math.max(.35,(state.PingMs or 100)/1000+.15))
-                            end
-                            if record.LastTarget and record.LastTarget~=item.Target then record.Retargets=(record.Retargets or 0)+1 end
-                            record.LastTarget=item.Target
-                            record.LastRequestAt=os.clock()
-                            item.Requested+=1
-                            record.TotalRequests+=1
-                            state.SkillHitRequests+=1
-                            sent+=1
-                            if ctx.FocusBudget then break end
-                        end
-                    end
-                    if sent==0 and not ctx.RefreshTargets then record.Status="Targets defeated or out of skill range"; break end
-                    record.Requested=round
-                    state.LastSkillBurstSize=round
-                end
-                if record.Requested==rounds then
-                    record.Status=ctx.RepeatWindow and "Rifle firing sequence completed" or rounds==1 and "Skill shot sent" or "Three skill rounds sent"
-                end
+            local ok,reason=pcall(function()
+                local windup=(ctx.FirstHitAt or 0)-os.clock()
+                if windup>0 then task.wait(windup)end
+                if ctx.SourceWindow then window(extra)else sequence(first,extra)end
             end)
-            if not ok then record.Status="Skill burst error"; state.LastSkillError=tostring(message) end
+            if not ok then record.Status="Skill burst error";state.LastSkillError=tostring(reason)end
             record.FinishedAt=record.FinishedAt or os.clock()
         end)
         return true
@@ -855,27 +799,21 @@ return function(ctx)
     function api.Finish()
         if record.ObservationFinished then return end
         record.ObservationFinished=true
-        -- Release engine listeners first: a missing counter or changed native
-        -- profile must never strand the entire completed cast in a callback.
-        for _,connection in ipairs(observers)do pcall(function()connection:Disconnect()end)end
-        table.clear(observers)
-        record.After,record.Damage=0,0
-        for _,item in ipairs(record.Targets) do
+        for _,connection in ipairs(listeners)do pcall(function()connection:Disconnect()end)end
+        table.clear(listeners)
+        record.After=0;record.Damage=0
+        for _,entry in ipairs(record.Targets)do
             local ok,reason=pcall(function()
-                item.After=item.Health.Value
-                item.HealthDamage=math.max(0,item.Before-item.After)
-                local credited=ctx.Contribution and ctx.Contribution(item.Health,item.Counter)
-                item.Damage=credited~=nil and math.max(0,credited-(item.BeforeContribution or 0))or item.HealthDamage
-                record.After+=item.After;record.Damage+=item.Damage
+                entry.After=entry.Health.Value;entry.HealthDamage=math.max(0,entry.Before-entry.After)
+                local credited=ctx.Contribution and ctx.Contribution(entry.Health,entry.Counter)
+                entry.Damage=credited~=nil and math.max(0,credited-(entry.BeforeContribution or 0))or entry.HealthDamage
+                record.After+=entry.After;record.Damage+=entry.Damage
             end)
             if not ok then record.ObservationError=tostring(reason)end
         end
     end
     function api.Cancel(reason)
-        cancelled=true
-        record.Status=reason or "Cast cancelled"
-        record.FinishedAt=record.FinishedAt or os.clock()
-        api.Finish()
+        cancelled=true;record.Status=reason or "Cast cancelled";record.FinishedAt=record.FinishedAt or os.clock();api.Finish()
     end
     return api
 end
@@ -884,58 +822,51 @@ end
 end)()
 local targetPriority=(function()
 -- BEGIN BUNDLED TARGET PRIORITY
+-- Rank metadata is merged across model/entity markers; tie ordering is deterministic.
 return function()
     local api={}
-    local cache=setmetatable({}, {__mode="k"})
-    local function clean(value) return string.lower((string.gsub(tostring(value or ""),"[^%w]",""))) end
+    local memo=setmetatable({}, {__mode="k"})
+    local function normalize(value)return tostring(value or ""):lower():gsub("[^%w]","")end
+    local function root(mob)return mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")end
+    local function marker(value)
+        local key=normalize(value)
+        if key:find("mainboss",1,true)or key:find("floorboss",1,true)then return 8 end
+        if key:find("mini",1,true)and key:find("boss",1,true)then return 4 end
+        return key:find("boss",1,true)and 2 or 0
+    end
     function api.Rank(mob)
         if not mob then return 3 end
         local entity=mob:FindFirstChild("Entity")
         local difficulty=entity and entity:FindFirstChild("Difficulty")
-        local modelRank=mob:GetAttribute("Rank")
-        local entityRank=entity and entity:GetAttribute("Rank")
-        local difficultyRank=difficulty and difficulty.Value
-        local cached=cache[mob]
-        if cached and os.clock()<cached.Until and cached.Entity==entity and cached.ModelRank==modelRank
-            and cached.EntityRank==entityRank and cached.Difficulty==difficultyRank then return cached.Rank end
-        local main,boss,mini=false,false,false
-        local function mark(value)
-            local key=clean(value)
-            if string.find(key,"mainboss",1,true)or string.find(key,"floorboss",1,true)then main=true
-            elseif string.find(key,"mini",1,true)and string.find(key,"boss",1,true)then mini=true
-            elseif string.find(key,"boss",1,true)then boss=true end
-        end
-        -- Read every native rank source: an unrelated model Rank must not
-        -- mask the boss Difficulty or rank stored on its Entity.
-        mark(modelRank);mark(entityRank);mark(difficultyRank)
-        for _,instance in ipairs(entity and {mob,entity} or {mob}) do
-            for _,tag in ipairs(instance:GetTags()) do mark(tag)end
-        end
-        local priority=3
-        if main then priority=1
-        elseif mini or clean(mob.Name)=="frogazoid" then priority=2
-        elseif boss then priority=1 end
-        cache[mob]={Rank=priority,Until=os.clock()+.15,Entity=entity,ModelRank=modelRank,EntityRank=entityRank,Difficulty=difficultyRank}
+        local modelTag=mob:GetAttribute("Rank")
+        local entityTag=entity and entity:GetAttribute("Rank")
+        local level=difficulty and difficulty.Value
+        local old=memo[mob]
+        if old and old.At>os.clock()and old.Entity==entity and old.Model==modelTag and old.EntityRank==entityTag and old.Difficulty==level then return old.Priority end
+        local flags={}
+        local function include(value)local code=marker(value);if code>0 then flags[code]=true end end
+        include(modelTag);include(entityTag);include(level)
+        for _,tag in ipairs(mob:GetTags())do include(tag)end
+        if entity then for _,tag in ipairs(entity:GetTags())do include(tag)end end
+        local priority=flags[8]and 1 or (flags[4]or normalize(mob.Name)=="frogazoid")and 2 or flags[2]and 1 or 3
+        memo[mob]={At=os.clock()+.15,Entity=entity,Model=modelTag,EntityRank=entityTag,Difficulty=level,Priority=priority}
         return priority
     end
     function api.Less(a,b,origin,preferred)
         local ar,br=api.Rank(a),api.Rank(b)
         if ar~=br then return ar<br end
-        if a==preferred then return b~=preferred end
-        if b==preferred then return false end
-        local ap=a:FindFirstChild("HumanoidRootPart")
-        local bp=b:FindFirstChild("HumanoidRootPart")
-        return (ap and (ap.Position-origin).Magnitude or math.huge)<(bp and (bp.Position-origin).Magnitude or math.huge)
+        if a==preferred or b==preferred then return a==preferred and b~=preferred end
+        local ap,bp=a:FindFirstChild("HumanoidRootPart"),b:FindFirstChild("HumanoidRootPart")
+        local ad=ap and (ap.Position-origin).Magnitude or math.huge
+        local bd=bp and (bp.Position-origin).Magnitude or math.huge
+        return ad<bd
     end
-    -- A common order for farming: never use a particular account's position
-    -- or previous target to break ties between otherwise eligible enemies.
     function api.FarmLess(a,b)
         if a==b then return false end
         local ar,br=api.Rank(a),api.Rank(b)
         if ar~=br then return ar<br end
         if a.Name~=b.Name then return a.Name<b.Name end
-        local ap=a:FindFirstChild("HumanoidRootPart")or a.PrimaryPart or a:FindFirstChild("RootPart")
-        local bp=b:FindFirstChild("HumanoidRootPart")or b.PrimaryPart or b:FindFirstChild("RootPart")
+        local ap,bp=root(a),root(b)
         if not ap or not bp then return ap~=nil and bp==nil end
         local av,bv=ap.Position,bp.Position
         if av.X~=bv.X then return av.X<bv.X end
@@ -947,100 +878,96 @@ end
 
 -- END BUNDLED TARGET PRIORITY
 end)()()
-local pendingDamage = setmetatable({}, { __mode = "k" })
-local stopMovement = function() end
 local enemyRegistry=(function()
 -- BEGIN BUNDLED ENEMY REGISTRY
--- One streamed-enemy index and data cache shared by every controller.
-return function(ctx)
-    local api={Models={},Revision=0,Count=0}
-    local cache=setmetatable({}, {__mode="k"})
-    local missing={}
-    local folder,added,removed
-    local disposed,nextReconcile=false,0
-    local function forgetMissing(mob)
-        local record=missing[mob]
-        if not record then return end
-        missing[mob]=nil
-        for _,connection in ipairs(record.Connections)do connection:Disconnect()end
-    end
-    local function changed(mob,present)
-        if present then
-            if not mob:IsA("Model")or api.Models[mob]then return end
-            api.Models[mob]=true;api.Count+=1
-        else
-            if not api.Models[mob]then return end
-            api.Models[mob]=nil;cache[mob]=nil;forgetMissing(mob);api.Count-=1
+-- Registry owns per-model records and temporary streaming observations.
+return function(context)
+    local api={Models={},Count=0,Revision=0}
+    local entries={}
+    local observedFolder,folderSignals=nil,{}
+    local closed=false
+    local reconcileAt=0
+    local function detach(record)
+        if record.Listeners then
+            for _,listener in ipairs(record.Listeners)do listener:Disconnect()end
+            record.Listeners=nil
         end
+    end
+    local function forget(model)
+        local record=entries[model]
+        if record then detach(record);entries[model]=nil end
+    end
+    local function notify(model,exists)
         api.Revision+=1
-        if ctx.Changed then ctx.Changed(mob,present)end
+        if context.Changed then context.Changed(model,exists)end
+    end
+    local function register(model)
+        if closed or api.Models[model]or not model:IsA("Model")then return end
+        api.Models[model]=true;api.Count+=1;notify(model,true)
+    end
+    local function unregister(model)
+        forget(model)
+        if api.Models[model]then api.Models[model]=nil;api.Count-=1;notify(model,false)end
+    end
+    local function reset()
+        for index=#folderSignals,1,-1 do folderSignals[index]:Disconnect();folderSignals[index]=nil end
+        for model in pairs(entries)do forget(model)end
+        table.clear(api.Models);api.Count=0
     end
     function api.Refresh()
-        if disposed then return nil end
-        local current=ctx.Folder()
-        if current~=folder then
-            if added then added:Disconnect();added=nil end
-            if removed then removed:Disconnect();removed=nil end
-            for mob in pairs(missing)do forgetMissing(mob)end
-            table.clear(api.Models);table.clear(cache);api.Count=0;api.Revision+=1
-            folder=current;api.Folder=folder;nextReconcile=0
+        if closed then return nil end
+        local folder=context.Folder()
+        if folder~=observedFolder then
+            reset();observedFolder=folder;api.Folder=folder;api.Revision+=1;reconcileAt=0
             if folder then
-                added=folder.ChildAdded:Connect(function(mob)changed(mob,true)end)
-                removed=folder.ChildRemoved:Connect(function(mob)changed(mob,false)end)
+                folderSignals[1]=folder.ChildAdded:Connect(register)
+                folderSignals[2]=folder.ChildRemoved:Connect(unregister)
             end
         end
-        local now=ctx.Now()
-        if folder and now>=nextReconcile then
-            nextReconcile=now+10
-            for mob in pairs(api.Models)do if mob.Parent~=folder then changed(mob,false)end end
-            for _,mob in ipairs(folder:GetChildren())do changed(mob,true)end
+        local at=context.Now()
+        if folder and at>=reconcileAt then
+            reconcileAt=at+10
+            for model in pairs(api.Models)do if model.Parent~=folder then unregister(model)end end
+            for _,model in ipairs(folder:GetChildren())do register(model)end
         end
-        return folder
+        return observedFolder
     end
-    function api.Data(mob)
-        if disposed or not mob then return nil end
-        if not mob.Parent then forgetMissing(mob);cache[mob]=nil;return nil end
-        local data=cache[mob]
-        local now=ctx.Now()
-        if data and data.Root and data.Root.Parent and data.Entity.Parent==mob and data.Health.Parent==data.Entity then
-            -- HitLives can replicate independently, including during a fight.
+    local function motion(root)
+        local current=root:FindFirstChild("BodyVelocity")
+        if current then return current end
+        return root.FindFirstChildOfClass and root:FindFirstChildOfClass("LinearVelocity")or nil
+    end
+    local function waitForData(model,record,at)
+        record.Data=nil;record.NextRead=at+.1
+        if record.Listeners or not model.DescendantAdded or not model.DescendantRemoving then return end
+        local function invalidate()record.NextRead=0 end
+        record.Listeners={model.DescendantAdded:Connect(invalidate),model.DescendantRemoving:Connect(invalidate)}
+    end
+    function api.Data(model)
+        if closed or model==nil then return nil end
+        if model.Parent==nil then forget(model);return nil end
+        local record=entries[model]
+        if record==nil then record={NextRead=0};entries[model]=record end
+        local at=context.Now()
+        local data=record.Data
+        if data and data.Root.Parent and data.Entity.Parent==model and data.Health.Parent==data.Entity then
             data.HitLives=data.Entity:FindFirstChild("HitLives")
-            if now>=(data.MetaAt or 0)then
-                data.Motion=data.Root:FindFirstChild("BodyVelocity")or (data.Root.FindFirstChildOfClass and data.Root:FindFirstChildOfClass("LinearVelocity"))
-                data.MetaAt=now+.5
-            end
+            if at>=(data.MetaAt or 0)then data.Motion=motion(data.Root);data.MetaAt=at+.5 end
             return data
         end
-        local incomplete=missing[mob]
-        if incomplete and now<incomplete.RetryAt then return nil end
-        local root=mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-        local entity=mob:FindFirstChild("Entity")
+        if at<record.NextRead then return nil end
+        local root=model:FindFirstChild("HumanoidRootPart")or model.PrimaryPart or model:FindFirstChild("RootPart")
+        local entity=model:FindFirstChild("Entity")
         local health=entity and entity:FindFirstChild("Health")
-        if not root or not root:IsA("BasePart")or not health then
-            cache[mob]=nil
-            if not incomplete and mob.DescendantAdded and mob.DescendantRemoving then
-                incomplete={RetryAt=0,Connections={}}
-                missing[mob]=incomplete
-                local function invalidate()incomplete.RetryAt=0 end
-                incomplete.Connections[1]=mob.DescendantAdded:Connect(invalidate)
-                incomplete.Connections[2]=mob.DescendantRemoving:Connect(invalidate)
-            end
-            if incomplete then incomplete.RetryAt=now+.1 end
-            return nil
-        end
-        forgetMissing(mob)
-        data={Root=root,Entity=entity,Health=health,HitLives=entity:FindFirstChild("HitLives"),
-            Motion=root:FindFirstChild("BodyVelocity")or (root.FindFirstChildOfClass and root:FindFirstChildOfClass("LinearVelocity")),MetaAt=now+.5}
-        cache[mob]=data
+        if not(root and root:IsA("BasePart")and health)then waitForData(model,record,at);return nil end
+        detach(record)
+        data={Root=root,Entity=entity,Health=health,HitLives=entity:FindFirstChild("HitLives"),Motion=motion(root),MetaAt=at+.5}
+        record.Data=data;record.NextRead=0
         return data
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        if added then added:Disconnect();added=nil end
-        if removed then removed:Disconnect();removed=nil end
-        for mob in pairs(missing)do forgetMissing(mob)end
-        table.clear(api.Models);table.clear(cache);api.Count=0;folder=nil;api.Folder=nil
+        if closed then return end
+        closed=true;reset();observedFolder=nil;api.Folder=nil
     end
     return api
 end
@@ -1049,726 +976,610 @@ end
 end)()({Now=os.clock,Folder=function()return workspace:FindFirstChild("Mobs")end,
     Changed=function()
         state.MultiSpotNextScan=0
-        if state.WorkScheduler then state.WorkScheduler.Wake("Movement");state.WorkScheduler.Wake("Combat");state.WorkScheduler.Wake("Skill")end
+        local scheduler=state.WorkScheduler
+        if scheduler then for _,name in ipairs({"Movement","Combat","Skill"})do scheduler.Wake(name)end end
         if state.WakeSkillAura then state.WakeSkillAura()end
     end})
 state.EnemyRegistry=enemyRegistry
 local trackedMobs=enemyRegistry.Models
 local indexedMobFolder
-local combatStatus = "Paused"
-local candidatePrimary
-local configReady = false
-local requestSave = function() end
-local enemyHUD
-
 local function refreshMobIndex()
-    indexedMobFolder=enemyRegistry.Refresh()
-    return indexedMobFolder
+    local folder=enemyRegistry.Refresh();indexedMobFolder=folder;return folder
 end
 local function getMobData(mob)
+    if not mob then return nil end
     return enemyRegistry.Data(mob)
 end
 function state.ReadOwnDamage(health,counter)
-    counter=counter or health:FindFirstChild(player.Name)
-    if counter and counter:IsA("ValueBase") and type(counter.Value)=="number" then return counter.Value,counter end
+    if health==nil then return nil,nil end
+    local tag=counter or health:FindFirstChild(player.Name)
+    if tag and tag:IsA("ValueBase")and type(tag.Value)=="number"then return tag.Value,tag end
     return nil,nil
 end
 do
-    local make=(function()
+    local createCredit=(function()
 -- BEGIN BUNDLED CREDIT CHECK
--- Coordinate only replicated damage contribution; never mutate enemy HP/counters.
+-- Group admission, per-enemy acknowledgment leases, and action planning share one gate.
 return function(ctx)
-    local api={}
-    local pending=setmetatable({}, {__mode="k"})
     local state=ctx.State
+    local api={}
+    local flights=setmetatable({}, {__mode="k"})
+    local group={}
     local function status(text)state.CreditCheckStatus=text end
-    local function damage(data,person)
+    local function contribution(data,person)
         local value=ctx.Damage(data,person)
         if type(value)~="number"or value~=value or math.abs(value)==math.huge then return nil end
         return value
     end
-    local cachedMembers,cachedReady,cachedMissing,groupKey
-    function api.Reset()
-        table.clear(pending)
-        cachedMembers,cachedReady,cachedMissing,groupKey=nil,nil,nil,nil
-        state.CreditDamagePlan=nil
-    end
-    function api.Observe(mob,data)
-        local flight=pending[mob]
-        local own=damage(data,ctx.Self())
-        if flight and own and own>flight.Before then
-            if ctx.Planner and flight.Key then ctx.Planner.Learn(flight.Key,own-flight.Before)end
-            pending[mob]=nil
-        end
-    end
-    local function groupReady()
+    local function roster()
         local members=ctx.Members()
-        if members==cachedMembers then return cachedReady,members,cachedMissing end
-        local missing={}
-        local keys={}
+        if group.Members==members then return group.Ready,members,group.Missing end
+        local missing,ids={},{}
         for _,person in ipairs(members)do
-            keys[#keys+1]=tostring(person.UserId or person.Name)..":"..tostring(type(person)=="table"and person.CreditMissing==true)
-            if type(person)=="table"and person.CreditMissing then missing[#missing+1]=person.Name end
+            local absent=type(person)=="table"and person.CreditMissing==true
+            ids[#ids+1]=tostring(person.UserId or person.Name)..":"..tostring(absent)
+            if absent then missing[#missing+1]=person.Name end
         end
-        local ready=#missing==0 and #members>1
-        table.sort(keys)
-        local key=table.concat(keys,"|")
-        if key~=groupKey then table.clear(pending);groupKey=key end
-        cachedMembers,cachedReady,cachedMissing=members,ready,missing
-        return ready,members,missing
+        table.sort(ids)
+        local signature=table.concat(ids,"|")
+        if signature~=group.Signature then table.clear(flights)end
+        group={Members=members,Missing=missing,Ready=#members>1 and #missing==0,Signature=signature}
+        return group.Ready,members,missing
+    end
+    function api.Reset()table.clear(flights);group={};state.CreditDamagePlan=nil end
+    function api.Observe(target,data)
+        local pending=flights[target]
+        local value=contribution(data,ctx.Self())
+        if not pending or not value or value<=pending.Before then return end
+        if ctx.Planner and pending.Key then ctx.Planner.Learn(pending.Key,value-pending.Before)end
+        flights[target]=nil
     end
     function api.FarmTarget(locked,candidates,valid,less)
-        if not state.CreditCheck or not groupReady()then return locked end
+        if not state.CreditCheck or not roster()then return locked end
         local best
-        for mob in pairs(candidates)do
-            if ctx.Rank(mob)<=2 and valid(mob)and (not best or less(mob,best))then best=mob end
+        for candidate in pairs(candidates)do
+            if ctx.Rank(candidate)<=2 and valid(candidate)and (not best or less(candidate,best))then best=candidate end
         end
         return best or locked
     end
-    function api.Allow(mob,data)
-        api.Bypass=false
-        if not state.CreditCheck or ctx.Rank(mob)>2 then return true end
-        local ready,members,missing=groupReady()
-        if not ready then
-            api.Bypass=true;pending[mob]=nil
-            status(#missing>0 and ("Credit Check inactive · missing from server: "..table.concat(missing,", "))or "Credit Check inactive · no other accounts in whitelist")
-            return true
-        end
-        local maximum=ctx.MaxHealth(data)
-        if type(maximum)~="number"or maximum~=maximum or maximum<=0 or maximum==math.huge then
-            status("Credit Check · waiting for maximum HP");return false
-        end
-        local required=maximum*.05
-        api.Observe(mob,data)
-        local own=damage(data,ctx.Self())or 0
-        local waiting,total,noCounter,below=0,0,{},{}
+    local function maximum(data)
+        local value=ctx.MaxHealth(data)
+        if type(value)=="number"and value==value and value>0 and value<math.huge then return value end
+    end
+    local function progress(data,members,required)
+        local result={Waiting=0,Unknown={},Partial={}}
         for _,person in ipairs(members)do
-            total+=1
-            local contribution=damage(data,person)
-            if contribution==nil then noCounter[#noCounter+1]=person.Name end
-            if (type(person)=="table"and person.CreditMissing)or (contribution or 0)<required then
-                waiting+=1
-                if contribution~=nil and not(type(person)=="table"and person.CreditMissing)then
-                    below[#below+1]=person.Name.." "..math.floor(contribution).."/"..math.ceil(required)
+            local value=contribution(data,person)
+            if value==nil then result.Unknown[#result.Unknown+1]=person.Name end
+            if (type(person)=="table"and person.CreditMissing)or (value or 0)<required then
+                result.Waiting+=1
+                if value~=nil and not(type(person)=="table"and person.CreditMissing)then
+                    result.Partial[#result.Partial+1]=person.Name.." "..math.floor(value).."/"..math.ceil(required)
                 end
             end
         end
-        if waiting==0 then pending[mob]=nil;status("Credit Check · everyone qualified · finishing");return true end
-        if total>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
-        local detail
-        if #noCounter>0 then detail="no replicated damage counter on "..tostring(mob.Name or "this enemy")..": "..table.concat(noCounter,", ")
-        else detail="below required: "..table.concat(below,", ")end
+        return result
+    end
+    function api.Allow(target,data)
+        api.Bypass=false
+        if not state.CreditCheck or ctx.Rank(target)>2 then return true end
+        local ready,members,missing=roster()
+        if not ready then
+            api.Bypass=true;flights[target]=nil
+            status(#missing>0 and "Credit Check inactive · missing from server: "..table.concat(missing,", ")or "Credit Check inactive · no other accounts in whitelist")
+            return true
+        end
+        local max=maximum(data)
+        if not max then status("Credit Check · waiting for maximum HP");return false end
+        local required=max*.05
+        api.Observe(target,data)
+        local own=contribution(data,ctx.Self())or 0
+        local observed=progress(data,members,required)
+        if observed.Waiting==0 then flights[target]=nil;status("Credit Check · everyone qualified · finishing");return true end
+        if #members>20 then status("Credit Check · more than 20 accounts cannot each receive 5% of one HP pool");return false end
+        local detail=#observed.Unknown>0 and "no replicated damage counter on "..tostring(target.Name or "this enemy")..": "..table.concat(observed.Unknown,", ")
+            or "below required: "..table.concat(observed.Partial,", ")
         if own>=required then
-            pending[mob]=nil
-            status("Credit Check · you qualified · group "..(total-waiting).."/"..total.." ready · "..detail)
+            flights[target]=nil
+            status("Credit Check · you qualified · group "..(#members-observed.Waiting).."/"..#members.." ready · "..detail)
             return false
         end
-        local flight=pending[mob]
-        if flight then
-            if own<flight.Before then pending[mob]=nil
-            elseif own>flight.Before then pending[mob]=nil
-            elseif ctx.Now()<flight.Deadline then status("Credit Check · waiting for damage acknowledgment");return false
-            else pending[mob]=nil end
+        local pending=flights[target]
+        if pending then
+            if own==pending.Before and ctx.Now()<pending.Deadline then status("Credit Check · waiting for damage acknowledgment");return false end
+            flights[target]=nil
         end
         status("Credit Check · "..math.floor(own).." / "..math.ceil(required).." · "..detail)
         return true
     end
-    function api.AllowAction(mob,data,kind)
+    function api.AllowAction(target,data,kind)
         api.ActionReason=nil
-        if not api.Allow(mob,data)then
-            local maximum=ctx.MaxHealth(data)
-            api.ActionReason=type(maximum)=="number"and (damage(data,ctx.Self())or 0)>=maximum*.05 and "Qualified"or "Waiting"
+        if not api.Allow(target,data)then
+            local max=maximum(data)
+            api.ActionReason=max and (contribution(data,ctx.Self())or 0)>=max*.05 and "Qualified"or "Waiting"
             return false
         end
-        if api.Bypass or not state.CreditCheck or ctx.Rank(mob)>2 or not ctx.Planner or not ctx.Options then return true end
-        local own=damage(data,ctx.Self())
-        if own==nil and kind=="Normal"then return true end -- Native skill registration.
+        if api.Bypass or not state.CreditCheck or ctx.Rank(target)>2 or not ctx.Planner or not ctx.Options then return true end
+        local own=contribution(data,ctx.Self())
+        if own==nil and kind=="Normal"then return true end
         local remaining=ctx.MaxHealth(data)*.05-(own or 0)
-        if remaining<=0 then return true end -- Everyone qualifies; unrestricted damage.
-        local options=ctx.Options(mob,data,kind)
+        if remaining<=0 then return true end
+        local options=ctx.Options(target,data,kind)
         local normal=ctx.Planner.Estimate(options.NormalKey)
         local skill=ctx.Planner.Estimate(options.CastKey or options.SkillKey)
-        if normal<=0 then normal=options.NormalEstimate or 0 end
-        if skill<=0 then skill=options.SkillEstimate or 0 end
-        -- During a running skill, allow its individual hits until one normal
-        -- hit is enough. Activation planning uses the observed whole-cast total.
+        normal=normal>0 and normal or options.NormalEstimate or 0
+        skill=skill>0 and skill or options.SkillEstimate or 0
         if kind=="Skill"and options.ActiveSkill then
-            if options.CanNormal and normal>0 and remaining<=normal then api.ActionReason="Normal";return false end
-            api.ActionReason="Skill";return true
+            api.ActionReason=options.CanNormal and normal>0 and remaining<=normal and "Normal"or "Skill"
+            return api.ActionReason=="Skill"
         end
         local chosen,plan=ctx.Planner.Choose(remaining,normal,skill,options.CanNormal,options.CanSkill)
-        state.CreditDamagePlan=plan
+        state.CreditDamagePlan=plan;api.ActionReason=chosen
         if chosen then
-            status(plan.Calibrating and ("Credit Check · learning "..chosen.." damage")
-                or ("Credit Check · remaining "..math.ceil(remaining).." · plan "..plan.Skill.." skill hit(s) + "..plan.Normal.." normal hit(s)"))
+            status(plan.Calibrating and "Credit Check · learning "..chosen.." damage"or "Credit Check · remaining "..math.ceil(remaining).." · plan "..plan.Skill.." skill hit(s) + "..plan.Normal.." normal hit(s)")
         end
-        api.ActionReason=chosen
         return chosen==(kind=="SkillStart"and "Skill"or kind)
     end
-    function api.Sent(mob,data,kind)
-        if not state.CreditCheck or ctx.Rank(mob)>2 then return end
-        if not groupReady()then pending[mob]=nil;return end
-        local maximum=ctx.MaxHealth(data)
-        local own=damage(data,ctx.Self())or 0
-        if type(maximum)=="number"and maximum>0 and own<maximum*.05 then
-            local options=ctx.Options and ctx.Options(mob,data,kind or "Normal")
-            pending[mob]={Key=options and ((kind=="Skill")and options.SkillKey or options.NormalKey),Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
-        end
+    function api.Sent(target,data,kind)
+        if not state.CreditCheck or ctx.Rank(target)>2 then return end
+        if not roster()then flights[target]=nil;return end
+        local max=maximum(data);local own=contribution(data,ctx.Self())or 0
+        if not max or own>=max*.05 then return end
+        local options=ctx.Options and ctx.Options(target,data,kind or "Normal")
+        local key=options and (kind=="Skill"and options.SkillKey or options.NormalKey)
+        flights[target]={Key=key,Before=own,Deadline=ctx.Now()+math.clamp((state.PingMs or 100)/1000+.25,.4,1.5)}
     end
     return api
 end
 
 -- END BUNDLED CREDIT CHECK
     end)()
-    local makeRoster=(function()
+    local createRoster=(function()
 -- BEGIN BUNDLED CREDIT ROSTER
--- Every configured account remains required; an unmatched entry is never dropped.
+-- Resolve aliases once; unmatched configured identities remain explicit requirements.
 return function(self,players,text)
-    local byName,byId={},{}
-    for _,person in ipairs(players)do byName[person.Name:lower()]=person;byId[tostring(person.UserId)]=person end
-    local result,seen={self},{[tostring(self.UserId)]=true}
-    for word in tostring(text or ""):gmatch("[%w_]+")do
-        local person=byName[word:lower()]or byId[word]
-        local key=person and tostring(person.UserId)or ("missing:"..word:lower())
-        if not seen[key]then
-            seen[key]=true
-            result[#result+1]=person or {Name=word,UserId=tonumber(word),CreditMissing=true}
+    local lookup={}
+    for _,person in ipairs(players)do
+        lookup[person.Name:lower()]=person
+        lookup[tostring(person.UserId)]=person
+    end
+    local members={self}
+    local identities={[tostring(self.UserId)]=true}
+    for token in tostring(text or ""):gmatch("[%w_]+")do
+        local person=lookup[token:lower()]or lookup[token]
+        local identity=person and tostring(person.UserId)or "missing:"..token:lower()
+        if not identities[identity]then
+            identities[identity]=true
+            members[#members+1]=person or {Name=token,UserId=tonumber(token),CreditMissing=true}
         end
     end
-    return result
+    return members
 end
 
 -- END BUNDLED CREDIT ROSTER
     end)()
-    local parsedText,members,rosterAt=nil,nil,0
-    local function roster()
-        local text=state.CreditWhitelistText or ""
-        local now=os.clock()
-        if members and text==parsedText and now<rosterAt then return members end
-        parsedText=text;rosterAt=now+.25
-        members=makeRoster(player,Players:GetPlayers(),text)
-        return members
-    end
-    local makePlan=(function()
+    local createPlanner=(function()
 -- BEGIN BUNDLED CREDIT DAMAGE PLAN
--- Choose a small-hit combination from confirmed, weapon-specific damage estimates.
+-- Bounded conservative estimates plus a lexicographic minimum-overkill search.
 return function()
     local api={}
-    local samples,keys={},{}
+    local estimates,ring={},{}
+    local cursor=1
+    local function valid(value)return type(value)=="number"and value==value and value>0 and value<math.huge end
     function api.Learn(key,amount)
-        if type(key)~="string"or type(amount)~="number"or amount<=0 or amount~=amount or amount==math.huge then return end
-        if not samples[key]then
-            if #keys>=128 then samples[table.remove(keys,1)]=nil end
-            keys[#keys+1]=key
-        end
-        -- Use the lower observed damage so a critical hit cannot under-budget credit.
-        samples[key]=samples[key]and math.min(samples[key],amount)or amount
+        if type(key)~="string"or not valid(amount)then return end
+        if estimates[key]then estimates[key]=math.min(estimates[key],amount);return end
+        local expired=ring[cursor]
+        if expired then estimates[expired]=nil end
+        ring[cursor]=key;cursor=cursor%128+1;estimates[key]=amount
     end
-    function api.Estimate(key)return samples[key]or 0 end
+    function api.Estimate(key)return estimates[key]or 0 end
     function api.Choose(remaining,normal,skill,canNormal,canSkill)
         if remaining<=0 then return nil end
-        normal,skill=normal or 0,skill or 0
+        normal=normal or 0;skill=skill or 0
         if canNormal and normal<=0 then return "Normal",{Calibrating=true}end
         if canSkill and skill<=0 then return "Skill",{Calibrating=true}end
-        if not canNormal and not canSkill then return nil end
-        local best
-        local function consider(n,s)
-            local amount=n*normal+s*skill
-            if amount<remaining then return end
-            local option={Normal=n,Skill=s,Damage=amount,Excess=amount-remaining,Actions=n+s}
-            if not best or option.Excess<best.Excess or (option.Excess==best.Excess and option.Actions<best.Actions)
-                or (option.Excess==best.Excess and option.Actions==best.Actions and s<best.Skill)then best=option end
+        local result
+        local function offer(normals,skills)
+            local total=normals*normal+skills*skill
+            if total<remaining then return end
+            local excess,actions=total-remaining,normals+skills
+            if result and (result.Excess<excess or (result.Excess==excess and (result.Actions<actions or (result.Actions==actions and result.Skill<=skills))))then return end
+            result={Normal=normals,Skill=skills,Damage=total,Excess=excess,Actions=actions}
         end
-        if canNormal and normal>0 then consider(math.ceil(remaining/normal),0)end
+        if canNormal and normal>0 then offer(math.ceil(remaining/normal),0)end
         if canSkill and skill>0 then
-            local count=math.ceil(remaining/skill)
-            consider(0,count)
+            local allSkill=math.ceil(remaining/skill)
+            offer(0,allSkill)
             if canNormal and normal>0 then
-                for s=1,math.min(64,count)do consider(math.max(0,math.ceil((remaining-s*skill)/normal)),s)end
+                for skills=1,math.min(64,allSkill)do offer(math.max(0,math.ceil((remaining-skills*skill)/normal)),skills)end
             end
         end
-        if not best then return nil end
-        return best.Skill>0 and "Skill"or "Normal",best
+        if result then return result.Skill>0 and "Skill"or "Normal",result end
     end
     return api
 end
 
 -- END BUNDLED CREDIT DAMAGE PLAN
     end)()
-    state.CreditDamagePlanner=makePlan()
-    state.CreditController=make({Planner=state.CreditDamagePlanner,Options=function(mob,data,kind)
-        local weapons=state.WeaponSkills
-        local version=weapons and weapons.Version or 0
-        local key=tostring(version)..":"..mob.Name
-        local skillKey=tostring(state.SelectedSkill)..":"..version
-        local estimate=state.SkillDamageBudget and state.SkillDamageBudget.Estimate(skillKey..":"..mob.Name)or 0
-        local ready=state.SkillAura and weapons and weapons.Ready and weapons.IsCompatible(state.SelectedSkill)
-        if ready and kind~="Skill"then
-            ready=Skills.usingSkill=="none"and Skills.GetCooldown(state.SelectedSkill)>=0
-            local definition=ReplicatedStorage.Database.Skills:FindFirstChild(state.SelectedSkill)
-            ready=ready and definition and Skills.HasStamina(definition.Cost.Value)and state.SkillActivation and state.SkillActivation.CanHandle(state.SelectedSkill)
+    local group={Text=false,At=0,Members=nil}
+    local function roster()
+        local text=state.CreditWhitelistText or "";local at=os.clock()
+        if group.Members==nil or group.Text~=text or at>=group.At then
+            group.Text=text;group.At=at+.25;group.Members=createRoster(player,Players:GetPlayers(),text)
         end
-        return {NormalKey="Normal:"..key,SkillKey="Skill:"..state.SelectedSkill..":"..key,
-            CastKey="Cast:"..state.SelectedSkill..":"..key,ActiveSkill=kind=="Skill"and state.SkillCastRunning,
-            NormalEstimate=data.NormalDamagePerHit,SkillEstimate=estimate,
-            CanNormal=state.Enabled==true,CanSkill=ready==true}
-    end,State=state,Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,
-        Members=roster,MaxHealth=function(data)
-            local health=data.Health
-            if health:IsA("DoubleConstrainedValue")or health:IsA("IntConstrainedValue")then return health.MaxValue end
-            local maximum=health:GetAttribute("MaxValue")or data.Entity:GetAttribute("MaxHealth")
-            if type(maximum)=="number"then return maximum end
-            local value=data.Entity:FindFirstChild("MaxHealth")
-            return value and value:IsA("ValueBase")and tonumber(value.Value)or nil
-        end,
-        Damage=function(data,person)
-            if type(person)=="table"and person.CreditMissing then return nil end
-            local counter=data.Health:FindFirstChild(person.Name)or data.Health:FindFirstChild(tostring(person.UserId))
-            local value=counter and counter:IsA("ValueBase")and counter.Value
-            return type(value)=="number"and value==value and math.max(0,value)or nil
-        end})
-    function state.SetCreditCheck(on)
-        state.CreditCheck=on==true;state.CreditController.Reset()
+        return group.Members
+    end
+    local function maxHealth(data)
+        local health=data.Health
+        for _,class in ipairs({"DoubleConstrainedValue","IntConstrainedValue"})do if health:IsA(class)then return health.MaxValue end end
+        local number=health:GetAttribute("MaxValue")or data.Entity:GetAttribute("MaxHealth")
+        if type(number)=="number"then return number end
+        local value=data.Entity:FindFirstChild("MaxHealth")
+        return value and value:IsA("ValueBase")and tonumber(value.Value)or nil
+    end
+    local function contribution(data,person)
+        if type(person)=="table"and person.CreditMissing then return nil end
+        local health=data.Health
+        local tag=health:FindFirstChild(person.Name)or health:FindFirstChild(tostring(person.UserId))
+        if not(tag and tag:IsA("ValueBase"))then return nil end
+        local value=tag.Value
+        return type(value)=="number"and value==value and math.max(0,value)or nil
+    end
+    local function options(mob,data,kind)
+        local equipped=state.WeaponSkills
+        local version=equipped and equipped.Version or 0
+        local skill=state.SelectedSkill
+        local stem=tostring(version)..":"..mob.Name
+        local available=state.SkillAura and equipped and equipped.Ready and equipped.IsCompatible(skill)
+        if available and kind~="Skill"then
+            local definition=ReplicatedStorage.Database.Skills:FindFirstChild(skill)
+            available=Skills.usingSkill=="none"and Skills.GetCooldown(skill)>=0 and definition
+                and Skills.HasStamina(definition.Cost.Value)and state.SkillActivation and state.SkillActivation.CanHandle(skill)
+        end
+        local estimateKey=skill..":"..version..":"..mob.Name
+        return {NormalKey="Normal:"..stem,SkillKey="Skill:"..skill..":"..stem,CastKey="Cast:"..skill..":"..stem,
+            ActiveSkill=kind=="Skill"and state.SkillCastRunning,NormalEstimate=data.NormalDamagePerHit,
+            SkillEstimate=state.SkillDamageBudget and state.SkillDamageBudget.Estimate(estimateKey)or 0,
+            CanNormal=state.Enabled==true,CanSkill=available==true}
+    end
+    state.CreditDamagePlanner=createPlanner()
+    state.CreditController=createCredit({State=state,Planner=state.CreditDamagePlanner,Options=options,
+        Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,Members=roster,MaxHealth=maxHealth,Damage=contribution})
+    function state.SetCreditCheck(enabled)
+        state.CreditCheck=enabled==true;state.CreditController.Reset()
         state.CreditCheckStatus=state.CreditCheck and "Credit Check · waiting for a boss or mini-boss"or "Credit Check is off"
         if state.WakeSkillAura then state.WakeSkillAura()end
         requestSave()
     end
     function state.SetCreditWhitelist(text)
-        local entries,seen={},{}
-        for word in tostring(text or ""):gmatch("[%w_]+")do
-            if not seen[word:lower()]then entries[#entries+1]=word;seen[word:lower()]=true end
+        local names={};local included={}
+        for token in tostring(text or ""):gmatch("[%w_]+")do
+            local key=token:lower()
+            if not included[key]then included[key]=true;names[#names+1]=token end
         end
-        local value=table.concat(entries,", ")
-        if #entries>100 or #value>2000 then error("Use at most 100 Credit Check whitelist entries")end
-        state.CreditWhitelistText=value;parsedText=nil;members=nil
+        local serialized=table.concat(names,", ")
+        assert(#names<=100 and #serialized<=2000,"Use at most 100 Credit Check whitelist entries")
+        state.CreditWhitelistText=serialized;group.Text=false;group.Members=nil
         state.CreditController.Reset();requestSave()
     end
 end
 local function getMobRoot(mob)
-    local data = getMobData(mob)
-    return data and data.Root
+    local data=getMobData(mob);return data and data.Root
 end
--- Yield only while initializing; gameplay object creation stays synchronous.
-state.StartupSliceAt=os.clock()
-function state.YieldStartup()
-    if not state.StartupComplete and os.clock()-state.StartupSliceAt>=.002 then
-        task.wait()
-        state.StartupSliceAt=os.clock()
-    end
-end
+-- Controllers publish values through plain adapters; only WindUI renders them.
 local controllerViews=(function()
 -- BEGIN BUNDLED CONTROLLER VIEW
--- State adapters for controllers that publish Text/Visible values.
--- These are plain tables: no Instances, input listeners, layout, or fallback UI.
+-- Nonvisual controller projections deliberately have no hierarchy or callbacks.
 return function()
-    local api={}
-    local disconnected={Connected=false,Disconnect=function()end}
-    local signal={ControllerSignal=true,Connect=function()return disconnected end}
-    local methods={}
-    function methods:GetChildren()return {}end
-    function methods:FindFirstChild()return nil end
-    function methods:IsA()return false end
-    function methods:IsFocused()return false end
-    function methods:GetPropertyChangedSignal()return signal end
-    function methods:Destroy()self.Parent=nil end
-    function methods:Clone()
-        local properties=table.clone(self)
-        return api.New(properties)
+    local factory={}
+    local connection={Connected=false,Disconnect=function()end}
+    local nullSignal={ControllerSignal=true}
+    function nullSignal:Connect()return connection end
+    local behavior={}
+    behavior.GetChildren=function()return {}end
+    behavior.FindFirstChild=function()return nil end
+    behavior.IsA=function()return false end
+    behavior.IsFocused=function()return false end
+    behavior.GetPropertyChangedSignal=function()return nullSignal end
+    behavior.Destroy=function(self)self.Parent=nil end
+    behavior.Clone=function(self)return factory.New(table.clone(self))end
+    local eventNames={"Activated","FocusLost","InputBegan","InputChanged","InputEnded","Changed","Destroying"}
+    for _,event in ipairs(eventNames)do behavior[event]=nullSignal end
+    local metatable={__index=behavior}
+    function factory.New(values,parent)
+        local projection={ControllerView=true,Text="",Visible=false,Parent=parent}
+        for property,value in pairs(values or {})do projection[property]=value end
+        return setmetatable(projection,metatable)
     end
-    local events={Activated=true,FocusLost=true,InputBegan=true,InputChanged=true,InputEnded=true,Changed=true,Destroying=true}
-    local meta={__index=function(_,key)return events[key]and signal or methods[key]end}
-    function api.New(properties,parent)
-        local view={ControllerView=true,Visible=false,Text="",Parent=parent}
-        for key,value in pairs(properties or {})do view[key]=value end
-        return setmetatable(view,meta)
-    end
-    return api
+    return factory
 end
 
 -- END BUNDLED CONTROLLER VIEW
 end)()()
-local function create(className, properties, parent)
+state.StartupSliceAt=os.clock()
+function state.YieldStartup()
+    if state.StartupComplete then return end
+    local now=os.clock()
+    if now-state.StartupSliceAt>=.002 then task.wait();state.StartupSliceAt=os.clock()end
+end
+local function create(class,properties,parent)
     if type(parent)=="table"and parent.ControllerView then return controllerViews.New(properties,parent)end
     state.YieldStartup()
-    local object = Instance.new(className)
-    for key, value in pairs(properties) do object[key] = value end
-    object.Parent = parent
-    return object
+    local instance=Instance.new(class)
+    for property,value in pairs(properties)do instance[property]=value end
+    instance.Parent=parent
+    return instance
 end
-local function corner(object, radius)
-    create("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, object)
-end
-local function bind(signal, callback)
+local function bind(signal,callback)
     if type(signal)=="table"and signal.ControllerSignal then return signal:Connect()end
-    local connection = signal:Connect(callback)
-    table.insert(connections, connection)
-    return connection
+    local connection=signal:Connect(callback);connections[#connections+1]=connection;return connection
 end
-
-do
-    local make=(function()
--- BEGIN BUNDLED ANTI AFK
--- One idle listener, no polling loop, movement or combat remote requests.
-return function(ctx)
-    local api={Enabled=true,Pulses=0}
-    local state=ctx.State
-    local stopped,busy=false,false
-    local nextPulse=0
-    local clock=ctx.Clock or os.clock
-    state.AntiAfkStatus="Active · waiting for idle"
-    local connection=ctx.Player.Idled:Connect(function()
-        if stopped or busy or state.Running==false or clock()<nextPulse then return end
-        busy=true;nextPulse=clock()+20
-        local ok,message=pcall(ctx.Pulse)
-        busy=false
-        if stopped or state.Running==false then return end
-        if ok then
-            api.Pulses+=1;state.LastAntiAfkError=nil
-            state.AntiAfkStatus="Active · idle input sent"
-        else
-            state.LastAntiAfkError=tostring(message)
-            state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
-        end
-    end)
-    function api.Destroy()
-        if stopped then return end
-        stopped=true;api.Enabled=false;connection:Disconnect()
-        state.AntiAfkStatus="Stopped"
-    end
-    return api
-end
-
--- END BUNDLED ANTI AFK
-    end)()
-    local virtualUser
-    state.AntiAfk=make({State=state,Player=player,Pulse=function()
-        virtualUser=virtualUser or game:GetService("VirtualUser")
-        pcall(function()virtualUser:CaptureController()end)
-        local camera=workspace.CurrentCamera
-        virtualUser:ClickButton2(Vector2.new(0,0),camera and camera.CFrame or CFrame.new())
-    end})
-end
-
-local gui=runtimeOwner.Root
-local showUI=create("TextButton",{Name="ShowUI",Text="🪶",Visible=false,Font=Enum.Font.GothamBold,TextSize=26,
-    Size=UDim2.fromOffset(44,44),Position=UDim2.new(.5,0,0,48),AnchorPoint=Vector2.new(.5,0),
-    BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0,TextColor3=Color3.fromRGB(239,239,241)},gui)
-corner(showUI,22)
-create("UIStroke",{Color=Color3.fromRGB(255,255,255),Transparency=.8,Thickness=1},showUI)
-function state.SetUIVisible(visible)
-    showUI.Visible=state.Running==true
-    state.UIHidden=true
-    if visible and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
-end
-bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
+local function corner(object,radius)create("UICorner",{CornerRadius=UDim.new(0,radius or 10)},object)end
 local content=controllerViews.New({Name="ControllerState"})
-local function uiButton(name,text,order,height,parent)
-    return controllerViews.New({Name=name,Text=text},parent or content)
-end
-local function uiLabel(name,text)
-    return controllerViews.New({Name=name,Text=text},content)
-end
+local function uiButton(name,text,order,height,parent)return controllerViews.New({Name=name,Text=text},parent or content)end
+local function uiLabel(name,text)return controllerViews.New({Name=name,Text=text},content)end
 local function revealOptions()end
 local toggle=uiButton("Toggle","Kill aura · OFF")
 local farmToggle=uiButton("AutoFarm","Auto farm · OFF")
 local dodgeToggle=uiButton("AutoDodge","Auto dodge · ON")
-local savePending, lastSettingsEdit = false, 0
-local lastSavedPayload,lastSavedStorageGeneration
-local function settingsPayload()
-    local position = {X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
-    local healthPosition = enemyHUD and enemyHUD.Position or UDim2.new(0.5, 0, 0.7, 0)
-    local features=state
-    return {AutoCraft=state.AutoCraft,AutoTrade=state.AutoTrade,TradeMode=state.TradeMode,TradeItems=state.TradeItems,AutoDismantle=state.AutoDismantle,AutoEquipBestSword=state.AutoEquipBestSword,
-        StopEverything=false,
-        AutoJoinFriend=state.AutoJoinFriend,JoinFriendUsername=state.JoinFriendUsername,
-        SafeMode=state.SafeMode,SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId,SafeWhitelistText=state.SafeWhitelistText,SafeWhitelistIds=state.SafeWhitelistIds,
-        MultiSpot=state.MultiSpot,MultiSpotSelected=state.MultiSpotSelected,MultiSpotOrder=state.MultiSpotOrder,MultiSpotCursor=state.MultiSpotCursor,MultiSpotPending=state.MultiSpotPending,
-        AccountProgression=state.AccountProgression,ProgressionFloor=state.ProgressionFloor,
-        ProgressionBossCleared=state.ProgressionBossCleared,ProgressionComplete=state.ProgressionComplete,
-        ProgressionBossClearedName=state.ProgressionBossClearedName,
-        ProgressionRestore=state.ProgressionRestore,
-        AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
-        Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,CreditCheck=state.CreditCheck,CreditWhitelistText=state.CreditWhitelistText,
-        AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
-        AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
-        UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
-        SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
-        MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
-        AutoExplore = state.AutoExplore,
-        AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge, TransparentMap = features.TransparentMap,
-        PerformanceBoosters=features.PerformanceBoosters,
-        PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
-        WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,
-        SelectedPlayerId=state.SelectedPlayerId,
-        ViewingPlayer=features.ViewingPlayer==true,ViewingPlayerInventory=features.ViewingPlayerInventory==true,
-        HealthHUDPosition = { healthPosition.X.Scale, healthPosition.X.Offset, healthPosition.Y.Scale, healthPosition.Y.Offset },
-    }
+local gui=runtimeOwner.Root
+local showUI=create("TextButton",{Name="ShowUI",Text="🪶",Visible=false,Font=Enum.Font.GothamBold,
+    TextSize=26,Size=UDim2.fromOffset(44,44),Position=UDim2.new(.5,0,0,48),AnchorPoint=Vector2.new(.5,0),
+    BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0,TextColor3=Color3.fromRGB(239,239,241)},gui)
+corner(showUI,22)
+create("UIStroke",{Color=Color3.new(1,1,1),Transparency=.8,Thickness=1},showUI)
+function state.SetUIVisible(requested)
+    state.UIHidden=true;showUI.Visible=state.Running==true
+    if requested and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
+bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
+local persistedFields={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
+    "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+    "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
+    "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
+    "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
+    "UnsafeOffsetProfiles","Threat","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion","SelectedMiscSkill",
+    "AutoExplore","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
+local function settingsPayload()
+    local payload={Version=1,StopEverything=false,AutoOffset=true,PanelPosition={0,0,0,0}}
+    for _,field in ipairs(persistedFields)do payload[field]=state[field]end
+    payload.SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId
+    payload.ActiveTab=state.UI and state.UI.ActiveTab
+    payload.MiscSkillEnabled=state.MiscSkillEnabled==true
+    payload.ViewingPlayer=state.ViewingPlayer==true;payload.ViewingPlayerInventory=state.ViewingPlayerInventory==true
+    local position=enemyHUD and enemyHUD.Position
+    payload.HealthHUDPosition=position and {position.X.Scale,position.X.Offset,position.Y.Scale,position.Y.Offset}or {.5,0,.7,0}
+    return payload
+end
+local lastSavedPayload,lastSavedStorageGeneration
+local savePending,lastSettingsEdit=false,0
 function state.SaveNow()
     if not filePersistence or state.AutoSaveSuspended then return false end
-    local ok, result = pcall(function()
-        if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure();assert(ready,reason)end
-        if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(configFolder) then makefolder(configFolder) end
-        local payload=settingsPayload()
-        local serialized = HttpService:JSONEncode(payload)
-        local generation=state.StorageBootstrap and state.StorageBootstrap.Generation or 0
-        if serialized ~= lastSavedPayload or generation~=lastSavedStorageGeneration
-            or (typeof(readfile)=="function"and readfile(configPath)~=serialized)then
-            writefile(configPath, serialized)
-            lastSavedPayload = serialized;lastSavedStorageGeneration=generation
-        end
+    local payload=settingsPayload()
+    local ok,reason=pcall(function()
+        local storage=state.StorageBootstrap
+        if storage then local ready,message=storage.Ensure();assert(ready,message)end
+        if type(isfolder)=="function"and type(makefolder)=="function"and not isfolder(configFolder)then makefolder(configFolder)end
+        local text=HttpService:JSONEncode(payload)
+        local generation=storage and storage.Generation or 0
+        local changed=text~=lastSavedPayload or generation~=lastSavedStorageGeneration
+        if not changed then local readable,disk=pcall(readfile,configPath);changed=not readable or disk~=text end
+        if changed then writefile(configPath,text);lastSavedPayload=text;lastSavedStorageGeneration=generation end
+        if sharedSettings then sharedSettings.Save(payload)end
     end)
-    if ok and sharedSettings then
-        local sharedOK,reason=pcall(sharedSettings.Save,settingsPayload())
-        if not sharedOK then ok=false;result=reason end
-    end
-    if ok then state.ConfigSaveError = nil else state.ConfigSaveError = tostring(result) end
-    state.AutoSaveStatus = ok and "Auto-save · saved" or "Auto-save · write failed"
+    state.ConfigSaveError=not ok and tostring(reason)or nil
+    state.AutoSaveStatus=ok and "Auto-save · saved"or "Auto-save · write failed"
     return ok
 end
-requestSave = function()
-    if not configReady or not filePersistence or not state.Running or state.AutoSaveSuspended then return end
-    lastSettingsEdit = os.clock()
-    state.AutoSaveStatus = "Auto-save · pending"
+requestSave=function()
+    if not(configReady and filePersistence and state.Running)or state.AutoSaveSuspended then return end
+    lastSettingsEdit=os.clock();state.AutoSaveStatus="Auto-save · pending"
     if savePending then return end
-    savePending = true
-    task.spawn(function()
-        while state.Running and os.clock() - lastSettingsEdit < 0.6 do task.wait(0.15) end
-        savePending = false
-        if state.Running then state.SaveNow() end
+    savePending=true
+    task.defer(function()
+        repeat task.wait(.15)until not state.Running or os.clock()-lastSettingsEdit>=.6
+        savePending=false
+        if state.Running then state.SaveNow()end
     end)
 end
-function state.SetAutoExplore(enabled)
-    state.AutoExplore = false
-    requestSave()
-end
-function state.SetThreat()
-    state.Threat=3
-    state.BurstProgress=0
-    requestSave()
-end
-state.SetThreat(state.Threat)
-
--- Each attacked mob gets an event-driven health row; only the fill is eased.
+function state.SetAutoExplore()state.AutoExplore=false;requestSave()end
+function state.SetThreat()state.Threat=3;state.BurstProgress=0;requestSave()end
+state.SetThreat()
 local healthHUD=(function()
 -- BEGIN BUNDLED ENEMY HEALTH
+-- Health subscriptions mark rows dirty; one projection pass coalesces hit bursts.
 return function(ctx)
-    local state,create,corner=ctx.State,ctx.Create,ctx.Corner
-    local now=ctx.Now or os.clock
-    local rows,connections={},{}
-    local healthRows={}
-    local disposed=false
-    local serial,nextUpdate,primary=0,0,nil
-    local layoutDirty,snapshotDirty,nextRankCheck=true,true,0
+    local state=ctx.State
+    local time=ctx.Now or os.clock
+    local rows,byHealth={},{}
+    local subscriptions={}
+    local stopped=false
+    local sequence,paintDue,rankDue=0,0,0
+    local focus
+    local dirtyLayout,dirtySnapshot=true,true
     local api={Rows=rows,Count=0}
-    -- Executors may reload with a fresh getgenv while the old GUI is still alive.
-    -- Destroy only our previous HUD, never the game's own health displays.
-    for _,child in ipairs(ctx.Parent:GetChildren()) do
-        if child.Name=="EnemyHealth" and child:IsA("ScrollingFrame") then child:Destroy() end
+    for _,object in ipairs(ctx.Parent:GetChildren())do
+        if object.Name=="EnemyHealth"and object:IsA("ScrollingFrame")then object:Destroy()end
     end
-    local root=create("ScrollingFrame",{
-        Name="EnemyHealth",Position=UDim2.new(.5,0,.7,0),AnchorPoint=Vector2.new(.5,.5),
-        Size=UDim2.fromOffset(280,52),Visible=false,Active=true,BackgroundTransparency=1,
-        BorderSizePixel=0,CanvasSize=UDim2.new(),ScrollBarThickness=0,
-        ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true,
-    },ctx.Parent)
+    local function make(class,properties,parent)return ctx.Create(class,properties,parent)end
+    local root=make("ScrollingFrame",{Name="EnemyHealth",Position=UDim2.new(.5,0,.7,0),AnchorPoint=Vector2.new(.5,.5),
+        Size=UDim2.fromOffset(280,52),Visible=false,Active=true,BackgroundTransparency=1,BorderSizePixel=0,
+        CanvasSize=UDim2.new(),ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true},ctx.Parent)
     api.Root=root
-    create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5)},root)
-    local function connect(signal,callback)
-        local connection=signal:Connect(callback); connections[#connections+1]=connection; return connection
+    make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5)},root)
+    local function subscribe(signal,fn)
+        local value=signal:Connect(fn);subscriptions[#subscriptions+1]=value;return value
     end
     function api.Number(value)
         local digits=string.format("%.0f",math.floor(math.max(0,value)))
-        return (string.reverse(string.gsub(string.reverse(digits),"(%d%d%d)","%1,")):gsub("^,",""))
+        local parts={}
+        while #digits>3 do table.insert(parts,1,digits:sub(-3));digits=digits:sub(1,-4)end
+        table.insert(parts,1,digits)
+        return table.concat(parts,",")
     end
     local function viewport()
-        local size=ctx.Viewport and ctx.Viewport() or ctx.Parent.AbsoluteSize
-        return size.X>0 and size.Y>0 and size or Vector2.new(1280,720)
+        local size=ctx.Viewport and ctx.Viewport()or ctx.Parent.AbsoluteSize
+        if size.X<=0 or size.Y<=0 then return Vector2.new(1280,720)end
+        return size
     end
-    local function clampPosition()
-        local size=viewport()
+    local function keepOnScreen()
+        local view=viewport()
         local p=root.Position
-        local x,y=p.X.Scale*size.X+p.X.Offset,p.Y.Scale*size.Y+p.Y.Offset
-        local hw,hh=root.Size.X.Offset/2,root.Size.Y.Offset/2
-        local cx=math.clamp(x,hw+4,math.max(hw+4,size.X-hw-4))
-        local cy=math.clamp(y,hh+4,math.max(hh+4,size.Y-hh-4))
-        if cx~=x or cy~=y then root.Position=UDim2.new(p.X.Scale,p.X.Offset+cx-x,p.Y.Scale,p.Y.Offset+cy-y) end
-    end
-    local function layout()
-        local list={}
-        for _,row in pairs(rows) do list[#list+1]=row end
-        table.sort(list,function(a,b)
-            local ar,br=a.Priority,b.Priority
-            return ar~=br and ar<br or ar==br and a.Serial<b.Serial
-        end)
-        local compact=#list>1
-        local width,height=compact and 244 or 280,compact and 42 or 52
-        local total=math.max(height,#list*(height+5)-5)
-        local maximum=math.max(52,math.min(360,math.floor(viewport().Y*.45)))
-        root.Size=UDim2.fromOffset(width,math.min(total,maximum))
-        root.CanvasSize=UDim2.fromOffset(0,total)
-        root.ScrollBarThickness=total>maximum and 3 or 0
-        root.Visible=#list>0
-        api.Count=#list; state.HealthHUDCount=#list
-        for index,row in ipairs(list) do
-            row.Frame.LayoutOrder=index
-            row.Frame.Size=UDim2.fromOffset(width,height)
-            row.Name.Size=UDim2.fromOffset(width-20,15)
-            row.Name.TextSize=compact and 11 or 12
-            row.Track.Position=UDim2.fromOffset(10,compact and 22 or 25)
-            row.Track.Size=UDim2.fromOffset(width-20,compact and 6 or 7)
-            row.Numbers.Position=UDim2.fromOffset(10,compact and 30 or 35)
-            row.Numbers.Size=UDim2.fromOffset(width-20,compact and 11 or 13)
-            row.Numbers.TextSize=compact and 9 or 10
-        end
-        clampPosition()
-        layoutDirty=false
+        local x=p.X.Scale*view.X+p.X.Offset
+        local y=p.Y.Scale*view.Y+p.Y.Offset
+        local halfX,halfY=root.Size.X.Offset/2,root.Size.Y.Offset/2
+        local boundedX=math.clamp(x,halfX+4,math.max(halfX+4,view.X-halfX-4))
+        local boundedY=math.clamp(y,halfY+4,math.max(halfY+4,view.Y-halfY-4))
+        if boundedX~=x or boundedY~=y then root.Position=UDim2.new(p.X.Scale,p.X.Offset+boundedX-x,p.Y.Scale,p.Y.Offset+boundedY-y)end
     end
     local function remove(mob)
         local row=rows[mob]
         if not row then return end
         rows[mob]=nil
-        if healthRows[row.Health]==row then healthRows[row.Health]=nil end
-        layoutDirty,snapshotDirty=true,true
-        for _,connection in ipairs(row.Connections or {}) do pcall(function()connection:Disconnect()end)end
+        if byHealth[row.Health]==row then byHealth[row.Health]=nil end
+        for _,connection in ipairs(row.Connections or {})do pcall(function()connection:Disconnect()end)end
         if row.Tween then pcall(function()row.Tween:Cancel()end)end
         if row.Frame then pcall(function()row.Frame:Destroy()end)end
+        dirtyLayout=true;dirtySnapshot=true
+    end
+    local function arrange()
+        local list={};for _,row in pairs(rows)do if row.Frame then list[#list+1]=row end end
+        table.sort(list,function(a,b)return a.Priority==b.Priority and a.Serial<b.Serial or a.Priority<b.Priority end)
+        local compact=#list>1
+        local width,height=compact and 244 or 280,compact and 42 or 52
+        local fullHeight=math.max(height,#list*(height+5)-5)
+        local maximum=math.max(52,math.min(360,math.floor(viewport().Y*.45)))
+        root.Size=UDim2.fromOffset(width,math.min(fullHeight,maximum))
+        root.CanvasSize=UDim2.fromOffset(0,fullHeight);root.ScrollBarThickness=fullHeight>maximum and 3 or 0
+        root.Visible=#list>0;api.Count=#list;state.HealthHUDCount=#list
+        for index,row in ipairs(list)do
+            row.Frame.LayoutOrder=index;row.Frame.Size=UDim2.fromOffset(width,height)
+            row.Name.Size=UDim2.fromOffset(width-20,15);row.Name.TextSize=compact and 11 or 12
+            row.Track.Position=UDim2.fromOffset(10,compact and 22 or 25);row.Track.Size=UDim2.fromOffset(width-20,compact and 6 or 7)
+            row.Numbers.Position=UDim2.fromOffset(10,compact and 30 or 35);row.Numbers.Size=UDim2.fromOffset(width-20,compact and 11 or 13)
+            row.Numbers.TextSize=compact and 9 or 10
+        end
+        keepOnScreen();dirtyLayout=false
+    end
+    local function paint(row,initial)
+        if stopped or not state.Running or not root.Parent or rows[row.Mob]~=row then return end
+        local hp=math.max(0,row.Health.Value)
+        row.ObservedMax=math.max(row.ObservedMax,hp)
+        local maximum=math.max(1,row.Constrained and row.Health.MaxValue or row.MaximumValue and row.MaximumValue.Value or row.ObservedMax)
+        local fraction=math.clamp(hp/maximum,0,1)
+        if row.Tween then row.Tween:Cancel()end
+        local fill={Size=UDim2.fromScale(fraction,1),BackgroundColor3=Color3.fromRGB(51,199,89)}
+        if initial then row.Fill.Size=fill.Size;row.Fill.BackgroundColor3=fill.BackgroundColor3
+        else row.Tween=ctx.TweenService:Create(row.Fill,TweenInfo.new(.22,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),fill);row.Tween:Play()end
+        row.Numbers.Text=string.format("%s / %s HP · %.0f%%",api.Number(hp),api.Number(maximum),fraction*100)
+        row.Current,row.Maximum=hp,maximum;row.Dirty=false
+        row.DeadAt=hp<=0 and (row.DeadAt or time())or nil
+        if row.Mob==focus or api.Count<=1 then state.ObservedHealth=hp;state.ObservedMaxHealth=maximum end
+        state.HealthUpdates=(state.HealthUpdates or 0)+1;dirtySnapshot=true
+    end
+    local function visuals(row)
+        row.Frame=make("Frame",{Name="Target_"..row.Serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(42,42,44),BackgroundTransparency=0,BorderSizePixel=0},root)
+        row.Frame:SetAttribute("TargetName",row.Mob.Name);ctx.Corner(row.Frame,14)
+        make("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=1,Transparency=.92},row.Frame)
+        row.Name=make("TextLabel",{Name="Name",Text=row.Mob.Name,BackgroundTransparency=1,Position=UDim2.fromOffset(10,4),Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(255,255,255),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
+        row.Track=make("Frame",{Name="Track",BackgroundColor3=Color3.fromRGB(24,24,26),BorderSizePixel=0},row.Frame);ctx.Corner(row.Track,3)
+        row.Fill=make("Frame",{Name="Fill",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.fromRGB(51,199,89),BorderSizePixel=0},row.Track);ctx.Corner(row.Fill,3)
+        row.Numbers=make("TextLabel",{Name="Values",BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
     end
     function api.Touch(mob)
-        if disposed or not root.Parent or not state.Running or not mob or not mob.Parent then return end
-        local row=rows[mob]
-        if row then row.LastAttack=now(); return end
+        if stopped or not root.Parent or not state.Running or not mob or not mob.Parent then return end
+        local existing=rows[mob]
+        if existing then existing.LastAttack=time();return end
         local data=ctx.GetData(mob)
         if not data or not data.Health or data.Health.Value<=0 then return end
-        local sameHealth=healthRows[data.Health]
-        if sameHealth then sameHealth.LastAttack=now();return end
-        serial+=1
-        row={Mob=mob,Health=data.Health,LastAttack=now(),Serial=serial,Connections={},ObservedMax=data.Health.Value,Priority=ctx.Priority and ctx.Priority(mob) or 3}
-        rows[mob]=row
-        healthRows[data.Health]=row
-        layoutDirty,snapshotDirty=true,true
-        row.Frame=create("Frame",{Name="Target_"..serial,Size=UDim2.fromOffset(280,52),BackgroundColor3=Color3.fromRGB(42,42,44),BackgroundTransparency=0,BorderSizePixel=0},root)
-        if disposed or not state.Running or not root.Parent then remove(mob);return end
-        row.Frame:SetAttribute("TargetName",mob.Name)
-        corner(row.Frame,14)
-        create("UIStroke",{Color=Color3.fromRGB(255,255,255),Thickness=1,Transparency=.92},row.Frame)
-        row.Name=create("TextLabel",{Name="Name",Text=mob.Name,BackgroundTransparency=1,Position=UDim2.fromOffset(10,4),Font=Enum.Font.Gotham,TextSize=12,TextColor3=Color3.fromRGB(255,255,255),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
-        row.Track=create("Frame",{Name="Track",BackgroundColor3=Color3.fromRGB(24,24,26),BorderSizePixel=0},row.Frame)
-        corner(row.Track,3)
-        row.Fill=create("Frame",{Name="Fill",Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.fromRGB(51,199,89),BorderSizePixel=0},row.Track)
-        corner(row.Fill,3)
-        row.Numbers=create("TextLabel",{Name="Values",BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},row.Frame)
-        local maximum=data.Entity:FindFirstChild("MaxHealth")
-        local constrained=data.Health:IsA("IntConstrainedValue") or data.Health:IsA("DoubleConstrainedValue")
-        local initial=true
-        local function render()
-            if disposed or not root.Parent or not state.Running or rows[mob]~=row then return end
-            row.Dirty=false
-            local hp=math.max(0,row.Health.Value)
-            row.ObservedMax=math.max(row.ObservedMax,hp)
-            local maxHP=math.max(1,constrained and row.Health.MaxValue or maximum and maximum.Value or row.ObservedMax)
-            local fraction=math.clamp(hp/maxHP,0,1)
-            local color=Color3.fromRGB(51,199,89)
-            if row.Tween then row.Tween:Cancel() end
-            if initial then row.Fill.Size=UDim2.fromScale(fraction,1); row.Fill.BackgroundColor3=color; initial=false
-            else row.Tween=ctx.TweenService:Create(row.Fill,TweenInfo.new(.22,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.fromScale(fraction,1),BackgroundColor3=color}); row.Tween:Play() end
-            row.Numbers.Text=string.format("%s / %s HP · %.0f%%",api.Number(hp),api.Number(maxHP),fraction*100)
-            row.Current,row.Maximum=hp,maxHP
-            snapshotDirty=true
-            row.DeadAt=hp<=0 and (row.DeadAt or now()) or nil
-            if mob==primary or api.Count<=1 then state.ObservedHealth,state.ObservedMaxHealth=hp,maxHP end
-            state.HealthUpdates=(state.HealthUpdates or 0)+1
-        end
-        row.Render=render
-        local function dirty()row.Dirty=true end
-        row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("Value"):Connect(dirty)
-        if constrained then row.Connections[#row.Connections+1]=data.Health:GetPropertyChangedSignal("MaxValue"):Connect(dirty)
-        elseif maximum and maximum:IsA("ValueBase") then row.Connections[#row.Connections+1]=maximum.Changed:Connect(dirty) end
-        render(); layout()
+        if byHealth[data.Health]then byHealth[data.Health].LastAttack=time();return end
+        sequence+=1
+        local row={Mob=mob,Health=data.Health,Connections={},Serial=sequence,LastAttack=time(),ObservedMax=data.Health.Value,
+            Priority=ctx.Priority and ctx.Priority(mob)or 3,MaximumValue=data.Entity:FindFirstChild("MaxHealth")}
+        row.Constrained=row.Health:IsA("IntConstrainedValue")or row.Health:IsA("DoubleConstrainedValue")
+        rows[mob]=row;byHealth[row.Health]=row
+        visuals(row)
+        if stopped or not root.Parent or not state.Running then remove(mob);return end
+        local function changed()row.Dirty=true end
+        row.Connections[#row.Connections+1]=row.Health:GetPropertyChangedSignal("Value"):Connect(changed)
+        if row.Constrained then row.Connections[#row.Connections+1]=row.Health:GetPropertyChangedSignal("MaxValue"):Connect(changed)
+        elseif row.MaximumValue and row.MaximumValue:IsA("ValueBase")then row.Connections[#row.Connections+1]=row.MaximumValue.Changed:Connect(changed)end
+        row.Render=function()paint(row,false)end
+        paint(row,true);dirtyLayout=true;arrange()
     end
-    function api.Focus(mob) primary=mob end
-    function api.Update(time)
-        if disposed or not root.Parent then return end
-        time=time or now()
-        if time<nextUpdate then return end
-        nextUpdate=time+.12
-        local refreshRanks=time>=nextRankCheck
-        if refreshRanks then nextRankCheck=time+.5 end
-        for mob,row in pairs(rows) do
+    function api.Focus(mob)focus=mob end
+    function api.Update(stamp)
+        if stopped or not root.Parent then return end
+        stamp=stamp or time();if stamp<paintDue then return end;paintDue=stamp+.12
+        local ranking=stamp>=rankDue;if ranking then rankDue=stamp+.5 end
+        for mob,row in pairs(rows)do
             local present=mob.Parent and row.Health.Parent and (not ctx.Present or ctx.Present(mob))
-            if present and row.Dirty then row.Render()end
-            if row.DeadAt then if time-row.DeadAt>.45 then remove(mob) end
-            elseif not present or (time-row.LastAttack>1.4 and not (mob==primary and (state.SkillPreparing or state.SkillCastRunning))) then remove(mob) end
-            if rows[mob] and refreshRanks and ctx.Priority then
-                local priority=ctx.Priority(mob)
-                if priority~=row.Priority then row.Priority=priority; layoutDirty=true end
-            end
+            if present and row.Dirty then paint(row,false)end
+            local expired=row.DeadAt and stamp-row.DeadAt>.45
+            local idle=stamp-row.LastAttack>1.4 and not(mob==focus and (state.SkillPreparing or state.SkillCastRunning))
+            if expired or not row.DeadAt and (not present or idle)then remove(mob)
+            elseif ranking and ctx.Priority then local rank=ctx.Priority(mob);if rank~=row.Priority then row.Priority=rank;dirtyLayout=true end end
         end
-        if snapshotDirty then
-            local snapshot={}
-            for mob,row in pairs(rows) do snapshot[#snapshot+1]={Name=mob.Name,Health=row.Current,MaxHealth=row.Maximum} end
-            state.HealthHUDTargets=snapshot
-            snapshotDirty=false
+        if dirtySnapshot then
+            local snapshot={};for mob,row in pairs(rows)do snapshot[#snapshot+1]={Name=mob.Name,Health=row.Current,MaxHealth=row.Maximum}end
+            state.HealthHUDTargets=snapshot;dirtySnapshot=false
         end
-        if layoutDirty then layout() end
+        if dirtyLayout then arrange()end
     end
-    local position=ctx.Position
-    if type(position)=="table" and #position==4 then
-        local valid=true
-        for _,value in ipairs(position) do if type(value)~="number" or value~=value or math.abs(value)>100000 then valid=false end end
-        if valid then root.Position=UDim2.new(position[1],position[2],position[3],position[4]); clampPosition() end
+    local saved=ctx.Position
+    if type(saved)=="table"and #saved==4 then
+        local valid=true;for _,n in ipairs(saved)do if type(n)~="number"or n~=n or math.abs(n)>100000 then valid=false end end
+        if valid then root.Position=UDim2.new(saved[1],saved[2],saved[3],saved[4]);keepOnScreen()end
     end
-    connect(ctx.Parent:GetPropertyChangedSignal("AbsoluteSize"),function() layoutDirty=true end)
-    local dragInput,dragStart,dragPosition
-    connect(root.InputBegan,function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragInput,dragStart,dragPosition=input,input.Position,root.Position end
+    local dragging
+    subscribe(ctx.Parent:GetPropertyChangedSignal("AbsoluteSize"),function()dirtyLayout=true end)
+    subscribe(root.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging={Input=input,Origin=input.Position,Position=root.Position}end
     end)
-    connect(ctx.Input.InputChanged,function(input)
-        if dragInput and (input==dragInput or input.UserInputType==Enum.UserInputType.MouseMovement) then
-            local delta=input.Position-dragStart
-            root.Position=UDim2.new(dragPosition.X.Scale,dragPosition.X.Offset+delta.X,dragPosition.Y.Scale,dragPosition.Y.Offset+delta.Y)
-            clampPosition()
+    subscribe(ctx.Input.InputChanged,function(input)
+        if dragging and (input==dragging.Input or input.UserInputType==Enum.UserInputType.MouseMovement)then
+            local delta=input.Position-dragging.Origin;local p=dragging.Position
+            root.Position=UDim2.new(p.X.Scale,p.X.Offset+delta.X,p.Y.Scale,p.Y.Offset+delta.Y);keepOnScreen()
         end
     end)
-    connect(ctx.Input.InputEnded,function(input) if input==dragInput or (dragInput and input.UserInputType==Enum.UserInputType.MouseButton1 and dragInput.UserInputType==Enum.UserInputType.MouseButton1) then dragInput=nil; if ctx.Save then ctx.Save() end end end)
-    function api.Destroy(fromDestroying)
-        if disposed then return end
-        disposed=true
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        local mobs={}; for mob in pairs(rows) do mobs[#mobs+1]=mob end
-        for _,mob in ipairs(mobs) do remove(mob) end
-        api.Count=0; state.HealthHUDCount=0; state.HealthHUDTargets={}
-        if not fromDestroying then root:Destroy() end
+    subscribe(ctx.Input.InputEnded,function(input)
+        if dragging and (input==dragging.Input or input.UserInputType==Enum.UserInputType.MouseButton1 and dragging.Input.UserInputType==Enum.UserInputType.MouseButton1)then dragging=nil;if ctx.Save then ctx.Save()end end
+    end)
+    function api.Destroy(fromRoot)
+        if stopped then return end
+        stopped=true
+        for _,connection in ipairs(subscriptions)do connection:Disconnect()end;table.clear(subscriptions)
+        for mob in pairs(rows)do remove(mob)end
+        table.clear(byHealth);api.Count=0;state.HealthHUDCount=0;state.HealthHUDTargets={}
+        if not fromRoot then root:Destroy()end
     end
-    connect(root.Destroying,function()api.Destroy(true)end)
+    subscribe(root.Destroying,function()api.Destroy(true)end)
     return api
 end
 
 -- END BUNDLED ENEMY HEALTH
-end)()({State=state,Parent=gui,Create=create,Corner=corner,GetData=getMobData,
-    TweenService=TweenService,Input=UserInputService,Position=configData.HealthHUDPosition,Save=requestSave,
-    Priority=function(mob) return targetPriority.Rank(mob) end,
-    Present=function(mob) return mob:IsDescendantOf(workspace) end,
-})
+end)()({State=state,Parent=gui,Create=create,Corner=corner,GetData=getMobData,TweenService=TweenService,Input=UserInputService,
+    Position=configData.HealthHUDPosition,Save=requestSave,Priority=function(mob)return targetPriority.Rank(mob)end,
+    Present=function(mob)return mob:IsDescendantOf(workspace)end})
 enemyHUD=healthHUD.Root
-local function trackHealth(mob) healthHUD.Focus(mob) end
-
+local function trackHealth(mob)return healthHUD.Focus(mob)end
 local skillToggle=uiButton("SkillAura","")
 local skillDropdown=uiButton("SkillDropdown",state.SelectedSkill)
 local skillList=controllerViews.New({Name="SkillOptions"})
+local travelHeading=uiLabel("TravelHeading","")
+local travelDropdown=uiButton("TeleportDropdown","")
+local travelList=controllerViews.New({Name="TravelOptions"})
 local AttackStats=require(ReplicatedStorage.Shared.Library.AttackStats)
-function state.SetSkillRange(value)
-    state.SkillRange=math.clamp(math.floor(tonumber(value)or state.SkillRange),20,120)
-end
-local function refreshSkillChoices()
-    state.SkillChoices=state.WeaponSkills and state.WeaponSkills.Choices()or {}
-end
-function state.SetSelectedSkill(name)
-    return state.WeaponSkills and state.WeaponSkills.Select(name)or false
-end
-function state.SetSkillAura(enabled)
-    if state.StopEverything and enabled==true then return false end
-    state.SkillAura=enabled==true
+local function refreshSkillChoices()state.SkillChoices=state.WeaponSkills and state.WeaponSkills.Choices()or {}end
+local function setTravelStatus(message)state.TravelStatus=message end
+local function setTravelOpen()end
+state.TravelStatus="";state.SetTravelOpen=setTravelOpen
+function state.SetSkillRange(value)state.SkillRange=math.clamp(math.floor(tonumber(value)or state.SkillRange),20,120)end
+function state.SetSelectedSkill(name)return state.WeaponSkills and state.WeaponSkills.Select(name)or false end
+function state.SetSkillAura(requested)
+    if requested and state.StopEverything then return false end
+    state.SkillAura=requested==true
     if state.AuraTouch then state.AuraTouch.Update()end
     if state.WakeSkillAura then state.WakeSkillAura()end
     if not state.SkillAura and state.CancelSkillAura then state.CancelSkillAura("Skill aura disabled")end
@@ -1776,423 +1587,416 @@ function state.SetSkillAura(enabled)
     requestSave()
 end
 refreshSkillChoices()
-local travelHeading=uiLabel("TravelHeading","")
-local travelDropdown=uiButton("TeleportDropdown","")
-local travelList=controllerViews.New({Name="TravelOptions"})
-state.TravelStatus=""
-local function setTravelStatus(message)state.TravelStatus=message end
-local function setTravelOpen()end
-state.SetTravelOpen=setTravelOpen
-state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelList,Pages={},TabButtons={}}
+state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelList,Pages={},TabButtons={},BoostButtons={}}
+local adapters={"AutoEquipBestSword","AtheonDodge","MiscSkillToggle","MiscSkillDropdown","MiscSkillOptions","BoostDropdown",
+    "BoostOptions","PlayerSelector","PlayerOptions","TeleportPlayer","ViewPlayer","ViewInventory","PlayerInventory","PlayerMessage"}
+for _,name in ipairs(adapters)do state.UI[name]=controllerViews.New({Name=name})end
 for _,name in ipairs({"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"})do
     state.UI.Pages[name]=controllerViews.New({Name=name})
 end
-for _,name in ipairs({"AutoEquipBestSword","AtheonDodge","MiscSkillToggle","MiscSkillDropdown","MiscSkillOptions",
-    "BoostDropdown","BoostOptions","PlayerSelector","PlayerOptions","TeleportPlayer","ViewPlayer","ViewInventory",
-    "PlayerInventory","PlayerMessage"})do state.UI[name]=controllerViews.New({Name=name})end
-state.UI.BoostButtons={}
 function state.SetTab(name)state.UI.ActiveTab=name end
-function state.SetAutoEquipBestSword(on)
-    state.AutoEquipBestSword=on==true
+function state.SetAutoEquipBestSword(requested)
+    state.AutoEquipBestSword=requested==true
     if state.ProgressionGearController then state.ProgressionGearController.Reset()end
     requestSave()
 end
-function state.SetAtheonDodge(on)
-    state.AtheonDodge=on==true
-    if not state.AtheonDodge and state.AtheonDodgeController then state.AtheonDodgeController.Reset()end
+function state.SetAtheonDodge(requested)
+    state.AtheonDodge=requested==true
+    if not requested and state.AtheonDodgeController then state.AtheonDodgeController.Reset()end
     requestSave()
 end
-state.SetAutoEquipBestSword(restore.AutoEquipBestSword)
-state.SetAtheonDodge(restore.AtheonDodge)
+state.SetAutoEquipBestSword(restore.AutoEquipBestSword);state.SetAtheonDodge(restore.AtheonDodge)
+state.SetTab(preference("ActiveTab","Main"))
 state.MiscMenuMethods={Dismantle="openDismantle",Upgrade="openUpgrade",["The Forge"]="openCrystalForge"}
 function state.OpenGameMenu(name)
     if state.StopEverything then return false,"Stop Everything is on"end
     local method=state.MiscMenuMethods[name]
-    if not method or type(GameUI[method])~="function"then return false,"Menu is unavailable"end
-    local ok,message=pcall(GameUI[method])
-    if not ok then state.LastMenuError=tostring(message)end
-    return ok,message
+    if type(GameUI[method])~="function"then return false,"Menu is unavailable"end
+    local ok,reason=pcall(GameUI[method]);if not ok then state.LastMenuError=tostring(reason)end
+    return ok,reason
 end
-state.SetTab(preference("ActiveTab","Main"))
-
 do
-    local function renderBoost()end
-    local createPlayerVisibility=(function()
+    local attachAntiAFK=(function()
+-- BEGIN BUNDLED ANTI AFK
+-- Idle events acquire a short pulse lease; no polling worker is created.
+return function(ctx)
+    local result={Enabled=true,Pulses=0}
+    local lease={Running=false,Due=0,Closed=false}
+    local clock=ctx.Clock or os.clock
+    local state=ctx.State
+    state.AntiAfkStatus="Active · waiting for idle"
+    local function onIdle()
+        local stamp=clock()
+        if lease.Closed or lease.Running or state.Running==false or stamp<lease.Due then return end
+        lease.Running=true;lease.Due=stamp+20
+        local success,reason=pcall(ctx.Pulse)
+        lease.Running=false
+        if lease.Closed or state.Running==false then return end
+        if success then
+            result.Pulses+=1
+            state.LastAntiAfkError=nil
+            state.AntiAfkStatus="Active · idle input sent"
+        else
+            state.LastAntiAfkError=tostring(reason)
+            state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
+        end
+    end
+    local subscription=ctx.Player.Idled:Connect(onIdle)
+    function result.Destroy()
+        if lease.Closed then return end
+        lease.Closed=true;result.Enabled=false
+        subscription:Disconnect();subscription=nil
+        state.AntiAfkStatus="Stopped"
+    end
+    return result
+end
+
+-- END BUNDLED ANTI AFK
+    end)()
+    local input
+    state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=function()
+        input=input or game:GetService("VirtualUser")
+        pcall(input.CaptureController,input)
+        local camera=workspace.CurrentCamera
+        input:ClickButton2(Vector2.zero,camera and camera.CFrame or CFrame.new())
+    end})
+    local attachVisibility=(function()
 -- BEGIN BUNDLED HIDE PLAYERS
--- Local rendering only. Never hide the local character or change physics.
+-- Visibility is a reversible property overlay scoped to remote player roots.
 return function(ctx)
     local api={BlockedEffects=0}
-    local enabled,disposed=false,false
-    local hideCharacters,hideEffects=false,false
-    local players,connections,characters={},{},{}
-    local itemFolder,itemConnections=nil,{}
-    local effectHooks={}
-    local selector="BasePart,Decal,ParticleEmitter,Beam,Trail,Light,Highlight,BillboardGui,SurfaceGui,Humanoid,Sound"
+    local modes={Characters=false,Effects=false,Closed=false}
+    local roster,roots,globalConnections,itemConnections,hooks={},{},{},{},{}
+    local itemFolder
     local invisible=NumberSequence.new(1)
-    local function restore(record)
-        for _,connection in ipairs(record.Connections) do connection:Disconnect() end
-        for _,connection in pairs(record.Guards) do connection:Disconnect() end
-        for instance,properties in pairs(record.Properties) do
-            for name,value in pairs(properties) do pcall(function() instance[name]=value end) end
+    local classes="BasePart,Decal,ParticleEmitter,Beam,Trail,Light,Highlight,BillboardGui,SurfaceGui,Humanoid,Sound"
+    local function disconnect(list)
+        for _,connection in pairs(list)do connection:Disconnect()end
+        table.clear(list)
+    end
+    local function enabled()return not modes.Closed and (modes.Characters or modes.Effects)end
+    local function restoreValue(layer,object)
+        local before=layer.Values[object]
+        layer.Values[object]=nil
+        local guard=layer.Guards[object]
+        if guard then guard:Disconnect();layer.Guards[object]=nil end
+        if before then for property,value in pairs(before)do pcall(function()object[property]=value end)end end
+    end
+    local function release(root)
+        local layer=roots[root]
+        if not layer then return end
+        roots[root]=nil;disconnect(layer.Connections)
+        for object in pairs(layer.Values)do restoreValue(layer,object)end
+        disconnect(layer.Guards)
+    end
+    local function properties(object)
+        if modes.Characters then
+            if object:IsA("BasePart")then return {Transparency=1,LocalTransparencyModifier=1,CastShadow=false}end
+            if object:IsA("Decal")then return {Transparency=1}end
+            if object:IsA("BillboardGui")or object:IsA("SurfaceGui")then return {Enabled=false}end
+            if object:IsA("Humanoid")then return {DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None}end
         end
+        if object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")then return {Enabled=false,Transparency=invisible}end
+        if object:IsA("Highlight")then return {Enabled=false}end
+        if object:IsA("Light")then return {Brightness=0}end
+        if object:IsA("Sound")then return {Volume=0}end
     end
-    local function detach(character)
-        local record=characters[character]
-        if record then characters[character]=nil; restore(record) end
-    end
-    local function attach(player,character)
-        if disposed or not enabled or player==ctx.Players.LocalPlayer or not character or characters[character] then return end
-        local record={Properties={},Connections={},Guards={}}
-        characters[character]=record
-        local function hide(instance)
-            if disposed or not enabled or characters[character]~=record or record.Properties[instance] then return end
-            local properties
-            if instance:IsA("BasePart") and hideCharacters then properties={Transparency=1,LocalTransparencyModifier=1,CastShadow=false}
-            elseif instance:IsA("Decal") and hideCharacters then properties={Transparency=1}
-            elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible}
-            elseif instance:IsA("Highlight") then properties={Enabled=false}
-            elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and hideCharacters then properties={Enabled=false}
-            elseif instance:IsA("Light") then properties={Brightness=0}
-            elseif instance:IsA("Sound") then properties={Volume=0}
-            elseif instance:IsA("Humanoid") and hideCharacters then properties={DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None} end
-            if not properties then return end
-            local before={}
-            for name,value in pairs(properties) do before[name]=instance[name]; instance[name]=value end
-            record.Properties[instance]=before
-            if properties.Enabled==false then
-                record.Guards[instance]=instance:GetPropertyChangedSignal("Enabled"):Connect(function()
-                    if enabled and not disposed and characters[character]==record and record.Properties[instance] and instance.Enabled then instance.Enabled=false end
+    local function overlay(person,root)
+        if not root or not enabled()or person==ctx.Players.LocalPlayer or roots[root]then return end
+        local layer={Owner=person,Values={},Guards={},Connections={}}
+        roots[root]=layer
+        local function apply(object)
+            if not enabled()or roots[root]~=layer or layer.Values[object]then return end
+            local changes=properties(object)
+            if not changes then return end
+            local old={}
+            for property,value in pairs(changes)do old[property]=object[property];object[property]=value end
+            layer.Values[object]=old
+            if changes.Enabled==false then
+                layer.Guards[object]=object:GetPropertyChangedSignal("Enabled"):Connect(function()
+                    if enabled()and roots[root]==layer and layer.Values[object]and object.Enabled then object.Enabled=false end
                 end)
             end
-            if instance:IsA("ParticleEmitter") then instance:Clear() end
+            if object:IsA("ParticleEmitter")then pcall(function()object:Clear()end)end
         end
-        record.Connections[1]=character.DescendantAdded:Connect(hide)
-        record.Connections[2]=character.DescendantRemoving:Connect(function(instance)
-            local before=record.Properties[instance]
-            if before then
-                record.Properties[instance]=nil
-                if record.Guards[instance] then record.Guards[instance]:Disconnect(); record.Guards[instance]=nil end
-                for name,value in pairs(before) do pcall(function() instance[name]=value end) end
-            end
-        end)
-        for _,instance in ipairs(character:QueryDescendants(selector)) do hide(instance) end
+        layer.Connections={root.DescendantAdded:Connect(apply),root.DescendantRemoving:Connect(function(object)restoreValue(layer,object)end)}
+        for _,object in ipairs(root:QueryDescendants(classes))do apply(object)end
     end
-    local function removePlayer(player)
-        local record=players[player]
+    local function unwatch(person)
+        local record=roster[person]
         if not record then return end
-        for _,connection in ipairs(record.Connections) do connection:Disconnect() end
-        if record.Character then detach(record.Character) end
-        if record.Items then detach(record.Items) end
-        players[player]=nil
+        roster[person]=nil;disconnect(record.Connections)
+        if record.Character then release(record.Character)end
+        if record.Items then release(record.Items)end
     end
-    local function attachItems(player)
-        local record=players[player]
+    local function updateItems(person)
+        local record=roster[person]
         if not record then return end
-        local items=itemFolder and itemFolder:FindFirstChild(tostring(player.UserId))
-        if items==record.Items then return end
-        if record.Items then detach(record.Items) end
-        record.Items=items
-        attach(player,items)
+        local nextRoot=itemFolder and itemFolder:FindFirstChild(tostring(person.UserId))
+        if record.Items==nextRoot then return end
+        if record.Items then release(record.Items)end
+        record.Items=nextRoot;overlay(person,nextRoot)
     end
-    local function watchItems()
-        local folder=ctx.Workspace and ctx.Workspace:FindFirstChild("CharacterItems")
-        if folder==itemFolder then return end
-        for _,connection in ipairs(itemConnections) do connection:Disconnect() end
-        table.clear(itemConnections)
-        itemFolder=folder
-        if folder then
-            itemConnections[1]=folder.ChildAdded:Connect(function(child)
-                for player in pairs(players) do if child.Name==tostring(player.UserId) then attachItems(player) end end
-            end)
-            itemConnections[2]=folder.ChildRemoved:Connect(function(child)
-                for _,record in pairs(players) do if record.Items==child then detach(child); record.Items=nil end end
-            end)
+    local function itemFolderChanged()
+        local current=ctx.Workspace and ctx.Workspace:FindFirstChild("CharacterItems")
+        if current==itemFolder then return end
+        disconnect(itemConnections);itemFolder=current
+        if current then
+            itemConnections={current.ChildAdded:Connect(function(child)
+                for person in pairs(roster)do if tostring(person.UserId)==child.Name then updateItems(person)end end
+            end),current.ChildRemoved:Connect(function(child)
+                for _,record in pairs(roster)do if record.Items==child then release(child);record.Items=nil end end
+            end)}
         end
-        for player in pairs(players) do attachItems(player) end
+        for person in pairs(roster)do updateItems(person)end
     end
-    local function addPlayer(player)
-        if disposed or not enabled or player==ctx.Players.LocalPlayer or players[player] then return end
+    local function watch(person)
+        if not enabled()or person==ctx.Players.LocalPlayer or roster[person]then return end
         local record={Connections={}}
-        players[player]=record
-        local function changed(character)
-            if record.Character then detach(record.Character) end
-            record.Character=character; attach(player,character)
+        roster[person]=record
+        local function characterChanged(character)
+            if record.Character then release(record.Character)end
+            record.Character=character;overlay(person,character)
         end
-        record.Connections[1]=player.CharacterAdded:Connect(changed)
-        record.Connections[2]=player.CharacterRemoving:Connect(function(character)
-            detach(character); if record.Character==character then record.Character=nil end
-        end)
-        changed(player.Character)
-        attachItems(player)
+        record.Connections={person.CharacterAdded:Connect(characterChanged),person.CharacterRemoving:Connect(function(character)
+            release(character);if record.Character==character then record.Character=nil end
+        end)}
+        characterChanged(person.Character);updateItems(person)
     end
     local function owner(value)
-        if typeof(value)~="Instance" and type(value)~="table" then return nil end
+        local kind=typeof(value)
+        if kind~="Instance"and type(value)~="table"then return nil end
         if value==ctx.Players.LocalPlayer then return false end
-        for player,record in pairs(players) do
-            if value==player then return true end
-            if typeof(value)=="Instance" then
-                if record.Character and (value==record.Character or value:IsDescendantOf(record.Character)) then return true end
-                if record.Items and (value==record.Items or value:IsDescendantOf(record.Items)) then return true end
+        local localCharacter=ctx.Players.LocalPlayer.Character
+        if kind=="Instance"and localCharacter and (value==localCharacter or value:IsDescendantOf(localCharacter))then return false end
+        for person,record in pairs(roster)do
+            if value==person then return true end
+            if kind=="Instance"then
+                for _,root in pairs({record.Character,record.Items})do if value==root or value:IsDescendantOf(root)then return true end end
             end
         end
-        local localCharacter=ctx.Players.LocalPlayer.Character
-        if typeof(value)=="Instance" and localCharacter and (value==localCharacter or value:IsDescendantOf(localCharacter)) then return false end
         return nil
     end
-    function api.IsOtherEffect(data)
-        if type(data)~="table" then return owner(data)==true end
-        -- Only source/caster fields; target ownership must not suppress hazards.
-        for _,field in ipairs({"Character","Player","SourceCharacter","SourcePlayer","Caster"}) do
-            local result=owner(data[field])
-            if result~=nil then return result end
+    function api.IsOtherEffect(payload)
+        if type(payload)~="table"then return owner(payload)==true end
+        for _,field in ipairs({"Character","Player","SourceCharacter","SourcePlayer","Caster"})do
+            local found=owner(payload[field]);if found~=nil then return found end
         end
         return false
     end
-    local function hookEffects()
-        for _,service in ipairs(ctx.EffectServices or {}) do
-            if type(service.DoEffect)=="function" then
-                local previous=service.DoEffect
-                local wrapper=function(name,data,...)
-                    if enabled and not disposed and name~="Damage Text" and api.IsOtherEffect(data) then api.BlockedEffects+=1; return end
-                    return previous(name,data,...)
+    local function cleanup()
+        disconnect(globalConnections);disconnect(itemConnections);itemFolder=nil
+        for _,hook in ipairs(hooks)do if hook.Service.DoEffect==hook.Wrapper then hook.Service.DoEffect=hook.Previous end end
+        table.clear(hooks)
+        for person in pairs(roster)do unwatch(person)end
+        for root in pairs(roots)do release(root)end
+    end
+    local function initialize()
+        globalConnections={ctx.Players.PlayerAdded:Connect(watch),ctx.Players.PlayerRemoving:Connect(unwatch)}
+        if ctx.Workspace then
+            globalConnections[#globalConnections+1]=ctx.Workspace.ChildAdded:Connect(function(child)if child.Name=="CharacterItems"then itemFolderChanged()end end)
+            globalConnections[#globalConnections+1]=ctx.Workspace.ChildRemoved:Connect(function(child)if child==itemFolder then itemFolderChanged()end end)
+        end
+        itemFolderChanged()
+        for _,person in ipairs(ctx.Players:GetPlayers())do watch(person)end
+        for _,service in ipairs(ctx.EffectServices or {})do
+            if type(service.DoEffect)=="function"then
+                local old=service.DoEffect
+                local wrapper=function(name,payload,...)
+                    if enabled()and name~="Damage Text"and api.IsOtherEffect(payload)then api.BlockedEffects+=1;return end
+                    return old(name,payload,...)
                 end
-                service.DoEffect=wrapper
-                effectHooks[#effectHooks+1]={Service=service,Previous=previous,Wrapper=wrapper}
+                service.DoEffect=wrapper;hooks[#hooks+1]={Service=service,Previous=old,Wrapper=wrapper}
             end
         end
     end
-    local function clear()
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        table.clear(connections)
-        for _,connection in ipairs(itemConnections) do connection:Disconnect() end
-        table.clear(itemConnections); itemFolder=nil
-        for _,hook in ipairs(effectHooks) do if hook.Service.DoEffect==hook.Wrapper then hook.Service.DoEffect=hook.Previous end end
-        table.clear(effectHooks)
-        for player in pairs(players) do removePlayer(player) end
-        for character in pairs(characters) do detach(character) end
-    end
-    local function setMode(charactersValue,effectsValue)
-        if disposed then return false end
-        charactersValue=charactersValue==true; effectsValue=effectsValue==true
-        local wasEnabled,wasCharacters=enabled,hideCharacters
-        hideCharacters,hideEffects=charactersValue,effectsValue
-        enabled=hideCharacters or hideEffects
-        if wasEnabled==enabled and wasCharacters==hideCharacters then return true end
-        clear()
-        if not enabled then return true end
-        connections[1]=ctx.Players.PlayerAdded:Connect(addPlayer)
-        connections[2]=ctx.Players.PlayerRemoving:Connect(removePlayer)
-        if ctx.Workspace then
-            connections[3]=ctx.Workspace.ChildAdded:Connect(function(child) if child.Name=="CharacterItems" then watchItems() end end)
-            connections[4]=ctx.Workspace.ChildRemoved:Connect(function(child) if child==itemFolder then watchItems() end end)
-        end
-        watchItems(); hookEffects()
-        for _,player in ipairs(ctx.Players:GetPlayers()) do addPlayer(player) end
+    local function mode(characters,effects)
+        if modes.Closed then return false end
+        characters,effects=characters==true,effects==true
+        if modes.Characters==characters and modes.Effects==effects then return true end
+        cleanup();modes.Characters=characters;modes.Effects=effects
+        if enabled()then initialize()end
         return true
     end
-    function api.Set(value) return setMode(value,hideEffects) end
-    function api.SetEffects(value) return setMode(hideCharacters,value) end
-    function api.Destroy()
-        if disposed then return end
-        disposed=true; enabled=false; clear()
-    end
+    function api.Set(value)return mode(value,modes.Effects)end
+    function api.SetEffects(value)return mode(modes.Characters,value)end
+    function api.Destroy()if modes.Closed then return end;modes.Closed=true;cleanup()end
     return api
 end
 
 -- END BUNDLED HIDE PLAYERS
     end)()
-    local playerVisibility=createPlayerVisibility({Players=Players,Workspace=workspace,
-        EffectServices={require(services.Graphics),require(services.SkillEffects)}})
-    state.PlayerVisibility=playerVisibility
-    local createBoost=(function()
+    local attachBoosts=(function()
 -- BEGIN BUNDLED PERFORMANCE BOOST
--- Source performance options; text is visible unless explicitly hidden.
+-- Effective booster policy is derived from individual selections plus one aggregate mode.
 return function(ctx)
     local state=ctx.State
     local api={Names={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}}
-    local options,known={},{}
-    for _,name in ipairs(api.Names) do known[name]=true; options[name]=ctx.Options and ctx.Options[name]==true end
-    state.PerformanceBoosters=options
-    local disposed=false
-    local hitFolder,added,removed
-    local particles={}
-    local invisible=NumberSequence.new(1)
-    local graphics=ctx.Graphics
-    local original,wrapper
-    local uiOriginal,uiWrapper
-    local renderOwned,fpsOwned=false,false
-    local oldCap
-    local uiVisible=false
-    if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS); if ok and type(value)=="number" then oldCap=value end end
-    local function wanted(name)return options[name]or options["Remove everything"]end
-    local function active(name) return not disposed and not ctx.Paused and state.Running and not state.StopEverything and wanted(name) end
-    function api.SetUIVisible(visible)
-        visible=visible==true
-        if disposed or uiVisible==visible then return end
-        uiVisible=visible
-        if fpsOwned then
-            local ok,message=pcall(ctx.SetFPS,uiVisible and 60 or 15)
-            if not ok then state.LastBoostError=tostring(message)end
-        end
+    local selected,known={},{}
+    for _,name in ipairs(api.Names)do known[name]=true;selected[name]=ctx.Options and ctx.Options[name]==true end
+    state.PerformanceBoosters=selected
+    local owned={Closed=false,Visible=false,Rendering=false,FPS=false}
+    local initialCap
+    if ctx.GetFPS then local ok,value=pcall(ctx.GetFPS);if ok and type(value)=="number"then initialCap=value end end
+    local transparent=NumberSequence.new(1)
+    local particles={Folder=nil,Connections={},Values={}}
+    local function desired(name)return selected[name]==true or selected["Remove everything"]==true end
+    local function live(name)return not owned.Closed and not ctx.Paused and state and state.Running and not state.StopEverything and desired(name)end
+    local function releaseParticle(item)
+        local before=particles.Values[item]
+        if not before then return end
+        particles.Values[item]=nil
+        pcall(function()item.Enabled=before[1];item.Transparency=before[2]end)
     end
-    local function restoreParticles()
-        for instance,record in pairs(particles) do pcall(function() instance.Enabled=record.Enabled; instance.Transparency=record.Transparency end) end
-        table.clear(particles)
-    end
-    local function suppress(instance)
-        if not active("No damage particles") or particles[instance] then return end
-        if not (instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail")) then return end
-        particles[instance]={Enabled=instance.Enabled,Transparency=instance.Transparency}
-        instance.Enabled=false; instance.Transparency=invisible
-        if instance:IsA("ParticleEmitter") then instance:Clear() end
+    local function hideParticle(item)
+        if not live("No damage particles")or particles.Values[item]then return end
+        if not(item:IsA("ParticleEmitter")or item:IsA("Beam")or item:IsA("Trail"))then return end
+        particles.Values[item]={item.Enabled,item.Transparency}
+        item.Enabled=false;item.Transparency=transparent
+        if item:IsA("ParticleEmitter")then pcall(function()item:Clear()end)end
     end
     local function detachParticles()
-        if added then added:Disconnect(); added=nil end
-        if removed then removed:Disconnect(); removed=nil end
-        restoreParticles(); hitFolder=nil
+        for _,connection in ipairs(particles.Connections)do connection:Disconnect()end
+        table.clear(particles.Connections)
+        for item in pairs(particles.Values)do releaseParticle(item)end
+        particles.Folder=nil
     end
-    local function attachParticles()
-        local folder=ctx.Workspace:FindFirstChild("HitEffects")
-        if folder==hitFolder then return end
-        detachParticles(); hitFolder=folder
+    local function syncParticles()
+        local folder=desired("No damage particles")and ctx.Workspace:FindFirstChild("HitEffects")or nil
+        if folder==particles.Folder then return end
+        detachParticles();particles.Folder=folder
         if not folder then return end
-        added=folder.DescendantAdded:Connect(suppress)
-        removed=folder.DescendantRemoving:Connect(function(instance)
-            local record=particles[instance]
-            if record then pcall(function() instance.Enabled=record.Enabled; instance.Transparency=record.Transparency end); particles[instance]=nil end
-        end)
-        for _,instance in ipairs(folder:QueryDescendants("ParticleEmitter,Beam,Trail")) do suppress(instance) end
+        particles.Connections={folder.DescendantAdded:Connect(hideParticle),folder.DescendantRemoving:Connect(releaseParticle)}
+        for _,item in ipairs(folder:QueryDescendants("ParticleEmitter,Beam,Trail"))do hideParticle(item)end
     end
-    local function hookGraphics()
-        if wrapper and graphics.ServerEvent==wrapper then return end
-        original=graphics.ServerEvent
-        local previous=original
-        wrapper=function(payload,...)
-            if active("No damage text") and type(payload)=="table" and payload[1]=="Damage Text" then return end
-            if active("Delete dead mobs") and type(payload)=="table" and payload[1]=="KillFade" then
-                local mob=payload[2]
-                local mobs=ctx.Workspace:FindFirstChild("Mobs")
-                if typeof(mob)=="Instance" and mob:IsA("Model") and mobs and mob:IsDescendantOf(mobs) then
-                    local entity=mob:FindFirstChild("Entity")
-                    local health=entity and entity:FindFirstChild("Health")
-                    if health and health.Value<=0 then mob:Destroy(); return end
-                end
-            end
+    local function corpse(payload)
+        local mob=payload[2]
+        local folder=ctx.Workspace:FindFirstChild("Mobs")
+        if typeof(mob)~="Instance"or not folder or not mob:IsA("Model")or not mob:IsDescendantOf(folder)then return false end
+        local entity=mob:FindFirstChild("Entity")
+        local health=entity and entity:FindFirstChild("Health")
+        if not health or health.Value>0 then return false end
+        mob:Destroy();return true
+    end
+    local hooks={}
+    local function hook(key,service,predicate,enabled)
+        local lease=hooks[key]
+        if not enabled then
+            if lease and service.ServerEvent==lease.Wrapper then service.ServerEvent=lease.Before end
+            hooks[key]=nil;return
+        end
+        if lease and service.ServerEvent==lease.Wrapper then return end
+        local previous=service.ServerEvent
+        local wrapper=function(payload,...)
+            if not owned.Closed and predicate(payload)then return end
             return previous(payload,...)
         end
-        graphics.ServerEvent=wrapper
+        service.ServerEvent=wrapper;hooks[key]={Before=previous,Wrapper=wrapper,Service=service}
     end
-    local function unhookGraphics()
-        if wrapper and graphics.ServerEvent==wrapper then graphics.ServerEvent=original end
-        -- A newer wrapper may still call ours; keep its captured original valid.
+    local function graphicsPolicy(payload)
+        if type(payload)~="table"then return false end
+        if payload[1]=="Damage Text"and live("No damage text")then return true end
+        return payload[1]=="KillFade"and live("Delete dead mobs")and corpse(payload)
     end
-    local function hookUI()
-        if uiWrapper and ctx.UI.ServerEvent==uiWrapper then return end
-        uiOriginal=ctx.UI.ServerEvent
-        local previous=uiOriginal
-        uiWrapper=function(payload,...)
-            if active("No vel obtained in chat") and type(payload)=="table" and payload[2]=="VelObtained" then return end
-            return previous(payload,...)
+    local function uiPolicy(payload)return type(payload)=="table"and payload[2]=="VelObtained"and live("No vel obtained in chat")end
+    local function syncFPS()
+        local limited=selected["Limit FPS"]and not selected["Remove everything"]
+        if limited or owned.FPS then
+            assert(ctx.SetFPS and initialCap~=nil,"FPS cap control is unavailable")
+            ctx.SetFPS(limited and (owned.Visible and 60 or 15)or initialCap)
         end
-        ctx.UI.ServerEvent=uiWrapper
+        owned.FPS=limited==true
     end
-    local function unhookUI()
-        if uiWrapper and ctx.UI.ServerEvent==uiWrapper then ctx.UI.ServerEvent=uiOriginal end
+    local effects={
+        ["Disable rendering"]=function()ctx.SetRendering(not desired("Disable rendering"));owned.Rendering=desired("Disable rendering")end,
+        ["Limit FPS"]=syncFPS,
+        ["Hide players"]=function()assert(ctx.PlayerVisibility and ctx.PlayerVisibility.Set(desired("Hide players")),"Player visibility is unavailable")end,
+        ["Hide effects"]=function()assert(ctx.PlayerVisibility and ctx.PlayerVisibility.SetEffects(desired("Hide effects")),"Effect visibility is unavailable")end,
+        ["Delete map"]=function()if state.MapDeletion then state.MapDeletion.Set(desired("Delete map"))end end,
+        ["Remove animations"]=function()if state.AnimationRemoval then state.AnimationRemoval.Set(desired("Remove animations"))end end,
+        ["No damage particles"]=syncParticles,
+    }
+    local function sync(name)
+        if name=="Remove everything"then
+            for _,key in ipairs({"Disable rendering","Limit FPS","Hide players","Hide effects","Delete map","Remove animations","No damage particles"})do effects[key]()end
+        elseif effects[name]then effects[name]()end
+        if name=="Remove everything"or name=="No damage text"or name=="Delete dead mobs"then
+            hook("Graphics",ctx.Graphics,graphicsPolicy,desired("No damage text")or desired("Delete dead mobs"))
+        end
+        if name=="Remove everything"or name=="No vel obtained in chat"then hook("UI",ctx.UI,uiPolicy,desired("No vel obtained in chat"))end
     end
-    local rootAdded=ctx.Workspace.ChildAdded:Connect(function(instance)
-        if instance.Name=="HitEffects" and active("No damage particles") then attachParticles() end
+    local rootConnection=ctx.Workspace.ChildAdded:Connect(function(item)
+        if item.Name=="HitEffects"and live("No damage particles")then syncParticles()end
     end)
-    local function apply(name)
-        local all=name=="Remove everything"
-        if name=="Disable rendering"or all then
-            ctx.SetRendering(not wanted("Disable rendering"));renderOwned=wanted("Disable rendering")==true
-        end
-        if name=="Limit FPS"or all then
-            local limited=options["Limit FPS"]and not options["Remove everything"]
-            if limited or fpsOwned then
-                assert(ctx.SetFPS and oldCap~=nil,"FPS cap control is unavailable")
-                ctx.SetFPS(limited and (uiVisible and 60 or 15)or oldCap)
-            end
-            fpsOwned=limited==true
-        end
-        if name=="Hide players"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.Set(wanted("Hide players")==true),"Player visibility is unavailable")end
-        if name=="Hide effects"or all then assert(ctx.PlayerVisibility and ctx.PlayerVisibility.SetEffects(wanted("Hide effects")==true),"Effect visibility is unavailable")end
-        if (name=="Delete map"or all)and state.MapDeletion then state.MapDeletion.Set(wanted("Delete map")==true)end
-        if (name=="Remove animations"or all)and state.AnimationRemoval then state.AnimationRemoval.Set(wanted("Remove animations")==true)end
-        if name=="No damage particles"or all then if wanted("No damage particles")then attachParticles()else detachParticles()end end
-        if name=="Delete dead mobs"or name=="No damage text"or all then
-            if wanted("Delete dead mobs")or wanted("No damage text")then hookGraphics()else unhookGraphics()end
-        end
-        if name=="No vel obtained in chat"or all then if wanted("No vel obtained in chat")then hookUI()else unhookUI()end end
+    function api.SetUIVisible(value)
+        value=value==true
+        if owned.Closed or owned.Visible==value then return end
+        owned.Visible=value
+        if owned.FPS then local ok,reason=pcall(syncFPS);if not ok then state.LastBoostError=tostring(reason)end end
     end
-    function api.Set(name,enabled)
-        if disposed or ctx.Paused or not known[name]or state.StopEverything then return false end
-        local previous=options[name]
-        options[name]=enabled==true
-        local ok,message=pcall(apply,name)
-        if not ok then options[name]=previous;pcall(apply,name);state.LastBoostError=tostring(message);return false end
-        if ctx.Changed then ctx.Changed() end
+    function api.Set(name,value)
+        if owned.Closed or ctx.Paused or not known[name]or state.StopEverything then return false end
+        local old=selected[name];selected[name]=value==true
+        local applied,reason=pcall(sync,name)
+        if not applied then selected[name]=old;pcall(sync,name);state.LastBoostError=tostring(reason);return false end
+        if ctx.Changed then ctx.Changed()end
         return true
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        rootAdded:Disconnect(); detachParticles(); unhookGraphics(); unhookUI()
-        if state.MapDeletion then state.MapDeletion.Destroy()end
-        if state.AnimationRemoval then state.AnimationRemoval.Destroy()end
-        if ctx.PlayerVisibility then ctx.PlayerVisibility.Destroy() end
-        if renderOwned then pcall(ctx.SetRendering,true); renderOwned=false end
-        if fpsOwned then pcall(ctx.SetFPS,oldCap); fpsOwned=false end
-        -- External wrappers may still reference ours; release the retired runtime.
-        ctx.State=nil;ctx.Changed=nil;ctx.PlayerVisibility=nil;state=nil
+        if owned.Closed then return end
+        owned.Closed=true;rootConnection:Disconnect();detachParticles()
+        for key,lease in pairs(hooks)do hook(key,lease.Service,nil,false)end
+        for _,object in pairs({state.MapDeletion,state.AnimationRemoval,ctx.PlayerVisibility})do if object then pcall(object.Destroy)end end
+        if owned.Rendering then pcall(ctx.SetRendering,true)end
+        if owned.FPS then pcall(ctx.SetFPS,initialCap)end
+        state=nil;ctx.State=nil;ctx.Changed=nil;ctx.PlayerVisibility=nil
     end
     if not ctx.Paused and not state.StopEverything then
-        for _,name in ipairs(api.Names) do
-            if options[name] then options[name]=false; api.Set(name,true) end
-        end
+        for _,name in ipairs(api.Names)do if selected[name]then selected[name]=false;api.Set(name,true)end end
     end
     return api
 end
 
 -- END BUNDLED PERFORMANCE BOOST
     end)()
-    state.PerformanceBoost=createBoost({State=state,Workspace=workspace,Graphics=require(services.Graphics),UI=GameUI,
-        Options=type(restore.PerformanceBoosters)=="table" and restore.PerformanceBoosters or {},PlayerVisibility=playerVisibility,
-        SetRendering=function(enabled) RunService:Set3dRenderingEnabled(enabled) end,
-        GetFPS=typeof(getfpscap)=="function" and getfpscap or function()
-            local cap=UserSettings():GetService("UserGameSettings").FramerateCap
-            return type(cap)=="number" and cap or cap.Value
-        end,
-        SetFPS=typeof(setfpscap)=="function" and setfpscap or nil,
-        Changed=function() renderBoost(); requestSave() end})
-    function state.SetPerformanceBoost(name,enabled) return state.PerformanceBoost.Set(name,enabled) end
-    renderBoost()
+    local playerVisibility=attachVisibility({Players=Players,Workspace=workspace,EffectServices={require(services.Graphics),require(services.SkillEffects)}})
+    state.PlayerVisibility=playerVisibility
+    local getCap=type(getfpscap)=="function"and getfpscap or function()
+        local value=UserSettings():GetService("UserGameSettings").FramerateCap
+        return type(value)=="number"and value or value.Value
+    end
+    state.PerformanceBoost=attachBoosts({State=state,Workspace=workspace,Graphics=require(services.Graphics),UI=GameUI,
+        Options=restore.PerformanceBoosters,PlayerVisibility=playerVisibility,GetFPS=getCap,
+        SetFPS=type(setfpscap)=="function"and setfpscap or nil,
+        SetRendering=function(enabled)RunService:Set3dRenderingEnabled(enabled)end,Changed=requestSave})
+    function state.SetPerformanceBoost(name,enabled)return state.PerformanceBoost.Set(name,enabled)end
 end
 state.MovementOwnership=(function()
 -- BEGIN BUNDLED MOVEMENT OWNER
--- Resolve ownership from active controller state; no competing persistent leases.
+-- Evaluate controller policies anew; movement ownership has no stale lease.
 return function(state)
     local api={Owner="Manual",ChangedAt=0,Transitions=0}
+    local rules={
+        {"Stopped",function()return state.Running==false or state.StopEverything end},
+        {"Moderator",function()return state.ModeratorBlocking end},
+        {"Safety",function()return state.SafeModePanic end},
+        {"Friend",function()return state.AutoJoinFriendHolding end},
+        {"Floor travel",function()return state.AutomationTeleporting end},
+        {"Trade",function()return state.AutoTradeBusy end},
+        {"Arena travel",function()return state.TravelBusy or state.MultiSpotOwnsTravel end},
+        {"Dodge",function()return state.Dodging end},
+        {"Recovery",function(now)return state.Recovering or now<(state.FarmPauseUntil or 0)end},
+        {"Farm",function()return state.AutoFarm end},
+    }
     function api.Resolve(now)
-        local owner
-        if state.StopEverything or state.Running==false then owner="Stopped"
-        elseif state.ModeratorBlocking then owner="Moderator"
-        elseif state.SafeModePanic then owner="Safety"
-        elseif state.AutoJoinFriendHolding then owner="Friend"
-        elseif state.AutomationTeleporting then owner="Floor travel"
-        elseif state.AutoTradeBusy then owner="Trade"
-        elseif state.TravelBusy or state.MultiSpotOwnsTravel then owner="Arena travel"
-        elseif state.Dodging then owner="Dodge"
-        elseif state.Recovering or now<(state.FarmPauseUntil or 0)then owner="Recovery"
-        elseif state.AutoFarm then owner="Farm"
-        else owner="Manual"end
-        if owner~=api.Owner then api.Owner=owner;api.ChangedAt=now;api.Transitions+=1 end
-        state.MovementOwner=owner
-        return owner
+        local owner="Manual"
+        for _,rule in ipairs(rules)do if rule[2](now)then owner=rule[1];break end end
+        if owner~=api.Owner then api.Owner=owner;api.Transitions+=1;api.ChangedAt=now end
+        state.MovementOwner=owner;return owner
     end
     function api.CanFarm(now)
         local owner=api.Resolve(now)
-        return owner=="Farm"or owner=="Manual"
+        return owner=="Manual"or owner=="Farm"
     end
     return api
 end
@@ -2217,53 +2021,46 @@ local function movementStatus(message)
     if not state.AutoFarm and string.sub(message, 1, 7) == "Stopped" then state.LastFarmStopReason = message end
 end
 function state.SetTeleportOffset(value)
-    if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return end
-    local newValue = (state.OffsetMode=="Above" and 1 or -1)*math.max(1,math.floor(math.abs(value)*10+0.5)/10)
-    if offsetInitialized and newValue == state.TeleportOffset then return end
-    state.TeleportOffset = newValue
-    offsetInitialized = true
-    -- Recalibration is an intentional destination change, not a server correction.
-    teleportTarget, lastTeleportPosition = nil, nil
-    lastTeleportTime, nextMovementUpdate = 0, 0
-    state.OffsetGraceUntil = os.clock() + 0.4
-    correctionStrikes, correctionTarget = 0, nil
+    if type(value)~="number"or value~=value or math.abs(value)==math.huge then return end
+    local sign=state.OffsetMode=="Above"and 1 or -1
+    local offset=sign*math.max(1,math.floor(math.abs(value)*10+.5)/10)
+    if offsetInitialized and offset==state.TeleportOffset then return end
+    offsetInitialized=true;state.TeleportOffset=offset
+    teleportTarget=nil;lastTeleportPosition=nil;lastTeleportTime=0;nextMovementUpdate=0
+    correctionStrikes=0;correctionTarget=nil;state.OffsetGraceUntil=os.clock()+.4
 end
 local activeOffsetMob, offsetSample
 state.OffsetAvoidTypes={}
 state.AutoOffsetSolver=(function()
 -- BEGIN BUNDLED AUTO OFFSET
--- Source autofarm geometry: height-corrected center and an outer attack radius.
--- A position must satisfy both attack reach and body clearance; never clamp an
--- unsafe position closer just to keep hitting.
+-- Solve the vertical attack-sphere intersection before accepting body clearance.
 return function(input)
-    local enemy,playerRoot=input.Enemy,input.Player
-    local size=enemy.Size
-    local reach=math.min(120,input.Reach or (math.max(size.X,size.Z)*.5+20))
-    local radius=math.min(math.max(size.X,size.Z)*.5+19,reach-(input.Margin or 2))
-    if radius<=0 then return nil,"No usable attack reach" end
-    if input.Mode=="Above" and input.AdaptiveAbove then
-        local minimum=(input.PlayerBelow or 3)+1.5
-        local center=input.Center or enemy.Position+Vector3.new(0,(playerRoot.Size.Y-size.Y)*.5,0)
-        local offset=math.max(minimum,center.Y-enemy.Position.Y+radius)
-        local distance=offset-(center.Y-enemy.Position.Y)
-        if distance>reach-.2 then return nil,"Above position is outside the learned hit range" end
-        local destination=enemy.Position+Vector3.new(0,offset,0)
-        if destination.Y<=(input.DestroyHeight or -500)+40 then return nil,"Offset crosses the map kill plane" end
-        return {Destination=destination,Offset=offset,Radius=distance,Reach=reach,
-            Minimum=minimum,Center=center,Mode="Above"}
-    end
-    local center=input.Center or enemy.Position+Vector3.new(0,(playerRoot.Size.Y-size.Y)*.5,0)
+    local enemy,player=input.Enemy,input.Player
+    local dimensions=enemy.Size
+    local widest=math.max(dimensions.X,dimensions.Z)
+    local reach=math.min(120,input.Reach or widest*.5+20)
+    local outer=math.min(widest*.5+19,reach-(input.Margin or 2))
+    if outer<=0 then return nil,"No usable attack reach"end
+    local center=input.Center or enemy.Position+Vector3.new(0,(player.Size.Y-dimensions.Y)*.5,0)
     local above=input.Mode=="Above"
-    local direction=above and 1 or -1
-    local destination=center+Vector3.new(0,direction*radius,0)
-    local offset=destination.Y-enemy.Position.Y
-    local body=above and (input.BodyAbove or size.Y*.5) or (input.BodyBelow or size.Y*.5)
-    local playerExtent=above and (input.PlayerBelow or 3) or (input.PlayerAbove or 3)
-    local minimum=body+playerExtent+1.5
-    if offset*direction<minimum then return nil,"No body clearance inside attack reach" end
-    if destination.Y<=(input.DestroyHeight or -500)+40 then return nil,"Offset crosses the map kill plane" end
-    return {Destination=destination,Offset=offset,Radius=radius,Reach=reach,
-        Minimum=minimum,Center=center,Mode=above and "Above" or "Below"}
+    local minimum,destination,radius
+    if above and input.AdaptiveAbove then
+        minimum=(input.PlayerBelow or 3)+1.5
+        local offset=math.max(minimum,center.Y-enemy.Position.Y+outer)
+        radius=offset-center.Y+enemy.Position.Y
+        if radius>reach-.2 then return nil,"Above position is outside the learned hit range"end
+        destination=enemy.Position+Vector3.new(0,offset,0)
+    else
+        local direction=above and 1 or -1
+        local body=above and (input.BodyAbove or dimensions.Y*.5)or (input.BodyBelow or dimensions.Y*.5)
+        local extent=above and (input.PlayerBelow or 3)or (input.PlayerAbove or 3)
+        minimum=body+extent+1.5
+        radius=outer;destination=center+Vector3.new(0,direction*radius,0)
+        if (destination.Y-enemy.Position.Y)*direction<minimum then return nil,"No body clearance inside attack reach"end
+    end
+    if destination.Y<=(input.DestroyHeight or -500)+40 then return nil,"Offset crosses the map kill plane"end
+    return {Destination=destination,Offset=destination.Y-enemy.Position.Y,Radius=radius,Reach=reach,
+        Minimum=minimum,Center=center,Mode=above and "Above"or "Below"}
 end
 
 -- END BUNDLED AUTO OFFSET
@@ -2279,37 +2076,36 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED GROUND FOLLOW
--- Cache each enemy's standing position; do not chase vertical attack animations.
+-- Ground observations are independent from attack/root positions during native jumps.
 return function(ctx)
-    local records=setmetatable({}, {__mode="k"})
     local api={}
+    local observations=setmetatable({}, {__mode="k"})
     function api.Resolve(mob,data,now)
+        local observation=observations[mob]
+        if not observation then observation={ProbeAt=0};observations[mob]=observation end
         local root=data.Root
-        local record=records[mob]
-        if not record then record={NextProbe=0};records[mob]=record end
-        if now>=record.NextProbe then
-            record.NextProbe=now+.2
+        local deleted=ctx.MapDeleted and ctx.MapDeleted()
+        if now>=observation.ProbeAt then
+            observation.ProbeAt=now+.2
             local floor=ctx.Floor(mob,data)
-            if type(floor)=="number" then record.Floor=floor end
+            if type(floor)=="number"then observation.Floor=floor end
         end
-        local hint=ctx.GroundHint and ctx.GroundHint(mob)
+        if deleted then observation.Floor=nil end
+        local floor=observation.Floor
+        local native=ctx.GroundHint and ctx.GroundHint(mob)
         local humanoid=mob:FindFirstChildOfClass("Humanoid")
-        local standing=math.max(data.BodyBelow or root.Size.Y*.5,
-            root.Size.Y*.5+(humanoid and humanoid.HipHeight or 0))
-        local floor=record.Floor
-        if ctx.MapDeleted and ctx.MapDeleted()then floor=nil;record.Floor=nil end
-        local position=root.Position
-        local elevated=floor and position.Y-floor>standing+7
-        local rising=root.AssemblyLinearVelocity.Y>10
-        local airborne=hint~=nil or elevated or rising
-        if not airborne then
-            record.Position=position
-            record.Standing=floor and position.Y-floor or record.Standing
-        elseif not record.Position then
-            record.Position=hint or (floor and Vector3.new(position.X,floor+(record.Standing or standing),position.Z)) or nil
+        local standing=math.max(data.BodyBelow or root.Size.Y*.5,root.Size.Y*.5+(humanoid and humanoid.HipHeight or 0))
+        local at=root.Position
+        local airborne=native~=nil or (floor~=nil and at.Y-floor>standing+7)or root.AssemblyLinearVelocity.Y>10
+        if airborne then
+            if not observation.Position then
+                observation.Position=native or (floor and Vector3.new(at.X,floor+(observation.Standing or standing),at.Z))
+            end
+        else
+            observation.Position=at
+            if floor then observation.Standing=at.Y-floor end
         end
-        record.Airborne=airborne==true
-        return record.Position or (not airborne and position or nil),record.Airborne
+        return observation.Position or (not airborne and at or nil),airborne==true
     end
     return api
 end
@@ -2348,277 +2144,224 @@ function state.ResolveAutoOffset(mob)
     local root=character and character:FindFirstChild("HumanoidRootPart")
     if not data or not root then return nil end
     if state.AutoFarm and mob.Name=="Suspended Unborn"then
-        -- Supplied arena (-2439,60,5389), with the requested +10 height.
         local destination=Vector3.new(-2439,70,5389)
         if state.FarmCoordination then destination=state.FarmCoordination.Spread(destination,mob)end
         activeOffsetMob,offsetSample=nil,nil
-        state.FixedFarmPosition=destination
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        state.FarmTargetAirborne=false
-        state.TeleportOffset=destination.Y-data.Root.Position.Y
+        state.FixedFarmPosition=destination;state.AutoOffsetTarget=mob;state.AutoOffsetDestination=destination
+        state.FarmTargetAirborne=false;state.TeleportOffset=destination.Y-data.Root.Position.Y
         state.OffsetStatus="Suspended Unborn · fixed arena position +10 studs"
         data.LastGroundedFarmDestination=destination
         return state.TeleportOffset
     end
     local now,mobRoot=os.clock(),data.Root
     local key=state.GetOffsetKey(mob,data)
-    if not data.BodyBelow or not data.BodyAbove or data.OffsetRootSize ~= mobRoot.Size then
-        local bottom,top = -mobRoot.Size.Y/2,mobRoot.Size.Y/2
-        local reach = math.max(12, mobRoot.Size.Magnitude * 2)
-        -- Whole-model bounds can contain effects at the world origin. Only use
-        -- visible body parts near the root, once per mob/size.
-        for _, part in ipairs(mob:QueryDescendants("BasePart")) do
-            local name = string.lower(part.Name)
-            if part.Transparency < 0.95 and (part.Position - mobRoot.Position).Magnitude <= reach
-                and not string.find(name, "hitbox", 1, true) and not string.find(name, "effect", 1, true)
-                and not string.find(name, "attack", 1, true) and not string.find(name, "trail", 1, true)
-                and not string.find(name,"weapon",1,true) and not string.find(name,"sword",1,true)
-                and not string.find(name,"blade",1,true) and name~="handle"
-                and not part:FindFirstAncestorWhichIsA("Tool") and not part:FindFirstAncestorWhichIsA("Accessory") then
-                local cf, size = part.CFrame, part.Size
-                local halfHeight = (math.abs(cf.RightVector.Y) * size.X + math.abs(cf.UpVector.Y) * size.Y + math.abs(cf.LookVector.Y) * size.Z) / 2
-                bottom = math.min(bottom, part.Position.Y - mobRoot.Position.Y - halfHeight)
-                top=math.max(top,part.Position.Y-mobRoot.Position.Y+halfHeight)
+    local function measureBody()
+        if data.BodyBelow and data.BodyAbove and data.OffsetRootSize==mobRoot.Size then return end
+        local lower,upper=-mobRoot.Size.Y/2,mobRoot.Size.Y/2
+        local bound=math.max(12,mobRoot.Size.Magnitude*2)
+        local ignore={"hitbox","effect","attack","trail","weapon","sword","blade"}
+        for _,part in ipairs(mob:QueryDescendants("BasePart"))do
+            local usable=part.Transparency<.95 and (part.Position-mobRoot.Position).Magnitude<=bound
+                and part.Name:lower()~="handle"and not part:FindFirstAncestorWhichIsA("Tool")and not part:FindFirstAncestorWhichIsA("Accessory")
+            if usable then
+                for _,word in ipairs(ignore)do if part.Name:lower():find(word,1,true)then usable=false;break end end
+            end
+            if usable then
+                local frame,size=part.CFrame,part.Size
+                local extent=(math.abs(frame.RightVector.Y)*size.X+math.abs(frame.UpVector.Y)*size.Y+math.abs(frame.LookVector.Y)*size.Z)/2
+                local height=part.Position.Y-mobRoot.Position.Y
+                lower=math.min(lower,height-extent);upper=math.max(upper,height+extent)
             end
         end
-        data.BodyBelow,data.BodyAbove = -bottom,top
-        data.OffsetRootSize = mobRoot.Size
+        data.BodyBelow=-lower;data.BodyAbove=upper;data.OffsetRootSize=mobRoot.Size
     end
-    local head=character:FindFirstChild("Head")
-    local humanoid=character:FindFirstChildOfClass("Humanoid")
-    local playerAbove=head and math.max(root.Size.Y/2,head.Position.Y+head.Size.Y/2-root.Position.Y) or 3
-    local playerBelow=math.max(3,humanoid and humanoid.HipHeight+root.Size.Y/2 or 3)
+    measureBody()
     local grounded,airborne=state.GroundFollow.Resolve(mob,data,now)
     state.FarmTargetAirborne=airborne
     if airborne then
-        local destination=data.LastGroundedFarmDestination
-            or (state.FarmAbove and root.Position)
-            or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z)) or root.Position
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        state.OffsetStatus="Waiting for enemy to land"
-        return destination.Y-mobRoot.Position.Y
+        local frozen=data.LastGroundedFarmDestination or (state.FarmAbove and root.Position)
+            or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z))or root.Position
+        state.AutoOffsetTarget=mob;state.AutoOffsetDestination=frozen;state.OffsetStatus="Waiting for enemy to land"
+        return frozen.Y-mobRoot.Position.Y
     end
-    if state.AutoFarm and state.FarmCoordination then
-        local sharedCenter=mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)
-        local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player={Size=Vector3.new(2,2,1)},Center=sharedCenter,
-            Mode="Below",Reach=state.AutoRanges.BodyRange(data),Margin=3,
-            BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=3,PlayerBelow=3,
-            DestroyHeight=workspace.FallenPartsDestroyHeight})
-        if not plan then
-            state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-            state.OffsetStatus=reason
-            return nil
-        end
-        local destination=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
-        state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
-        data.LastGroundedFarmDestination=destination
-        activeOffsetMob,offsetSample=nil,nil
-        state.TeleportOffset=destination.Y-mobRoot.Position.Y
+    local shared=state.AutoFarm and state.FarmCoordination
+    local head=character:FindFirstChild("Head")
+    local humanoid=character:FindFirstChildOfClass("Humanoid")
+    local center=shared and mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)or root.Position+state.AutoRanges.Delta(data,root)
+    local mode=shared and "Below"or state.OffsetMode or "Below"
+    local kind=state.Enabled and "Kill"or "Skill"
+    local reach=shared and state.AutoRanges.BodyRange(data)or (state.FarmAbove and state.AutoRanges.Range(kind,data,state.SelectedSkill)or state.AutoRanges.BodyRange(data))
+    local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player=shared and {Size=Vector3.new(2,2,1)}or root,Center=center,
+        Mode=mode,Reach=reach,Margin=shared and 3 or 1.5+math.min(1,(state.PingMs or 150)/500),AdaptiveAbove=not shared and state.FarmAbove,
+        BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=shared and 3 or (head and math.max(root.Size.Y/2,head.Position.Y+head.Size.Y/2-root.Position.Y)or 3),
+        PlayerBelow=shared and 3 or math.max(3,humanoid and humanoid.HipHeight+root.Size.Y/2 or 3),DestroyHeight=workspace.FallenPartsDestroyHeight})
+    if plan and not shared and plan.Radius>state.AutoRanges.Range(kind,data,state.SelectedSkill)-(state.FarmAbove and .2 or 1)then plan=nil;reason="Outer position exceeds the learned attack reach"end
+    if not plan then
+        state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;state.OffsetStatus=reason
+        if not shared then data.SkipUntil=now+8;state.LastOffsetRejected={Target=mob.Name,Reason=reason,At=now};if state.FollowTarget==mob then state.FollowTarget=nil end end
+        return nil
+    end
+    if shared then
+        local destination=state.FarmCoordination.Spread(plan.Destination,mob,center,plan.Reach)
+        state.AutoOffsetTarget=mob;state.AutoOffsetDestination=destination;data.LastGroundedFarmDestination=destination
+        activeOffsetMob,offsetSample=nil,nil;state.TeleportOffset=destination.Y-mobRoot.Position.Y
         state.OffsetStatus="Separated farm hold · slot "..tostring(state.FarmCoordination.Slot or 1)
         return state.TeleportOffset
     end
-    local center=root.Position+state.AutoRanges.Delta(data,root)
-    local reach=state.FarmAbove and state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill) or state.AutoRanges.BodyRange(data)
-    local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player=root,Center=center,
-        Mode=state.OffsetMode or "Below",Reach=reach,Margin=1.5+math.min(1,(state.PingMs or 150)/500),
-        AdaptiveAbove=state.FarmAbove,BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=playerAbove,PlayerBelow=playerBelow,
-        DestroyHeight=workspace.FallenPartsDestroyHeight})
-    local verifiedReach=state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill)
-    if plan and plan.Radius>verifiedReach-(state.FarmAbove and .2 or 1) then plan=nil; reason="Outer position exceeds the learned attack reach" end
-    if not plan then
-        data.SkipUntil=now+8
-        state.OffsetStatus=reason
-        state.LastOffsetRejected={Target=mob.Name,Reason=reason,At=now}
-        state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-        if state.FollowTarget==mob then state.FollowTarget=nil end
-        return nil
-    end
-    local playerHealth=character:FindFirstChild("Entity")
-    playerHealth=playerHealth and playerHealth:FindFirstChild("Health")
+    local entity=character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
     if activeOffsetMob~=mob or not offsetSample or offsetSample.Key~=key then
-        activeOffsetMob=mob
-        offsetSample={Offset=plan.Offset,Key=key,Requests=data.OffsetRequests or 0,At=now,
-            SafeSince=now,PlayerHealth=playerHealth and playerHealth.Value,OwnDamage=state.ReadOwnDamage(data.Health),Misses=0,Confirmed=false}
-        state.OffsetStatus="Source outer reach · checking clearance"
+        activeOffsetMob=mob;offsetSample={Key=key,Offset=plan.Offset,At=now,SafeSince=now,Requests=data.OffsetRequests or 0,
+            PlayerHealth=health and health.Value,OwnDamage=state.ReadOwnDamage(data.Health),Misses=0,Confirmed=false}
     end
-    if math.abs(plan.Offset-offsetSample.Offset)>.75 then
-        offsetSample.SafeSince=now; offsetSample.Confirmed=false; offsetSample.Offset=plan.Offset
-    end
-    if now-offsetSample.At>=1.2 then
+    local sample=offsetSample
+    if math.abs(plan.Offset-sample.Offset)>.75 then sample.SafeSince=now;sample.Confirmed=false;sample.Offset=plan.Offset end
+    state.OffsetStatus="Source outer reach · checking clearance"
+    if now-sample.At>=1.2 then
         local requests=data.OffsetRequests or 0
-        local contribution=state.ReadOwnDamage(data.Health)
-        local damageConfirmed=contribution~=nil and contribution>(offsetSample.OwnDamage or 0)
-        if requests>offsetSample.Requests and damageConfirmed then
-            offsetSample.Misses=0
-            local noDamage=now-(state.LastIncomingDamageAt or -math.huge)>=4
-                and (not playerHealth or not offsetSample.PlayerHealth or playerHealth.Value>=offsetSample.PlayerHealth)
-            if noDamage and now-offsetSample.SafeSince>=4 then
-                offsetSample.Confirmed=true
-                state.OffsetStatus="Holding damage-free source position"
-                local saved=(plan.Mode=="Above" and 1 or -1)*math.floor(math.abs(plan.Offset)*4+.5)/4
-                if state.OffsetProfiles[key]~=saved and now-(data.LastProfileSaveAt or -math.huge)>=10 then
-                    local count=0; for _ in pairs(state.OffsetProfiles) do count+=1 end
-                    if count<32 or state.OffsetProfiles[key] then state.OffsetProfiles[key]=saved; data.LastProfileSaveAt=now; requestSave() end
+        local own=state.ReadOwnDamage(data.Health)
+        if requests>sample.Requests and own~=nil and own>(sample.OwnDamage or 0)then
+            sample.Misses=0
+            local safe=now-(state.LastIncomingDamageAt or -math.huge)>=4 and (not health or not sample.PlayerHealth or health.Value>=sample.PlayerHealth)
+            if safe and now-sample.SafeSince>=4 then
+                sample.Confirmed=true;state.OffsetStatus="Holding damage-free source position"
+                local value=(plan.Mode=="Above"and 1 or -1)*math.floor(math.abs(plan.Offset)*4+.5)/4
+                if state.OffsetProfiles[key]~=value and now-(data.LastProfileSaveAt or -math.huge)>=10 then
+                    local count=0;for _ in pairs(state.OffsetProfiles)do count+=1 end
+                    if count<32 or state.OffsetProfiles[key]then state.OffsetProfiles[key]=value;data.LastProfileSaveAt=now;requestSave()end
                 end
-            else state.OffsetStatus="Checking damage and player health" end
-        elseif requests-offsetSample.Requests>=3 and not state.SkillCastRunning and not state.Recovering
-            and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500) then
-            offsetSample.Misses+=1
-            state.OffsetStatus="No damage · holding outer clearance"
-            if offsetSample.Misses>=3 then
-                data.SkipUntil=now+8
-                state.FollowTarget=nil
-                state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-                return nil
-            end
+            else state.OffsetStatus="Checking damage and player health"end
+        elseif requests-sample.Requests>=3 and not state.SkillCastRunning and not state.Recovering and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500)then
+            sample.Misses+=1;state.OffsetStatus="No damage · holding outer clearance"
+            if sample.Misses>=3 then data.SkipUntil=now+8;state.FollowTarget=nil;state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;return nil end
         end
-        offsetSample.Requests,offsetSample.At=requests,now
-        offsetSample.OwnDamage=contribution
-        offsetSample.PlayerHealth=playerHealth and playerHealth.Value
+        sample.Requests=requests;sample.At=now;sample.OwnDamage=own;sample.PlayerHealth=health and health.Value
     end
-    state.OffsetDebug={Target=mob.Name,Mode=plan.Mode,Distance=math.abs(plan.Offset),Minimum=plan.Minimum,
-        Radius=plan.Radius,Reach=plan.Reach,CenterCorrection=center.Y-mobRoot.Position.Y,
-        BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=offsetSample.Misses,Confirmed=offsetSample.Confirmed}
-    state.AutoOffsetTarget,state.AutoOffsetDestination=mob,plan.Destination
-    data.LastGroundedFarmDestination=plan.Destination
-    state.SetTeleportOffset(plan.Offset)
-    return plan.Offset
+    state.OffsetDebug={Target=mob.Name,Mode=plan.Mode,Distance=math.abs(plan.Offset),Minimum=plan.Minimum,Radius=plan.Radius,Reach=plan.Reach,
+        CenterCorrection=center.Y-mobRoot.Position.Y,BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=sample.Misses,Confirmed=sample.Confirmed}
+    state.AutoOffsetTarget=mob;state.AutoOffsetDestination=plan.Destination;data.LastGroundedFarmDestination=plan.Destination
+    state.SetTeleportOffset(plan.Offset);return plan.Offset
 end
 
 local function attackDeltaFor(data,root)
-    if state.AutoRanges then return state.AutoRanges.Delta(data,root) end
-    return data.Root.Position+Vector3.new(0,(root.Size.Y-data.Root.Size.Y)*.5,0)-root.Position
+    if state.AutoRanges then return state.AutoRanges.Delta(data,root)end
+    local center=data.Root.Position+Vector3.new(0,(root.Size.Y-data.Root.Size.Y)*.5,0)
+    return center-root.Position
 end
 local function attackRadiusFor(mob)
     local data=getMobData(mob)
     if not data then return 20 end
-    if state.AutoRanges then return state.AutoRanges.Range("Kill",data) end
-    local size=data.Root.Size
-    return math.min(120,math.max(size.X,size.Z)*.5+20)
+    return state.AutoRanges and state.AutoRanges.Range("Kill",data)or math.min(120,math.max(data.Root.Size.X,data.Root.Size.Z)*.5+20)
 end
-local function pivotRoot(root, position)
-    local character = root.Parent
+local function pivotRoot(root,position)
+    local model=root.Parent
     local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
-    if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1) end
-    local targetRoot=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
-    character:PivotTo(targetRoot * root.CFrame:ToObjectSpace(character:GetPivot()))
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
+    if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1)end
+    local frame=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
+    local relative=root.CFrame:ToObjectSpace(model:GetPivot())
+    model:PivotTo(frame*relative)
+    root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
 end
-stopMovement = function(message, keepPosition)
-    local floatingRoot=state.ArenaFloat and state.ArenaFloat.Root
-    if state.ArenaFloat then state.ArenaFloat.Release() end
-    state.TravelHold=false
-    state.TravelHoldPosition=nil
+stopMovement = function(message,keepPosition)
+    local floated=state.ArenaFloat and state.ArenaFloat.Root
+    if state.ArenaFloat then state.ArenaFloat.Release()end
+    state.TravelHold=false;state.TravelHoldPosition=nil
     if state.Recovering and not movementRoot then return end
-    if characterPartConnection then characterPartConnection:Disconnect(); characterPartConnection = nil end
-    local oldRoot, oldHumanoid = movementRoot, movementHumanoid
-    if not oldRoot and floatingRoot then
-        oldRoot=floatingRoot
-        oldHumanoid=floatingRoot.Parent and floatingRoot.Parent:FindFirstChildOfClass("Humanoid")
-    end
-    local oldRotate, oldPlatform = previousAutoRotate, previousPlatformStand
-    local oldPosition, oldOrientation, oldAttachment = positionAlign, orientationAlign, movementAttachment
-    local oldCollisions = collisionParts
-    collisionParts = {}
-    local function cleanup()
-        if oldPosition then oldPosition:Destroy() end
-        if oldOrientation then oldOrientation:Destroy() end
-        if oldAttachment then oldAttachment:Destroy() end
-        for part, value in pairs(oldCollisions) do if part.Parent then part.CanCollide = value end end
-        if oldHumanoid and oldHumanoid.Parent then
-            oldHumanoid.AutoRotate = oldRotate~=false
-            oldHumanoid.PlatformStand = oldPlatform==true
-            if oldHumanoid.Health > 0 and not oldPlatform then oldHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
+    if characterPartConnection then characterPartConnection:Disconnect();characterPartConnection=nil end
+    local root=movementRoot or floated
+    local humanoid=movementHumanoid or (root and root.Parent and root.Parent:FindFirstChildOfClass("Humanoid"))
+    local rotate,platform=previousAutoRotate,previousPlatformStand
+    local align,orientation,attachment=positionAlign,orientationAlign,movementAttachment
+    local collisions=collisionParts;collisionParts={}
+    local function finish()
+        if align then align:Destroy()end
+        if orientation then orientation:Destroy()end
+        if attachment then attachment:Destroy()end
+        for part,value in pairs(collisions)do if part.Parent then part.CanCollide=value end end
+        if humanoid and humanoid.Parent then
+            humanoid.AutoRotate=rotate~=false;humanoid.PlatformStand=platform==true
+            if humanoid.Health>0 and not platform then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)end
         end
-        if oldRoot and oldRoot.Parent then oldRoot.AssemblyLinearVelocity = Vector3.zero end
-        state.Recovering = false
+        if root and root.Parent then root.AssemblyLinearVelocity=Vector3.zero end
+        state.Recovering=false
     end
-    local surface
-    if not keepPosition and oldRoot and oldRoot.Parent and (oldPosition or floatingRoot) and oldHumanoid and oldHumanoid.Health > 0 then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { oldRoot.Parent, workspace:FindFirstChild("Mobs") or oldRoot.Parent }
-        params.RespectCanCollide = true
-        local floor = workspace:Raycast(oldRoot.Position + Vector3.new(0, 35, 0), Vector3.new(0, -70, 0), params)
-        local exitY = floor and floor.Position.Y + oldHumanoid.HipHeight + oldRoot.Size.Y / 2 + 1.5 or lastSurfaceY
-        if exitY and math.abs(oldRoot.Position.Y - exitY) > 1 then surface = Vector3.new(oldRoot.Position.X, exitY, oldRoot.Position.Z) end
+    local exit
+    if not keepPosition and root and root.Parent and (align or floated)and humanoid and humanoid.Health>0 then
+        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        params.FilterDescendantsInstances={root.Parent,workspace:FindFirstChild("Mobs")or root.Parent}
+        local hit=workspace:Raycast(root.Position+Vector3.new(0,35,0),Vector3.new(0,-70,0),params)
+        local elevation=hit and hit.Position.Y+humanoid.HipHeight+root.Size.Y/2+1.5 or lastSurfaceY
+        if elevation and math.abs(root.Position.Y-elevation)>1 then exit=Vector3.new(root.Position.X,elevation,root.Position.Z)end
     end
-    if surface and not oldPosition then pivotRoot(oldRoot,surface);surface=nil end
-    if surface then
-        state.Recovering = true
-        oldPosition.Enabled = true
-        oldPosition.Position = surface
-        pivotRoot(oldRoot, surface)
-        local exitCollisionConnection = RunService.Stepped:Connect(function()
-            for part in pairs(oldCollisions) do if part.Parent then part.CanCollide = false end end
-        end)
-        env.SB2FarmRecoveryUntil = os.clock() + 0.3
-        task.delay(0.3, function()
-            exitCollisionConnection:Disconnect()
-            cleanup()
-            if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped · character controls restored") end
-        end)
-    else
-        cleanup()
-    end
-    movementRoot, movementHumanoid, previousAutoRotate, previousPlatformStand = nil, nil, nil, nil
-    movementAttachment, positionAlign, orientationAlign = nil, nil, nil
-    lastTeleportPosition, teleportTarget = nil, nil
-    correctionStrikes, correctionTarget, holdPaused = 0, nil, false
-    state.Exploring, state.LastExploreDestination = false, nil
-    state.Moving = false
-    if message then movementStatus(state.Recovering and "Returning above ground…" or message) end
+    if exit then
+        pivotRoot(root,exit)
+        if align then
+            state.Recovering=true;align.Enabled=true;align.Position=exit
+            local physics=RunService.Stepped:Connect(function()for part in pairs(collisions)do if part.Parent then part.CanCollide=false end end end)
+            env.SB2FarmRecoveryUntil=os.clock()+.3
+            task.delay(.3,function()
+                physics:Disconnect();finish()
+                if state.Running then movementStatus(state.LastFarmStopReason or message or "Stopped · character controls restored")end
+            end)
+        else finish()end
+    else finish()end
+    movementRoot=nil;movementHumanoid=nil;previousAutoRotate=nil;previousPlatformStand=nil
+    movementAttachment=nil;positionAlign=nil;orientationAlign=nil
+    lastTeleportPosition=nil;teleportTarget=nil;correctionTarget=nil;correctionStrikes=0;holdPaused=false
+    state.Exploring=false;state.LastExploreDestination=nil;state.Moving=false
+    if message then movementStatus(state.Recovering and "Returning above ground…"or message)end
 end
+
 do
     local make=(function()
 -- BEGIN BUNDLED FARM NOCLIP
--- Auto Farm owns collision changes across idle, travel and farming handoffs.
+-- Character-scoped collision ownership survives farm/travel handoffs and respawns.
 return function(ctx)
     local api={}
-    local character,added,pulse
-    local originals={}
-    local disposed=false
-    local function restore()
-        if added then added:Disconnect();added=nil end
-        for part,value in pairs(originals)do if part.Parent then part.CanCollide=value end end
-        originals={};character=nil
+    local ledger={}
+    local owner,partsAdded,physics
+    local closed=false
+    local function restorePart(part)
+        local value=ledger[part]
+        ledger[part]=nil
+        if part.Parent then part.CanCollide=value end
     end
-    local function remember(part)
-        if part:IsA("BasePart")then
-            if originals[part]==nil then originals[part]=part.CanCollide end
-            part.CanCollide=false
-        end
+    local function detach()
+        if partsAdded then partsAdded:Disconnect();partsAdded=nil end
+        for part in pairs(ledger)do restorePart(part)end
+        owner=nil
     end
-    function api.Original(part)return originals[part]end
+    local function claim(part)
+        if not part:IsA("BasePart")then return end
+        if ledger[part]==nil then ledger[part]=part.CanCollide end
+        part.CanCollide=false
+    end
+    function api.Original(part)return ledger[part]end
     function api.Update()
-        if disposed then return end
+        if closed then return end
         if not ctx.Enabled()then
-            restore()
-            if pulse then pulse:Disconnect();pulse=nil end
-            return
+            detach();if physics then physics:Disconnect();physics=nil end;return
         end
         local current=ctx.Player.Character
-        if current~=character then
-            restore();character=current
-            if current then
-                for _,part in ipairs(current:QueryDescendants("BasePart"))do remember(part)end
-                added=current.DescendantAdded:Connect(remember)
+        if current~=owner then
+            detach();owner=current
+            if owner then
+                for _,part in ipairs(owner:QueryDescendants("BasePart"))do claim(part)end
+                partsAdded=owner.DescendantAdded:Connect(claim)
             end
         end
-        for part in pairs(originals)do
-            if not part.Parent then originals[part]=nil
-            elseif character and not part:IsDescendantOf(character)then
-                part.CanCollide=originals[part];originals[part]=nil
-            elseif part.CanCollide then part.CanCollide=false end
+        for part in pairs(ledger)do
+            if not part.Parent then ledger[part]=nil
+            elseif owner and not part:IsDescendantOf(owner)then restorePart(part)
+            else part.CanCollide=false end
         end
-        if not pulse then pulse=ctx.Pulse:Connect(api.Update)end
+        if not physics then physics=ctx.Pulse:Connect(api.Update)end
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        if pulse then pulse:Disconnect();pulse=nil end
-        restore()
+        if closed then return end
+        closed=true
+        if physics then physics:Disconnect();physics=nil end
+        detach()
     end
     return api
 end
@@ -2628,216 +2371,177 @@ end
     state.FarmNoclip=make({Player=player,Pulse=RunService.Stepped,
         Enabled=function()return state.Running and state.AutoFarm and not state.StopEverything and not state.ModeratorBlocking end})
 end
-function state.SetAutoFarm(enabled, reason)
-    if state.StopEverything and enabled==true then return false end
-    if (enabled == true) == state.AutoFarm then return end
-    state.LastAutoFarmChange={Enabled=enabled==true,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
-    if state.AutoFarm and enabled ~= true then state.ProtectionUntil = os.clock() + 8 end
-    state.AutoFarm = enabled == true
-    state.FarmTargetLock=nil
-    if state.AutoFarm then state.LastFarmStopReason = nil end
-    state.LastMovementError = nil
-    farmToggle.Text = state.AutoFarm and "Auto farm  ·  ON" or "Auto farm  ·  OFF"
-    farmToggle.BackgroundColor3 = state.AutoFarm and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
-    stopMovement(state.AutoFarm and "Searching for the nearest living mob" or "Auto farm is off")
-    state.FollowTarget = nil
-    activeOffsetMob, offsetSample = nil, nil
-    state.AutoOffsetTarget = nil
-    nextTargetRefresh = 0
-    nextMovementUpdate = 0
-    targetMissingSince, nextAcquisition = nil, 0
-    if state.AutoFarm and state.SetEnabled then
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid:Move(Vector3.zero, false) end
+function state.SetAutoFarm(enabled,reason)
+    enabled=enabled==true
+    if (state.StopEverything and enabled)or enabled==state.AutoFarm then return end
+    state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
+    if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
+    state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
+    if enabled then state.LastFarmStopReason=nil end
+    farmToggle.Text=enabled and "Auto farm  ·  ON"or "Auto farm  ·  OFF"
+    farmToggle.BackgroundColor3=enabled and Color3.fromRGB(114,88,229)or Color3.fromRGB(45,48,63)
+    stopMovement(enabled and "Searching for the nearest living mob"or "Auto farm is off")
+    state.FollowTarget=nil;activeOffsetMob=nil;offsetSample=nil;state.AutoOffsetTarget=nil
+    nextTargetRefresh=0;nextMovementUpdate=0;targetMissingSince=nil;nextAcquisition=0
+    if enabled and state.SetEnabled then
+        local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:Move(Vector3.zero,false)end
     end
     if state.FarmNoclip then state.FarmNoclip.Update()end
     requestSave()
 end
-function state.SetFarmRange(range)
-    if type(range) ~= "number" or range ~= range then range = state.FarmRange end
-    state.FarmRange = math.huge
-    state.FollowTarget = nil
-    nextTargetRefresh = 0
-    movementStatus("Detection range updated")
-    nextMovementUpdate = 0
+function state.SetBossOnly(enabled)
+    state.BossOnly=enabled==true;state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityTarget=nil
+    state.MultiSpotEncounter={};state.MultiSpotNextScan=0;nextTargetRefresh=0;nextAcquisition=0;nextMovementUpdate=0
     requestSave()
 end
-bind(farmToggle.Activated, function() state.SetAutoFarm(not state.AutoFarm,"UI toggle") end)
+function state.SetFarmRange(value)
+    state.FarmRange=math.huge;state.FollowTarget=nil;nextTargetRefresh=0;nextMovementUpdate=0
+    movementStatus("Detection range updated");requestSave()
+end
+bind(farmToggle.Activated,function()state.SetAutoFarm(not state.AutoFarm,"UI toggle")end)
 state.SetAutoFarm(false)
 refreshMobIndex()
-function state.SetBossOnly(on)
-    state.BossOnly=on==true
-    state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityScanAt=0
-    nextAcquisition=0
-    requestSave()
-end
 local function validMob(mob, mobs)
-    if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
-    if not mob or mob.Parent ~= mobs then return nil end
-    if state.AutoFarm and state.BossOnly and targetPriority.Rank(mob)>2 then return nil end
-    if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
-        or mob~=state.ProgressionBossMob)then return nil end
-    local data = getMobData(mob)
-    if state.MultiSpotAnchor and data and not (state.AutoFarm and targetPriority.Rank(mob)<=2) and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-    if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
-    return nil
+    if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
+    local rank=targetPriority.Rank(mob)
+    if state.AutoFarm and state.BossOnly and rank>2 then return nil end
+    if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+    local data=getMobData(mob)
+    if not data then return nil end
+    local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+    if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
+    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or os.clock()<(data.SkipUntil or 0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    return data.Root
 end
 function state.IsFarmEnemyAlive()
     if not state.AutoFarm then return false end
-    local mob=state.FarmTargetLock or state.FollowTarget
-    if not mob or mob.Parent~=refreshMobIndex()then return false end
-    local data=getMobData(mob)
-    return not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))
+    local target=state.FarmTargetLock or state.FollowTarget
+    if not target or target.Parent~=refreshMobIndex()then return false end
+    local data=getMobData(target)
+    return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
 end
--- Share one paced, position-independent boss choice across movement and arena rotation.
 function state.GetFarmPriorityTarget(now)
     if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
-    local mobs=refreshMobIndex()
-    if not mobs then return nil end
+    local folder=refreshMobIndex()
+    if not folder then return nil end
     if state.CreditController and state.CreditCheck then
-        local focus=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
-        if focus then return focus end
+        local shared=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,folder)end,targetPriority.FarmLess)
+        if shared then return shared end
     end
     local cached=state.FarmPriorityTarget
-    if now<(state.FarmPriorityScanAt or 0)and cached and validMob(cached,mobs)then return cached end
-    if now<(state.FarmPriorityScanAt or 0)and not cached then return nil end
+    if now<(state.FarmPriorityScanAt or 0)and (not cached or validMob(cached,folder))then return cached end
     state.FarmPriorityScanAt=now+.15
-    local best
+    local candidate
     for mob in pairs(trackedMobs)do
-        if targetPriority.Rank(mob)<=2 and validMob(mob,mobs)
-            and (not best or targetPriority.FarmLess(mob,best))then best=mob end
+        if targetPriority.Rank(mob)<=2 and validMob(mob,folder)and (not candidate or targetPriority.FarmLess(mob,candidate))then candidate=mob end
     end
-    if state.IsFarmEnemyAlive()then
-        local locked=state.FarmTargetLock or state.FollowTarget
-        if targetPriority.Rank(locked)<=2 and (not best or targetPriority.Rank(locked)<=targetPriority.Rank(best))then best=locked end
-    end
-    -- A temporary invulnerability/streaming gap is not a kill and must not
-    -- downgrade an already observed main boss to a mini-boss or normal mob.
-    if cached and cached.Parent==mobs and targetPriority.Rank(cached)<=2 then
+    local locked=state.IsFarmEnemyAlive()and (state.FarmTargetLock or state.FollowTarget)
+    if locked and targetPriority.Rank(locked)<=2 and (not candidate or targetPriority.Rank(locked)<=targetPriority.Rank(candidate))then candidate=locked end
+    if cached and cached.Parent==folder and targetPriority.Rank(cached)<=2 then
         local data=getMobData(cached)
-        if (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)))
-            and (not best or targetPriority.Rank(cached)<targetPriority.Rank(best))then best=cached end
+        local living=not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
+        if living and (not candidate or targetPriority.Rank(cached)<targetPriority.Rank(candidate))then candidate=cached end
     end
-    state.FarmPriorityTarget=best
-    return best
+    state.FarmPriorityTarget=candidate;return candidate
 end
 function state.IsAttackingEnemy()
-    if not state.Running or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging
-        or state.Recovering or state.ProtectionRetreating then return false end
-    local stamp=state.LastEnemyAttackAt
-    if not stamp or os.clock()-stamp>.8 then return false end
-    local kind=state.LastEnemyAttackKind
-    if not ((kind=="Normal" and state.Enabled) or (kind=="Skill" and state.SkillAura)) then return false end
-    local mob=state.LastEnemyAttackTarget
-    if not validMob(mob,indexedMobFolder) then return false end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    local entity=character:FindFirstChild("Entity")
-    local health=entity and entity:FindFirstChild("Health")
-    if not health or health.Value<=0 then return false end
-    local data=getMobData(mob)
-    local range=kind=="Normal" and attackRadiusFor(mob) or state.AutoRanges.Range("Skill",data,state.LastEnemyAttackSkill)
-    return attackDeltaFor(data,root).Magnitude<=range
+    if not state.Running or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering or state.ProtectionRetreating then return false end
+    if not state.LastEnemyAttackAt or os.clock()-state.LastEnemyAttackAt>.8 then return false end
+    local normal=state.LastEnemyAttackKind=="Normal"
+    if not ((normal and state.Enabled)or (state.LastEnemyAttackKind=="Skill"and state.SkillAura))then return false end
+    local target=state.LastEnemyAttackTarget
+    if not validMob(target,indexedMobFolder)then return false end
+    local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+    local entity=character and character:FindFirstChild("Entity");local health=entity and entity:FindFirstChild("Health")
+    if not root or not health or health.Value<=0 then return false end
+    local data=getMobData(target)
+    local radius=normal and attackRadiusFor(target)or state.AutoRanges.Range("Skill",data,state.LastEnemyAttackSkill)
+    return attackDeltaFor(data,root).Magnitude<=radius
 end
 local function pauseHold(message)
-    if movementRoot and movementRoot.Parent and positionAlign and not holdPaused then positionAlign.Position = movementRoot.Position end
-    holdPaused = true
-    movementStatus(message)
+    if not holdPaused and movementRoot and movementRoot.Parent and positionAlign then positionAlign.Position=movementRoot.Position end
+    holdPaused=true;movementStatus(message)
 end
 local function clearStaleFarmControllers(root)
-    for _,child in ipairs(root:GetChildren())do
-        if (child.Name=="SB2FarmPosition"and child:IsA("AlignPosition"))
-            or (child.Name=="SB2FarmOrientation"and child:IsA("AlignOrientation"))
-            or (child.Name=="SB2FarmAttachment"and child:IsA("Attachment"))then child:Destroy()end
-    end
+    local names={SB2FarmPosition="AlignPosition",SB2FarmOrientation="AlignOrientation",SB2FarmAttachment="Attachment"}
+    for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
-    if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release() end
-    if movementRoot and positionAlign and positionAlign.Parent then return end
+    if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
+    if movementRoot==root and positionAlign and positionAlign.Parent then return end
     clearStaleFarmControllers(root)
-    movementRoot, movementHumanoid = root, humanoid
-    previousAutoRotate, previousPlatformStand = humanoid.AutoRotate, humanoid.PlatformStand
-    humanoid.AutoRotate = false
-    humanoid.PlatformStand = false
-    humanoid.Sit = false
-    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-    local function trackPart(part)
-        if part:IsA("BasePart") then
-            if collisionParts[part] == nil then
-                local original=state.FarmNoclip and state.FarmNoclip.Original(part)
-                if original==nil then original=part.CanCollide end
-                collisionParts[part]=original
-            end
-            part.CanCollide = false
+    movementRoot=root;movementHumanoid=humanoid;previousAutoRotate=humanoid.AutoRotate;previousPlatformStand=humanoid.PlatformStand
+    humanoid.AutoRotate=false;humanoid.PlatformStand=false;humanoid.Sit=false;humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    local function collision(part)
+        if not part:IsA("BasePart")then return end
+        if collisionParts[part]==nil then
+            local original=state.FarmNoclip and state.FarmNoclip.Original(part)
+            if original==nil then original=part.CanCollide end
+            collisionParts[part]=original
         end
+        part.CanCollide=false
     end
-    for _, part in ipairs(character:QueryDescendants("BasePart")) do trackPart(part) end
-    characterPartConnection = character.DescendantAdded:Connect(trackPart)
-    movementAttachment = create("Attachment", { Name = "SB2FarmAttachment" }, root)
-    positionAlign = create("AlignPosition", {
-        Name = "SB2FarmPosition", Mode = Enum.PositionAlignmentMode.OneAttachment,
-        Attachment0 = movementAttachment, Position = destination, ApplyAtCenterOfMass = true,
-        MaxForce = math.max(1, root.AssemblyMass) * workspace.Gravity * 8,
-        MaxVelocity = 60, Responsiveness = 40, RigidityEnabled = false,
-    }, root)
-    orientationAlign = create("AlignOrientation", {
-        Name = "SB2FarmOrientation", Mode = Enum.OrientationAlignmentMode.OneAttachment,
-        Attachment0 = movementAttachment, CFrame = state.UprightController.Rotation(root.CFrame),
-        MaxTorque = math.max(1, root.AssemblyMass) * 10000, MaxAngularVelocity = 20,
-        Responsiveness = 40, RigidityEnabled = true,
-    }, root)
-    state.Moving = true
+    for _,part in ipairs(character:QueryDescendants("BasePart"))do collision(part)end
+    characterPartConnection=character.DescendantAdded:Connect(collision)
+    movementAttachment=create("Attachment",{Name="SB2FarmAttachment"},root)
+    local mass=math.max(1,root.AssemblyMass)
+    positionAlign=create("AlignPosition",{Name="SB2FarmPosition",Mode=Enum.PositionAlignmentMode.OneAttachment,
+        Attachment0=movementAttachment,Position=destination,ApplyAtCenterOfMass=true,MaxForce=mass*workspace.Gravity*8,
+        MaxVelocity=60,Responsiveness=40,RigidityEnabled=false},root)
+    orientationAlign=create("AlignOrientation",{Name="SB2FarmOrientation",Mode=Enum.OrientationAlignmentMode.OneAttachment,
+        Attachment0=movementAttachment,CFrame=state.UprightController.Rotation(root.CFrame),MaxTorque=mass*10000,
+        MaxAngularVelocity=20,Responsiveness=40,RigidityEnabled=true},root)
+    state.Moving=true
 end
 
 state.UprightController=(function()
 -- BEGIN BUNDLED UPRIGHT
+-- Posture control has an explicit humanoid-state restoration ledger.
 return function(ctx)
     local api={}
-    local nextUpdate=0
-    local held,flags
+    local owner,states
+    local due=0
     function api.Rotation(frame)
-        local direction=frame.LookVector*Vector3.new(1,0,1)
-        if direction.Magnitude<.001 then direction=Vector3.new(0,0,-1) end
-        return CFrame.lookAt(Vector3.zero,direction.Unit,Vector3.yAxis)
+        local flat=frame.LookVector*Vector3.new(1,0,1)
+        local forward=flat.Magnitude>=.001 and flat.Unit or Vector3.new(0,0,-1)
+        return CFrame.lookAt(Vector3.zero,forward,Vector3.yAxis)
     end
     function api.Release()
-        if held and held.Parent and flags then
-            for kind,enabled in pairs(flags) do held:SetStateEnabled(kind,enabled) end
+        local humanoid,ledger=owner,states
+        owner,states=nil,nil
+        if humanoid and humanoid.Parent and ledger then
+            for state,wasEnabled in pairs(ledger)do humanoid:SetStateEnabled(state,wasEnabled)end
         end
-        held,flags=nil,nil
+    end
+    local function acquire(humanoid)
+        if owner==humanoid then return end
+        api.Release();owner=humanoid;states={}
+        for _,state in ipairs({Enum.HumanoidStateType.FallingDown,Enum.HumanoidStateType.Ragdoll})do
+            states[state]=humanoid:GetStateEnabled(state);humanoid:SetStateEnabled(state,false)
+        end
     end
     function api.Update(force)
         local now=os.clock()
-        if not force and now<nextUpdate then return end
-        nextUpdate=now+.1
+        if not force and now<due then return end
+        due=now+.1
         local character=ctx.Player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-        if not ctx.Controlled() or not root or not humanoid or humanoid.Health<=0 then api.Release(); return end
-        if held~=humanoid then
-            api.Release()
-            held,flags=humanoid,{}
-            for _,kind in ipairs({Enum.HumanoidStateType.FallingDown,Enum.HumanoidStateType.Ragdoll}) do
-                flags[kind]=humanoid:GetStateEnabled(kind)
-                humanoid:SetStateEnabled(kind,false)
-            end
-        end
-        if humanoid.PlatformStand then humanoid.PlatformStand=false end
-        if humanoid.Sit then humanoid.Sit=false end
-        local kind=humanoid:GetState()
-        if kind==Enum.HumanoidStateType.Physics or kind==Enum.HumanoidStateType.FallingDown
-            or kind==Enum.HumanoidStateType.Ragdoll or kind==Enum.HumanoidStateType.Seated then
-            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+        if not ctx.Controlled()or not root or not humanoid or humanoid.Health<=0 then api.Release();return end
+        acquire(humanoid)
+        humanoid.PlatformStand=false;humanoid.Sit=false
+        local current=humanoid:GetState()
+        for _,bad in ipairs({Enum.HumanoidStateType.Physics,Enum.HumanoidStateType.FallingDown,Enum.HumanoidStateType.Ragdoll,Enum.HumanoidStateType.Seated})do
+            if current==bad then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp);break end
         end
         local rotation=api.Rotation(root.CFrame)
         local align=ctx.Orientation()
-        if align and align.Parent then align.CFrame=rotation; align.Enabled=true end
+        if align and align.Parent then align.CFrame=rotation;align.Enabled=true end
         if root.CFrame.UpVector.Y<.999 then
             root.CFrame=CFrame.new(root.Position)*rotation
-            root.AssemblyAngularVelocity=Vector3.zero
             ctx.State.UprightCorrections=(ctx.State.UprightCorrections or 0)+1
+            root.AssemblyAngularVelocity=Vector3.zero
         elseif root.AssemblyAngularVelocity.Magnitude>.1 then root.AssemblyAngularVelocity=Vector3.zero end
     end
     api.Destroy=api.Release
@@ -2853,162 +2557,159 @@ end)()({State=state,Player=player,
 do
     local create=(function()
 -- BEGIN BUNDLED BOSS DODGE
--- React only to native enemy warning names/tags confirmed in EnemySkills.
+-- Native warning discovery feeds bounded geometry snapshots and a reusable escape search.
 return function(ctx)
     local api={ThreatCount=0}
-    local roots,connections={},{}
-    local disposed=false
-    local lastPoint,holdUntil=nil,0
-    local nextSearch=0
-    local named={RedGroundWarning="Circle",LockedAimWarning="Beam"}
+    local warnings,bindings={},{}
+    local snapshots={}
+    local castWindows={}
+    local closed=false
+    local escape={Point=nil,Until=0,SearchAt=0}
+    local labels={RedGroundWarning="Circle",LockedAimWarning="Beam"}
     local tags={"AegorSlam Rock","AegorSlam Slam","AegorSpike Spike","RiftDetonation Rift"}
-    local projectileActive={}
-    local function track(root,kind)
-        if disposed or roots[root] then return end
-        local count=0; for _ in pairs(roots) do count+=1 end
-        if count>=48 then return end
-        roots[root]={Kind=kind,Started=os.clock(),Name=root.Name}
-        api.HasHazards=true
+    local function bind(signal,fn)bindings[#bindings+1]=signal:Connect(fn)end
+    local function register(object,kind,name,radius)
+        if closed then return end
+        local entry=warnings[object]
+        if not entry then
+            local count=0;for _ in pairs(warnings)do count+=1 end
+            if count>=48 then return end
+            entry={Kind=kind,Started=os.clock(),Name=name or object.Name};warnings[object]=entry
+        end
+        entry.Radius=radius or entry.Radius;api.HasHazards=true
     end
-    local function projectileMatch(part,spec)
-        local template=spec.Template
-        return template and part.ClassName==template.ClassName and part.Name==template.Name
-            and part.Material==template.Material and part.Color==template.Color
-            and (part.Size-template.Size).Magnitude<.15 and part:FindFirstChild(spec.Marker)~=nil
-    end
-    local function projectileAdded(part)
-        for _,spec in ipairs(ctx.Projectiles or {}) do
-            if projectileMatch(part,spec) then
-                local function register()
-                    if not disposed and part.Parent and os.clock()<(projectileActive[spec.Name] or 0) then
-                        track(part,"Projectile")
-                        local r=roots[part]
-                        if r then r.Name=spec.Name; r.Radius=spec.Radius end
-                    end
+    local function projectile(object)
+        for _,spec in ipairs(ctx.Projectiles or {})do
+            local template=spec.Template
+            local matches=template and object.ClassName==template.ClassName and object.Name==template.Name
+                and object.Material==template.Material and object.Color==template.Color
+                and (object.Size-template.Size).Magnitude<.15 and object:FindFirstChild(spec.Marker)~=nil
+            if matches then
+                local function admit()
+                    if not closed and object.Parent and os.clock()<(castWindows[spec.Name]or 0)then register(object,"Projectile",spec.Name,spec.Radius)end
                 end
-                register(); if not roots[part] then task.defer(register) end
+                admit();if not warnings[object]then task.defer(admit)end
             end
         end
     end
-    if ctx.Replicate then connections[#connections+1]=ctx.Replicate:Connect(function(_,phase,name)
-        if phase=="Initial" or phase=="RunPhase" then
-            for _,spec in ipairs(ctx.Projectiles or {}) do if name==spec.Name then projectileActive[name]=os.clock()+10 end end
-        end
-    end) end
-    connections[#connections+1]=ctx.Workspace.DescendantAdded:Connect(function(instance)
-        if named[instance.Name] and (instance:IsA("Model") or instance:IsA("BasePart")) then track(instance,named[instance.Name]) end
-        if instance:IsA("BasePart") and instance.Name=="Part" then projectileAdded(instance) end
-    end)
-    for _,instance in ipairs(ctx.Workspace:QueryDescendants("#RedGroundWarning,#LockedAimWarning")) do track(instance,named[instance.Name]) end
-    for _,tag in ipairs(tags) do
-        local function added(part) if part:IsA("BasePart") and part.Name=="Circle" then track(part,"Circle") end end
-        for _,part in ipairs(ctx.Collection:GetTagged(tag)) do added(part) end
-        connections[#connections+1]=ctx.Collection:GetInstanceAddedSignal(tag):Connect(added)
+    local function inspect(object)
+        if labels[object.Name]and (object:IsA("Model")or object:IsA("BasePart"))then register(object,labels[object.Name])end
+        if object:IsA("BasePart")and object.Name=="Part"then projectile(object)end
     end
-    -- Preserve protection when the script is reloaded during an existing cast.
+    if ctx.Replicate then bind(ctx.Replicate,function(_,phase,name)
+        if phase~="Initial"and phase~="RunPhase"then return end
+        for _,spec in ipairs(ctx.Projectiles or {})do if spec.Name==name then castWindows[name]=os.clock()+10 end end
+    end)end
+    bind(ctx.Workspace.DescendantAdded,inspect)
+    for _,object in ipairs(ctx.Workspace:QueryDescendants("#RedGroundWarning,#LockedAimWarning"))do inspect(object)end
+    for _,tag in ipairs(tags)do
+        local function tagged(object)if object:IsA("BasePart")and object.Name=="Circle"then register(object,"Circle")end end
+        bind(ctx.Collection:GetInstanceAddedSignal(tag),tagged)
+        for _,object in ipairs(ctx.Collection:GetTagged(tag))do tagged(object)end
+    end
     local mobs=ctx.Workspace:FindFirstChild("Mobs")
-    local prime=false
-    for _,spec in ipairs(ctx.Projectiles or {}) do
+    local scanExisting=false
+    for _,spec in ipairs(ctx.Projectiles or {})do
         local boss=mobs and spec.BossName and mobs:FindFirstChild(spec.BossName)
         local entity=boss and boss:FindFirstChild("Entity")
         local health=entity and entity:FindFirstChild("Health")
-        if health and health.Value>0 then projectileActive[spec.Name]=os.clock()+10; prime=true end
+        if health and health.Value>0 then castWindows[spec.Name]=os.clock()+10;scanExisting=true end
     end
-    if prime then for _,part in ipairs(ctx.Workspace:GetChildren()) do if part:IsA("BasePart") and part.Name=="Part" then projectileAdded(part) end end end
-    local boxes={}
-    local function refresh()
-        table.clear(boxes)
-        local now=os.clock()
-        for root,record in pairs(roots) do
-            if root.Parent then
-                local ok,cf,size=pcall(function() if root:IsA("Model") then return root:GetBoundingBox() end return root.CFrame,root.Size end)
-                if ok and math.max(size.X,size.Z)>.2 then
-                    if record.Kind=="Projectile" and record.CFrame and record.SampleAt and now>record.SampleAt then
-                        local velocity=(cf.Position-record.CFrame.Position)/(now-record.SampleAt)
-                        record.Velocity=velocity.Magnitude<=400 and velocity or Vector3.zero
-                    end
-                    record.CFrame,record.Size,record.SampleAt=cf,size,now
-                end
-                record.RemovedAt=nil
-            else record.RemovedAt=record.RemovedAt or now end
-            if now-record.Started>20 or (record.RemovedAt and now-record.RemovedAt>.8) then roots[root]=nil
-            elseif record.CFrame then boxes[#boxes+1]=record end
+    if scanExisting then for _,object in ipairs(ctx.Workspace:GetChildren())do if object:IsA("BasePart")and object.Name=="Part"then projectile(object)end end end
+    local function sample(object,entry,time)
+        if not object.Parent then entry.RemovedAt=entry.RemovedAt or time;return end
+        entry.RemovedAt=nil
+        local ok,frame,size=pcall(function()
+            if object:IsA("Model")then return object:GetBoundingBox()end
+            return object.CFrame,object.Size
+        end)
+        if not ok or math.max(size.X,size.Z)<=.2 then return end
+        if entry.Kind=="Projectile"and entry.CFrame and time>(entry.SampleAt or time)then
+            local motion=(frame.Position-entry.CFrame.Position)/(time-entry.SampleAt)
+            entry.Velocity=motion.Magnitude<=400 and motion or Vector3.zero
         end
-        api.ThreatCount=#boxes; ctx.State.BossThreatCount=#boxes
-        api.HasHazards=next(roots)~=nil
+        entry.CFrame=frame;entry.Size=size;entry.SampleAt=time
     end
-    local function threatened(point)
+    function api.RefreshThreats()
+        if closed then return end
+        table.clear(snapshots)
+        local time=os.clock()
+        for object,entry in pairs(warnings)do
+            sample(object,entry,time)
+            if time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
+            elseif entry.CFrame then snapshots[#snapshots+1]=entry end
+        end
+        api.ThreatCount=#snapshots;ctx.State.BossThreatCount=#snapshots;api.HasHazards=next(warnings)~=nil
+    end
+    local function collision(entry,point,margin)
+        local frame,size=entry.CFrame,entry.Size
+        if entry.Kind=="Beam"then
+            local at=frame:PointToObjectSpace(point)
+            return math.abs(at.X)<size.X*.5+margin and math.abs(at.Z)<size.Z*.5+margin
+        end
+        if entry.Kind=="Projectile"then
+            local lead=math.clamp(.12+(ctx.State.PingMs or 0)/1000,.12,.4)
+            local segment=(entry.Velocity or Vector3.zero)*lead
+            local length=segment:Dot(segment)
+            local fraction=length>.01 and math.clamp((point-frame.Position):Dot(segment)/length,0,1)or 0
+            local delta=point-frame.Position-segment*fraction
+            local radius=(entry.Radius or math.max(size.X,size.Y,size.Z)*.5)+margin
+            return delta:Dot(delta)<radius*radius
+        end
+        local x=math.abs(frame.RightVector.X)*size.X+math.abs(frame.UpVector.X)*size.Y+math.abs(frame.LookVector.X)*size.Z
+        local z=math.abs(frame.RightVector.Z)*size.X+math.abs(frame.UpVector.Z)*size.Y+math.abs(frame.LookVector.Z)*size.Z
+        local delta=(point-frame.Position)*Vector3.new(1,0,1)
+        local radius=math.max(x,z)*.5+margin
+        return delta:Dot(delta)<radius*radius
+    end
+    function api.IsThreatened(point)
         local margin=5+math.min(3,(ctx.State.PingMs or 0)/100)
-        for _,record in ipairs(boxes) do
-            local cf,size=record.CFrame,record.Size
-            if record.Kind=="Projectile" then
-                local lead=math.clamp(.12+(ctx.State.PingMs or 0)/1000,.12,.4)
-                local segment=(record.Velocity or Vector3.zero)*lead
-                local alpha=segment:Dot(segment)>.01 and math.clamp((point-cf.Position):Dot(segment)/segment:Dot(segment),0,1) or 0
-                local d=point-(cf.Position+segment*alpha)
-                local radius=(record.Radius or math.max(size.X,size.Y,size.Z)*.5)+margin
-                if d:Dot(d)<radius*radius then return true,record.Name end
-            elseif record.Kind=="Beam" then
-                local p=cf:PointToObjectSpace(point)
-                if math.abs(p.X)<size.X*.5+margin and math.abs(p.Z)<size.Z*.5+margin then return true,record.Name end
-            else
-                local half=Vector3.new(math.abs(cf.RightVector.X)*size.X+math.abs(cf.UpVector.X)*size.Y+math.abs(cf.LookVector.X)*size.Z,
-                    0,math.abs(cf.RightVector.Z)*size.X+math.abs(cf.UpVector.Z)*size.Y+math.abs(cf.LookVector.Z)*size.Z)*.5
-                local radius=math.max(half.X,half.Z)+margin
-                local delta=(point-cf.Position)*Vector3.new(1,0,1)
-                if delta:Dot(delta)<radius*radius then return true,record.Name end
-            end
-        end
+        for _,entry in ipairs(snapshots)do if collision(entry,point,margin)then return true,entry.Name end end
         return false
     end
-    function api.RefreshThreats() if not disposed then refresh() end end
-    function api.IsThreatened(point) return threatened(point) end
     function api.IsHazardPart(part)
-        local node=part
-        while node and node~=ctx.Workspace do if roots[node] then return true end; node=node.Parent end
+        local object=part
+        while object and object~=ctx.Workspace do if warnings[object]then return true end;object=object.Parent end
         return false
     end
     function api.Plan(point,desired,region,extraThreat)
-        if disposed or not ctx.State.AutoDodge then return nil end
-        refresh()
-        local now=os.clock()
-        local unsafe,name=threatened(point)
-        local wanted,wantedName=threatened(desired or point)
-        api.Blocked=unsafe or wanted
-        if not unsafe and not wanted and now>=holdUntil then lastPoint=nil; return nil end
-        local function valid(p)
-            if threatened(p) or (extraThreat and extraThreat(p)) then return false end
-            if region then local q=region.CFrame:PointToObjectSpace(p); if math.abs(q.X)>region.Size.X*.5-8 or math.abs(q.Z)>region.Size.Z*.5-8 then return false end end
+        if closed or not ctx.State.AutoDodge then return nil end
+        api.RefreshThreats()
+        local time=os.clock()
+        local danger,reason=api.IsThreatened(point)
+        local targetDanger,targetReason=api.IsThreatened(desired or point)
+        api.Blocked=danger or targetDanger
+        if not api.Blocked and time>=escape.Until then escape.Point=nil;return nil end
+        local function safe(candidate)
+            if api.IsThreatened(candidate)or (extraThreat and extraThreat(candidate))then return false end
+            if region then
+                local at=region.CFrame:PointToObjectSpace(candidate)
+                if math.abs(at.X)>region.Size.X*.5-8 or math.abs(at.Z)>region.Size.Z*.5-8 then return false end
+            end
             return true
         end
-        if lastPoint and valid(lastPoint) then return lastPoint,api.LastReason end
-        if now<nextSearch then return nil end
-        lastPoint=nil
-        if valid(point) then lastPoint=point
-        else
-            for radius=10,220,10 do
-                for i=1,16 do
-                    local angle=i*math.pi/8
-                    local p=point+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
-                    if valid(p) then lastPoint=p; break end
-                end
-                if lastPoint then break end
+        if escape.Point and safe(escape.Point)then return escape.Point,api.LastReason end
+        if time<escape.SearchAt then return nil end
+        local chosen=safe(point)and point or nil
+        for radius=10,220,10 do
+            if chosen then break end
+            for direction=1,16 do
+                local angle=direction*math.pi/8
+                local candidate=point+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
+                if safe(candidate)then chosen=candidate;break end
             end
         end
-        if lastPoint then
-            holdUntil=now+.45; api.LastReason=name or wantedName or "Boss warning"
-            ctx.State.LastBossWarning=api.LastReason
-            return lastPoint,api.LastReason
-        end
-        nextSearch=now+.15
-        return nil
+        escape.Point=chosen
+        if not chosen then escape.SearchAt=time+.15;return nil end
+        escape.Until=time+.45;api.LastReason=reason or targetReason or "Boss warning"
+        ctx.State.LastBossWarning=api.LastReason
+        return chosen,api.LastReason
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        api.HasHazards=false
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        table.clear(roots); table.clear(boxes); lastPoint=nil
+        if closed then return end
+        closed=true;api.HasHazards=false;api.ThreatCount=0
+        for _,connection in ipairs(bindings)do connection:Disconnect()end
+        table.clear(bindings);table.clear(warnings);table.clear(snapshots);table.clear(castWindows);escape.Point=nil
     end
     return api
 end
@@ -3032,235 +2733,221 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED ATHEON DODGE
--- Native Atheon cast data and LavaGyzer Point geometry; no damage/cooldown edits.
+-- Bounded evasion uses native cast lifecycles, flame assets, and geyser markers.
 return function(ctx)
-    local state=ctx.State
     local api={Moves=0,Seen={},Completed={},ThreatCount=0,MaxStep=112,MaxBossDistance=128,SmashRadius=90}
-    local casts={}
-    local points={}
-    local disposed=false
-    local now=ctx.Now or os.clock
+    local state=ctx.State
+    local clock=ctx.Now or os.clock
+    local casts,markers={},{}
+    local closed=false
+    local route={Point=nil,Due=0}
     local flat=Vector3.new(1,0,1)
-    local known={FireDash=true,LavaSmash=true,LavaGyzer=true}
-    local lastPoint,nextPlan=nil,0
-    local function update(point)
-        local time=now()
-        local closest,distance
-        for _,boss in ipairs(ctx.Bosses()) do
+    local supported={FireDash=true,LavaSmash=true,LavaGyzer=true}
+    local function margin()return math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)end
+    local function registry(boss)
+        local rig=(ctx.Native.RiggedEnemies or {})[boss]
+        return rig and rig.ActiveSkills
+    end
+    local function collectAssets(entry,ended)
+        if entry.Name~="FireDash"then return end
+        entry.Assets=entry.Assets or {}
+        for _,part in pairs(entry.Skill.CreatedAssets or {})do
+            if part.Parent and part:IsA("BasePart")then entry.Assets[part]=true;entry.AssetsKnown=true end
+        end
+        if not ended or entry.AssetQueryDone or not ctx.FireAssets then return end
+        entry.AssetQueryDone=true
+        local ok,parts=pcall(ctx.FireAssets,entry.Skill)
+        if ok and type(parts)=="table"then
+            entry.AssetsKnown=true
+            for _,part in ipairs(parts)do entry.Assets[part]=true end
+        end
+    end
+    local function airborne(entry,time)
+        if entry.Name~="LavaSmash"then return false end
+        if time-entry.Started>=14 then return true end
+        local position=ctx.Position(entry.Boss)
+        local ground=entry.Skill.LastCFrame and entry.Skill.LastCFrame.Position or entry.Skill.SurfacePosition
+        if not position or not ground then return true end
+        local grounded=ctx.Grounded and ctx.Grounded(entry.Boss)or (not ctx.Grounded and math.abs(position.Y-ground.Y)<=6)
+        if not grounded and position.Y>ground.Y+6 then
+            entry.WasAirborne=true;entry.CompletedAt=nil;entry.Until=math.max(entry.Until,time+1.2)
+        elseif grounded and entry.WasAirborne and not entry.LandedAt then
+            entry.LandedAt=time;entry.Until=math.max(entry.Until,time+1.2+(state.PingMs or 0)/1000)
+        end
+        return not grounded
+    end
+    local function settle(entry,time)
+        local active=registry(entry.Boss)
+        local ended=entry.Skill.Destroyed==true or (active and active[entry.Name]~=entry.Skill)
+        collectAssets(entry,ended)
+        if not ended or airborne(entry,time)then return end
+        if not entry.CompletedAt then
+            entry.CompletedAt=time;entry.ReturnMargin=margin()
+            api.LastSkillEndAt=time;api.LastSkillEndName=entry.Name;api.LastReturnMargin=entry.ReturnMargin
+            api.Completed[entry.Name]={At=time,Margin=entry.ReturnMargin}
+        end
+        local ready=entry.CompletedAt+entry.ReturnMargin
+        if entry.Name~="FireDash"then entry.Until=math.min(entry.Until,ready);return end
+        if not entry.AssetsKnown then return end
+        local hasFlames=false
+        for part in pairs(entry.Assets)do if part.Parent then hasFlames=true else entry.Assets[part]=nil end end
+        entry.Until=hasFlames and math.min(entry.CompletedAt+3.2,math.max(ready,time+.2))or ready
+    end
+    local function discover(point,time)
+        local nearest,gap
+        for _,boss in ipairs(ctx.Bosses())do
             local position=ctx.Position(boss)
-            local gap=position and (position-point).Magnitude
-            if gap and (not distance or gap<distance) then closest,distance=position,gap end
-            local rig=(ctx.Native.RiggedEnemies or {})[boss]
-            for name,skill in pairs(rig and rig.ActiveSkills or {}) do
-                if known[name] and not skill.Destroyed then
-                    local record=casts[skill]
-                    if not record then
-                        record={Name=name,Skill=skill,Boss=boss,Started=time}
-                        if name=="LavaSmash" then
-                            record.MinimumUntil=time+math.clamp(tonumber(skill.Lifetime) or 3,1,8)+1.2+(state.PingMs or 0)/1000
-                        end
-                        casts[skill]=record;api.Seen[name]=(api.Seen[name] or 0)+1
+            local distance=position and (position-point).Magnitude
+            if distance and (not gap or distance<gap)then nearest=position;gap=distance end
+            for name,skill in pairs(registry(boss)or {})do
+                if supported[name]and not skill.Destroyed then
+                    local entry=casts[skill]
+                    if not entry then
+                        entry={Name=name,Skill=skill,Boss=boss,Started=time}
+                        if name=="LavaSmash"then entry.MinimumUntil=time+math.clamp(tonumber(skill.Lifetime)or 3,1,8)+1.2+(state.PingMs or 0)/1000 end
+                        casts[skill]=entry;api.Seen[name]=(api.Seen[name]or 0)+1
                     end
-                    record.Until=math.max(record.MinimumUntil or 0,time+(name=="FireDash" and 3.2 or name=="LavaGyzer" and 1 or .8))
+                    local tail=name=="FireDash"and 3.2 or name=="LavaGyzer"and 1 or .8
+                    entry.Until=math.max(entry.MinimumUntil or 0,time+tail)
                 end
+            end
+        end
+        return nearest
+    end
+    local function sampleMarkers(time)
+        for index,part in ipairs(ctx.Collection:GetTagged("LavaGyzer Point"))do
+            if index>48 then break end
+            if part.Parent and part:IsA("BasePart")then
+                local entry=markers[part]
+                if not entry then
+                    entry={Started=time}
+                    local duration=part.GetAttribute and part:GetAttribute("Lifetime")
+                    if type(duration)=="number"and duration>=0 and duration<=15 then entry.Lifetime=duration end
+                    markers[part]=entry
+                end
+                entry.Position=part.Position;entry.Radius=math.max(part.Size.X,part.Size.Z)*.5
+                entry.Until=time+1;entry.SeenAt=time;entry.RemovedAt=nil
             end
         end
         local count=0
-        for skill,record in pairs(casts) do
-            local rig=(ctx.Native.RiggedEnemies or {})[record.Boss]
-            local ended=skill.Destroyed==true or (rig and rig.ActiveSkills and rig.ActiveSkills[record.Name]~=skill)
-            if record.Name=="FireDash" then
-                record.Assets=record.Assets or {}
-                for _,part in pairs(skill.CreatedAssets or {}) do
-                    if part.Parent and part:IsA("BasePart") then record.Assets[part]=true;record.AssetsKnown=true end
-                end
-                if ended and not record.AssetQueryDone and ctx.FireAssets then
-                    record.AssetQueryDone=true
-                    local ok,assets=pcall(ctx.FireAssets,skill)
-                    if ok and type(assets)=="table" then
-                        record.AssetsKnown=true
-                        for _,part in ipairs(assets) do record.Assets[part]=true end
-                    end
-                end
+        for part,entry in pairs(markers)do
+            if entry.SeenAt~=time and entry.Lifetime then
+                entry.RemovedAt=entry.RemovedAt or time
+                local padding=.15+margin()
+                entry.Until=math.max(entry.Started+entry.Lifetime+padding,entry.RemovedAt+padding)
             end
-            local grounded=record.Name~="LavaSmash"
-            if record.Name=="LavaSmash" and time-record.Started<14 then
-                local root=ctx.Position(record.Boss)
-                local ground=skill.LastCFrame and skill.LastCFrame.Position or skill.SurfacePosition
-                if root and ground then
-                    if ctx.Grounded then grounded=ctx.Grounded(record.Boss)
-                    else grounded=math.abs(root.Y-ground.Y)<=6 end
-                    if not grounded and root.Y>ground.Y+6 then
-                        record.WasAirborne=true;record.CompletedAt=nil;record.Until=math.max(record.Until,time+1.2)
-                    elseif grounded and record.WasAirborne and not record.LandedAt then
-                        record.LandedAt=time;record.Until=math.max(record.Until,time+1.2+(state.PingMs or 0)/1000)
-                    end
-                    -- A native Destroy plus the grounded root confirms completion;
-                    -- do not spend the conservative fallback timer after that.
-                end
-            end
-            if ended and grounded then
-                if not record.CompletedAt then
-                    record.CompletedAt=time
-                    record.ReturnMargin=math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)
-                    api.LastSkillEndAt=time;api.LastSkillEndName=record.Name;api.LastReturnMargin=record.ReturnMargin
-                    api.Completed[record.Name]={At=time,Margin=record.ReturnMargin}
-                end
-                local due=record.CompletedAt+record.ReturnMargin
-                if record.Name=="FireDash" then
-                    if record.AssetsKnown then
-                        local alive=false
-                        for part in pairs(record.Assets) do if part.Parent then alive=true else record.Assets[part]=nil end end
-                        record.Until=alive and math.min(record.CompletedAt+3.2,math.max(due,time+.2)) or due
-                    end
-                else record.Until=math.min(record.Until,due) end
-            end
-            if time>record.Until then casts[skill]=nil else count+=1 end
+            if time>entry.Until then markers[part]=nil else count+=1 end
         end
-        local added=0
-        for _,part in ipairs(ctx.Collection:GetTagged("LavaGyzer Point")) do
-            added+=1;if added>48 then break end
-            if part.Parent and part:IsA("BasePart") then
-                local record=points[part]
-                if not record then
-                    record={Started=time}
-                    local lifetime=part.GetAttribute and part:GetAttribute("Lifetime")
-                    if type(lifetime)=="number" and lifetime>=0 and lifetime<=15 then record.Lifetime=lifetime end
-                end
-                record.Position=part.Position;record.Radius=math.max(part.Size.X,part.Size.Z)*.5;record.Until=time+1
-                record.SeenAt=time;record.RemovedAt=nil
-                points[part]=record
-            end
-        end
-        for part,record in pairs(points) do
-            if record.SeenAt~=time and record.Lifetime then
-                record.RemovedAt=record.RemovedAt or time
-                local margin=math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)
-                record.Until=math.max(record.Started+record.Lifetime+.15+margin,record.RemovedAt+.15+margin)
-            end
-            if time>record.Until then points[part]=nil else count+=1 end
-        end
-        api.ThreatCount=count
-        local smashCenter
-        for _,record in pairs(casts) do
-            if record.Name=="LavaSmash" then smashCenter=record.Skill.SurfacePosition or smashCenter end
-        end
-        api.Anchor=smashCenter or closest
-        api.NearBoss=api.Anchor~=nil and (api.Anchor-point).Magnitude<=api.MaxBossDistance
-        return time
+        return count
     end
-    local function danger(point)
-        local margin=8+math.min(4,(state.PingMs or 0)/100)
-        for _,record in pairs(casts) do
-            local skill=record.Skill
-            if record.Name=="LavaSmash" and skill.SurfacePosition then
-                local delta=(point-skill.SurfacePosition)*flat
-                local radius=api.SmashRadius+margin
-                if delta:Dot(delta)<radius*radius then return true,"LavaSmash" end
-            end
-            if record.Name=="FireDash" and skill.SurfacePosition and skill.FocusPosition then
-                if record.CompletedAt and record.AssetsKnown and now()>=record.CompletedAt+record.ReturnMargin then
-                    for part in pairs(record.Assets) do
-                        if part.Parent then
-                            local p=part.CFrame:PointToObjectSpace(Vector3.new(point.X,part.Position.Y,point.Z))
-                            if math.abs(p.X)<part.Size.X*.5+margin and math.abs(p.Z)<part.Size.Z*.5+margin then return true,"FireDash flames" end
-                        end
-                    end
-                    continue
-                end
-                local a=skill.SurfacePosition*flat
-                local line=(skill.FocusPosition-skill.SurfacePosition)*flat
-                local delta=point*flat-a
-                local length=line:Dot(line)
-                local alpha=length>.01 and math.clamp(delta:Dot(line)/length,0,1) or 0
-                local width=(tonumber(skill.Width) or 0)*.5+10+margin
-                local offset=delta-line*alpha
-                if offset:Dot(offset)<width*width then return true,"FireDash" end
-            end
+    local function refresh(point,time)
+        local nearest=discover(point,time)
+        local count=sampleMarkers(time)
+        local impact
+        for skill,entry in pairs(casts)do
+            -- Grounded state must be tracked even while the skill remains active.
+            if entry.Name=="LavaSmash"then airborne(entry,time)end
+            settle(entry,time)
+            if time>entry.Until then casts[skill]=nil
+            else count+=1;if entry.Name=="LavaSmash"then impact=entry.Skill.SurfacePosition or impact end end
         end
-        for _,record in pairs(points) do
-            local delta=(point-record.Position)*flat
-            local radius=record.Radius+margin
-            if delta:Dot(delta)<radius*radius then return true,"LavaGyzer" end
-        end
-        if api.ThreatCount>0 and ctx.Warnings then
-            local unsafe,reason=ctx.Warnings.IsThreatened(point)
-            if unsafe then return true,reason end
+        api.Anchor=impact or nearest;api.ThreatCount=count
+        api.NearBoss=api.Anchor~=nil and (api.Anchor-point).Magnitude<=api.MaxBossDistance
+    end
+    local function flameThreat(entry,point,padding)
+        for part in pairs(entry.Assets)do
+            if part.Parent then
+                local localPoint=part.CFrame:PointToObjectSpace(Vector3.new(point.X,part.Position.Y,point.Z))
+                if math.abs(localPoint.X)<part.Size.X*.5+padding and math.abs(localPoint.Z)<part.Size.Z*.5+padding then return true end
+            end
         end
         return false
     end
-    function api.Reset()table.clear(casts);table.clear(points);lastPoint=nil;nextPlan=0;api.ThreatCount=0;api.Active=false;api.NearBoss=false end
+    local function castThreat(entry,point,padding)
+        local skill=entry.Skill
+        if entry.Name=="LavaSmash"and skill.SurfacePosition then
+            local delta=(point-skill.SurfacePosition)*flat
+            return delta:Dot(delta)<(api.SmashRadius+padding)^2,"LavaSmash"
+        end
+        if entry.Name~="FireDash"or not skill.SurfacePosition or not skill.FocusPosition then return false end
+        if entry.CompletedAt and entry.AssetsKnown and clock()>=entry.CompletedAt+entry.ReturnMargin then return flameThreat(entry,point,padding),"FireDash flames"end
+        local segment=(skill.FocusPosition-skill.SurfacePosition)*flat
+        local delta=(point-skill.SurfacePosition)*flat
+        local length=segment:Dot(segment)
+        local alpha=length>.01 and math.clamp(delta:Dot(segment)/length,0,1)or 0
+        local offset=delta-segment*alpha
+        local width=(tonumber(skill.Width)or 0)*.5+10+padding
+        return offset:Dot(offset)<width*width,"FireDash"
+    end
+    local function threatened(point)
+        local padding=8+math.min(4,(state.PingMs or 0)/100)
+        for _,entry in pairs(casts)do local hit,reason=castThreat(entry,point,padding);if hit then return true,reason end end
+        for _,entry in pairs(markers)do
+            local delta=(point-entry.Position)*flat
+            if delta:Dot(delta)<(entry.Radius+padding)^2 then return true,"LavaGyzer"end
+        end
+        if api.ThreatCount>0 and ctx.Warnings then return ctx.Warnings.IsThreatened(point)end
+        return false
+    end
+    function api.Reset()
+        table.clear(casts);table.clear(markers);route.Point=nil;route.Due=0
+        api.ThreatCount=0;api.Active=false;api.NearBoss=false
+    end
     function api.Plan(point,desired,floorY)
-        if disposed or not state.AtheonDodge or not state.Running or state.SafeModePanic or state.TravelBusy or state.Recovering then
-            api.Reset();return nil
-        end
-        local time=update(point)
-        if api.ThreatCount==0 then
-            api.Active=false;lastPoint=nil
-            return nil
-        end
+        if closed or not state.Running or not state.AtheonDodge or state.SafeModePanic or state.TravelBusy or state.Recovering then api.Reset();return nil end
+        local time=clock();refresh(point,time)
+        if api.ThreatCount==0 then api.Active=false;route.Point=nil;return nil end
+        if ctx.Warnings then ctx.Warnings.RefreshThreats()end
+        local danger,reason=threatened(point)
+        local targetDanger,targetReason=threatened(desired or point)
+        if not danger and not targetDanger then api.Active=false;route.Point=nil;return nil end
         local function valid(candidate)
-            return candidate and ctx.Valid(candidate) and (candidate-point).Magnitude<=api.MaxStep
-                and api.Anchor and (candidate-api.Anchor).Magnitude<=api.MaxBossDistance
+            return candidate and api.Anchor and ctx.Valid(candidate)and (candidate-point).Magnitude<=api.MaxStep
+                and (candidate-api.Anchor).Magnitude<=api.MaxBossDistance
         end
-        local function shallow()
-            local floor=floorY and floorY(point)
-            local candidate=type(floor)=="number" and Vector3.new(point.X,floor-20,point.Z) or nil
-            return valid(candidate) and candidate or nil
-        end
-        if ctx.Warnings and api.ThreatCount>0 then ctx.Warnings.RefreshThreats() end
-        -- Evade the impact laterally; going only 20 below its center still gets hit.
-        local unsafe,reason=danger(point)
-        local wanted,wantedReason=danger(desired or point)
-        if not unsafe and not wanted then api.Active=false;lastPoint=nil;return nil end
-        if lastPoint and valid(lastPoint) and not danger(lastPoint) then api.Active=true;return lastPoint,api.LastReason end
-        if time<nextPlan then return nil end
-        nextPlan=time+.1
-        lastPoint=nil
-        if not unsafe and valid(point) then lastPoint=point
-        elseif reason=="LavaSmash" and api.Anchor then
-            -- Search one ring around the impact, not hundreds of floor raycasts.
-            local floor=floorY and floorY(point)
-            local y=type(floor)=="number" and floor-20 or point.Y
-            local radius=api.SmashRadius+8+math.min(4,(state.PingMs or 0)/100)+6
+        local function safe(candidate)return valid(candidate)and not threatened(candidate)end
+        if route.Point and safe(route.Point)then api.Active=true;return route.Point,api.LastReason end
+        if time<route.Due then return nil end
+        route.Due=time+.1
+        local chosen
+        if not danger and valid(point)then chosen=point
+        elseif reason=="LavaSmash"and api.Anchor then
+            local ground=floorY and floorY(point)
+            local y=type(ground)=="number"and ground-20 or point.Y
+            local radius=api.SmashRadius+14+math.min(4,(state.PingMs or 0)/100)
             if state.FarmAbove then
                 local vertical=math.sqrt(math.max(0,api.MaxBossDistance^2-radius^2))-1
                 y=math.clamp(point.Y,api.Anchor.Y-vertical,api.Anchor.Y+vertical)
             end
             local best
-            for i=1,16 do
-                local angle=i*math.pi/8
+            for direction=1,16 do
+                local angle=direction*math.pi/8
                 local candidate=Vector3.new(api.Anchor.X+math.cos(angle)*radius,y,api.Anchor.Z+math.sin(angle)*radius)
                 local distance=(candidate-point).Magnitude
-                if valid(candidate) and not danger(candidate) and (not best or distance<best) then lastPoint,best=candidate,distance end
+                if safe(candidate)and (not best or distance<best)then chosen=candidate;best=distance end
             end
         else
-            local floor
-            if reason=="LavaSmash" or wantedReason=="LavaSmash" then floor=floorY and floorY(point) end
+            local smash=reason=="LavaSmash"or targetReason=="LavaSmash"
+            local ground=smash and floorY and floorY(point)
             for radius=8,api.MaxStep,8 do
-                for i=1,16 do
-                    local angle=i*math.pi/8
+                if chosen then break end
+                for direction=1,16 do
+                    local angle=direction*math.pi/8
                     local candidate=point+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
-                    if reason=="LavaSmash" or wantedReason=="LavaSmash" then
-                        if type(floor)=="number" then candidate=Vector3.new(candidate.X,floor-20,candidate.Z) end
-                    end
-                    if valid(candidate) and not danger(candidate) then lastPoint=candidate;break end
+                    if type(ground)=="number"then candidate=Vector3.new(candidate.X,ground-20,candidate.Z)end
+                    if safe(candidate)then chosen=candidate;break end
                 end
-                if lastPoint then break end
             end
         end
-        if not lastPoint then
-            local fallback=shallow()
-            if fallback and not danger(fallback) then lastPoint=fallback end
+        if not chosen then
+            local floor=floorY and floorY(point)
+            local shallow=type(floor)=="number"and Vector3.new(point.X,floor-20,point.Z)
+            if safe(shallow)then chosen=shallow end
         end
-        if lastPoint then
-            api.Active=true;api.LastReason=reason or wantedReason or "Atheon warning"
-            api.Moves+=1
-            return lastPoint,api.LastReason
-        end
-        api.Active=false;return nil
+        route.Point=chosen;api.Active=chosen~=nil
+        if chosen then api.LastReason=reason or targetReason or "Atheon warning";api.Moves+=1;return chosen,api.LastReason end
     end
-    function api.Destroy()disposed=true;api.Reset()end
+    function api.Destroy()closed=true;api.Reset()end
     return api
 end
 
@@ -3315,425 +3002,360 @@ end
 end
 local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
+-- Challenge-floor controller: event observation, geometry, and movement are separate phases.
 return function(ctx)
-    local state, player = ctx.State, game.Players.LocalPlayer
-    local api = { Active = false, Seen = {}, History = {}, Moves = 0, RockChanges = 0 }
-    local names = { "Lava", "Tempest", "Blackout", "Horde", "Rift", "Wisp", "Meme", "Bob" }
-    local logPath="SB2Codex/wave-tests_"..player.UserId..".json"
+    local state=ctx.State
+    local player=game.Players.LocalPlayer
+    local api={Active=false,Seen={},History={},Moves=0,RockChanges=0}
+    local eventNames={"Lava","Tempest","Blackout","Horde","Rift","Wisp","Meme","Bob"}
+    local flat=Vector3.new(1,0,1)
+    local closed=false
+    local timing={UpdateAt=0,ScanAt=0,LastMove=0,EvadeUntil=0}
+    local terrain={Environment=nil,Floor=nil,Refuge=nil,RefugeUntil=0}
+    local bob={Until=0,Depth=0,Point=nil,Environment=nil,PlanAt=0}
+    local lava={Rocks={},Current=nil}
+    local strikes={}
+    local event,lastEvent,lastHealth
+    local path="SB2Codex/wave-tests_"..player.UserId..".json"
     local audit=getgenv().SB2WaveDodgeAudit
     if not audit then
         audit={Seen={}}
         pcall(function()
-            if isfile(logPath) then
-                local raw=readfile(logPath)
-                if #raw<65536 then
-                    local data=game:GetService("HttpService"):JSONDecode(raw)
-                    if data.Version==1 and type(data.Seen)=="table" then audit.Seen=data.Seen end
-                end
-            end
+            if not isfile(path)then return end
+            local text=readfile(path)
+            if #text>=65536 then return end
+            local value=game:GetService("HttpService"):JSONDecode(text)
+            if value.Version==1 and type(value.Seen)=="table"then audit.Seen=value.Seen end
         end)
         getgenv().SB2WaveDodgeAudit=audit
     end
     api.Seen=audit.Seen
-    local function saveAudit()
+    local function persist()
         pcall(function()
-            if not isfolder("SB2Codex") then makefolder("SB2Codex") end
-            writefile(logPath,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
+            if not isfolder("SB2Codex")then makefolder("SB2Codex")end
+            writefile(path,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
         end)
     end
-    local rocks, strikes = {}, {}
-    local lastArea, currentRock, rockSince, nextScan = nil, nil, 0, 0
-    local nextUpdate, lastMove, holdUntil = 0, 0, 0
-    local cachedFloor, floorEnvironment, idleXZ
-    local blackoutPoint,blackoutEnvironment,blackoutUntil=nil,nil,0
-    local bobUntil,bobDepth,nextBobPlan=0,0,0
-    local bobPoint,bobEnvironment=nil,nil
-    local damageBefore, lastHealth, eventRecord
-    local function horizontal(a, b)
-        local d = (a - b) * Vector3.new(1, 0, 1)
-        return d:Dot(d)
-    end
-    local function currentEvent()
-        local a = tostring(workspace:GetAttribute("WaveDefenseArea") or "")
-        local b = tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        local text = string.lower(a .. " " .. b .. " " .. tostring(workspace:GetAttribute("SpecialWave") or ""))
-        if string.find(text,"darkness",1,true) then return "Blackout" end
-        for _, name in ipairs(names) do if string.find(text, string.lower(name), 1, true) then return name end end
-        return nil
-    end
-    local function isActor(part)
-        for _, name in ipairs({ "Mobs", "Characters", "CharacterItems", "HitEffects" }) do
-            local f = workspace:FindFirstChild(name)
-            if f and part:IsDescendantOf(f) then return true end
-        end
-        return player.Character and part:IsDescendantOf(player.Character)
-    end
-    local function extent(part)
-        local cf, s = part.CFrame, part.Size
-        return Vector3.new(
-            math.abs(cf.RightVector.X)*s.X + math.abs(cf.UpVector.X)*s.Y + math.abs(cf.LookVector.X)*s.Z,
-            math.abs(cf.RightVector.Y)*s.X + math.abs(cf.UpVector.Y)*s.Y + math.abs(cf.LookVector.Y)*s.Z,
-            math.abs(cf.RightVector.Z)*s.X + math.abs(cf.UpVector.Z)*s.Y + math.abs(cf.LookVector.Z)*s.Z) / 2
+    local function horizontal(a,b)local delta=(a-b)*flat;return delta:Dot(delta)end
+    local function environment()return tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")end
+    local function detect()
+        local text=(tostring(workspace:GetAttribute("WaveDefenseArea")or "").." "..environment().." "..tostring(workspace:GetAttribute("SpecialWave")or "")):lower()
+        if text:find("darkness",1,true)then return "Blackout"end
+        for _,name in ipairs(eventNames)do if text:find(name:lower(),1,true)then return name end end
     end
     local function bounds()
-        local stuff = workspace:FindFirstChild("WaveDefenseStuff")
-        return stuff and stuff:FindFirstChild("LavaHazardRegion"), stuff and stuff:FindFirstChild("WaveDefenseOrigin")
+        local container=workspace:FindFirstChild("WaveDefenseStuff")
+        return container and container:FindFirstChild("LavaHazardRegion"),container and container:FindFirstChild("WaveDefenseOrigin")
+    end
+    local function actors(part)
+        if player.Character and part:IsDescendantOf(player.Character)then return true end
+        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects"})do
+            local folder=workspace:FindFirstChild(name)
+            if folder and part:IsDescendantOf(folder)then return true end
+        end
+        return false
+    end
+    local function halfSize(part)
+        local cf,size=part.CFrame,part.Size
+        local x=math.abs(cf.RightVector.X)*size.X+math.abs(cf.UpVector.X)*size.Y+math.abs(cf.LookVector.X)*size.Z
+        local y=math.abs(cf.RightVector.Y)*size.X+math.abs(cf.UpVector.Y)*size.Y+math.abs(cf.LookVector.Y)*size.Z
+        local z=math.abs(cf.RightVector.Z)*size.X+math.abs(cf.UpVector.Z)*size.Y+math.abs(cf.LookVector.Z)*size.Z
+        return Vector3.new(x,y,z)/2
+    end
+    local function exclusions(extra)
+        local result={}
+        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
+            local object=workspace:FindFirstChild(name)
+            if object then result[#result+1]=object end
+        end
+        if player.Character then result[#result+1]=player.Character end
+        for _,name in ipairs(extra or {})do local object=workspace:FindFirstChild(name);if object then result[#result+1]=object end end
+        return result
     end
     function api.FloorY(point)
-        local region, origin = bounds()
-        local environment = tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if environment ~= floorEnvironment then cachedFloor, idleXZ, floorEnvironment = nil, nil, environment end
+        local _,origin=bounds()
+        local env=environment()
+        if terrain.Environment~=env then terrain.Environment=env;terrain.Floor=nil;terrain.Refuge=nil end
         local offset=math.abs(state.TeleportOffset or 20)
-        local reference = origin and origin.Position.Y or point.Y + (state.OffsetMode=="Above" and 32 or math.max(32,offset))
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        local excluded = {}
-        for _, n in ipairs({ "Mobs", "Characters", "CharacterItems", "WaveDefenseStuff" }) do
-            local f=workspace:FindFirstChild(n); if f then excluded[#excluded+1]=f end
-        end
-        if player.Character then excluded[#excluded+1]=player.Character end
-        params.FilterDescendantsInstances = excluded
-        params.RespectCanCollide = true
+        local reference=origin and origin.Position.Y or point.Y+(state.OffsetMode=="Above"and 32 or math.max(32,offset))
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true;params.FilterDescendantsInstances=exclusions()
         local hit=workspace:Raycast(Vector3.new(point.X,reference+8,point.Z),Vector3.new(0,-math.max(180,offset+160),0),params)
-        if hit and hit.Normal.Y > 0.6 then cachedFloor = hit.Position.Y end
-        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then
-            return point.Y+20 -- Missing deleted geometry must not accumulate vertical drift.
-        end
-        return cachedFloor or reference
+        if hit and hit.Normal.Y>.6 then terrain.Floor=hit.Position.Y end
+        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then return point.Y+20 end
+        return terrain.Floor or reference
     end
     function api.BlackoutPoint(point)
-        local environment=tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if blackoutPoint and environment==blackoutEnvironment and os.clock()<blackoutUntil then return blackoutPoint end
+        local env=environment();local now=os.clock()
+        if terrain.Refuge and terrain.Environment==env and now<terrain.RefugeUntil then return terrain.Refuge end
         local _,origin=bounds()
         local center=origin and origin.Position or point
-        local reference=origin and origin.Position.Y or api.FloorY(point)
+        local y=origin and origin.Position.Y or api.FloorY(point)
         local minimum=workspace.FallenPartsDestroyHeight+35
-        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.RespectCanCollide=true
-        local excluded={}
-        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff","ActiveLavaHazard","PillarSpawns"}) do
-            local folder=workspace:FindFirstChild(name); if folder then excluded[#excluded+1]=folder end
-        end
-        if player.Character then excluded[#excluded+1]=player.Character end
-        local cursor=Vector3.new(center.X,reference+64,center.Z)
+        local ignored=exclusions({"ActiveLavaHazard","PillarSpawns"})
+        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local from=Vector3.new(center.X,y+64,center.Z)
         local bottom
         for _=1,12 do
-            if cursor.Y<=minimum then break end
-            params.FilterDescendantsInstances=excluded
-            local hit=workspace:Raycast(cursor,Vector3.new(0,minimum-cursor.Y,0),params)
+            if from.Y<=minimum then break end
+            params.FilterDescendantsInstances=ignored
+            local hit=workspace:Raycast(from,Vector3.new(0,minimum-from.Y,0),params)
             if not hit then break end
             local part=hit.Instance
-            if not part or not part:IsA("BasePart") then return nil end
-            excluded[#excluded+1]=part
-            local under=part.Position.Y-extent(part).Y
-            if part.Anchored and part.CanCollide and not isActor(part) then bottom=math.min(bottom or under,under) end
-            cursor=Vector3.new(center.X,math.min(hit.Position.Y,under)-.5,center.Z)
+            if not part or not part:IsA("BasePart")then return nil end
+            ignored[#ignored+1]=part
+            local under=part.Position.Y-halfSize(part).Y
+            if part.Anchored and part.CanCollide and not actors(part)then bottom=math.min(bottom or under,under)end
+            from=Vector3.new(center.X,math.min(hit.Position.Y,under)-.5,center.Z)
         end
         if not bottom or bottom-20<=minimum then return nil end
-        blackoutPoint=Vector3.new(center.X,bottom-20,center.Z)
-        blackoutEnvironment=environment; blackoutUntil=os.clock()+1
-        state.BlackoutMapBottom=bottom; state.BlackoutShelter=blackoutPoint
-        return blackoutPoint
+        terrain.Environment=env;terrain.Refuge=Vector3.new(center.X,bottom-20,center.Z);terrain.RefugeUntil=now+1
+        state.BlackoutMapBottom=bottom;state.BlackoutShelter=terrain.Refuge
+        return terrain.Refuge
     end
-    local function bobRefuge(point,now)
-        local environment=tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if environment~=bobEnvironment then bobPoint=nil; nextBobPlan=0; bobEnvironment=environment end
-        if bobPoint and now<nextBobPlan then return bobPoint end
-        nextBobPlan=now+.25
-        local shelter=api.BlackoutPoint(point)
-        if not shelter then return nil end
-        local y=math.max(workspace.FallenPartsDestroyHeight+36,shelter.Y-bobDepth)
-        if y>=shelter.Y+1 then return nil end
+    local function classify(part,now)
+        if state.StopEverything or not part:IsA("BasePart")or actors(part)then return end
         local region,origin=bounds()
-        if not region then return Vector3.new(shelter.X,y,shelter.Z) end
-        if ctx.BossDodge then ctx.BossDodge.RefreshThreats() end
-        local enemies={}
-        local mobs=workspace:FindFirstChild("Mobs")
-        if mobs then for _,mob in ipairs(mobs:GetChildren()) do
-            local entity=mob:FindFirstChild("Entity"); local hp=entity and entity:FindFirstChild("Health")
-            local root=mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-            if root and hp and hp.Value>0 and #enemies<64 then enemies[#enemies+1]=root.Position+root.AssemblyLinearVelocity*math.min(.3,(state.PingMs or 100)/1000+.1) end
-        end end
-        local function clearance(p)
-            if ctx.BossDodge and ctx.BossDodge.IsThreatened(p) then return -1 end
-            local value=math.huge
-            for _,enemy in ipairs(enemies) do value=math.min(value,(p-enemy).Magnitude) end
-            if #enemies==0 then value=math.sqrt(horizontal(p,origin and origin.Position or region.Position)) end
-            return value
-        end
-        local best,bestScore=nil,-1
-        for _,x in ipairs({-.85,0,.85}) do for _,z in ipairs({-.85,0,.85}) do
-            if x~=0 or z~=0 then
-                local raw=region.CFrame:PointToWorldSpace(Vector3.new(region.Size.X*.5*x,0,region.Size.Z*.5*z))
-                local p=Vector3.new(raw.X,y,raw.Z)
-                local score=clearance(p)
-                if score>bestScore then best,bestScore=p,score end
+        if not origin or horizontal(part.Position,origin.Position)>202500 then return end
+        local kind=detect();local extents=halfSize(part)
+        if kind=="Tempest"then
+            local color=part.Color
+            local purple=color.B>.45 and color.R>.3 and color.G<math.max(color.R,color.B)*.8
+            local named=part.Name:lower()=="vfx"and part.Size.Y>100 and part.Size.X<35 and part.Size.Z<35
+            if not ((part.Material==Enum.Material.Neon and purple and extents.X>1 and extents.Z>1)or named)then return end
+            if not strikes[part]then strikes[part]={First=now};if event then event.Warnings+=1 end end
+            strikes[part].Last=now;part.LocalTransparencyModifier=0
+        elseif kind=="Lava"then
+            local container=workspace:FindFirstChild("ActiveLavaHazard")or workspace:FindFirstChild("PillarSpawns")or part
+            if not part:IsDescendantOf(container)then return end
+            local name=part.Name:lower()
+            local isPlatform=name:find("rock",1,true)or name:find("pillar",1,true)or name:find("platform",1,true)or part.Parent.Name=="PillarSpawns"
+            local at=region and region.CFrame:PointToObjectSpace(part.Position)
+            local inside=not region or (math.abs(at.X)<region.Size.X/2-8 and math.abs(at.Z)<region.Size.Z/2-8)
+            local top=part.Position.Y+extents.Y
+            if not inside or not isPlatform or top<=origin.Position.Y+2 or top>=origin.Position.Y+90 or extents.X<2 or extents.Z<2 or extents.X>=40 or extents.Z>=40 then return end
+            if not lava.Rocks[part]then
+                lava.Rocks[part]={First=now,StableAt=now,StablePosition=part.Position,StableSize=part.Size}
+                if event then event.Rocks+=1 end
             end
-        end end
-        if bobPoint then
-            local current=Vector3.new(bobPoint.X,y,bobPoint.Z)
-            local score=clearance(current)
-            if score>=80 and score>=bestScore*.85 then best,bestScore=current,score end
-        end
-        bobPoint=best or Vector3.new(shelter.X,y,shelter.Z)
-        state.BobRefuge=bobPoint; state.BobClearance=bestScore; state.BobExtraDepth=bobDepth
-        return bobPoint
-    end
-    local function classify(part, now)
-        if state.StopEverything then return end
-        if not part:IsA("BasePart") or isActor(part) then return end
-        local region, origin = bounds()
-        if not origin or horizontal(part.Position,origin.Position)>450*450 then return end
-        local name = string.lower(part.Name)
-        local area=currentEvent()
-        if area == "Tempest" then
-            local c, e = part.Color, extent(part)
-            local purple = c.B > 0.45 and c.R > 0.3 and c.G < math.max(c.R,c.B)*0.8
-            if (part.Material==Enum.Material.Neon and purple and e.X>1 and e.Z>1)
-                or (name=="vfx" and part.Size.Y>100 and part.Size.X<35 and part.Size.Z<35) then
-                if not strikes[part] then strikes[part]={ First=now, Last=now }; if eventRecord then eventRecord.Warnings+=1 end end
-                strikes[part].Last=now
-                part.LocalTransparencyModifier=0
-            end
-        elseif area=="Lava" and part:IsDescendantOf(workspace:FindFirstChild("ActiveLavaHazard") or workspace:FindFirstChild("PillarSpawns") or part) then
-            local e=extent(part)
-            local floor=origin.Position.Y
-            local top=part.Position.Y+e.Y
-            local rockName = string.find(name,"rock",1,true) or string.find(name,"pillar",1,true) or string.find(name,"platform",1,true)
-            local inside = not region or (math.abs(region.CFrame:PointToObjectSpace(part.Position).X)<region.Size.X/2-8 and math.abs(region.CFrame:PointToObjectSpace(part.Position).Z)<region.Size.Z/2-8)
-            if inside and top>floor+2 and top<floor+90 and e.X>=2 and e.Z>=2 and e.X<40 and e.Z<40 and (rockName or part.Parent.Name=="PillarSpawns") then
-                if not rocks[part] then rocks[part]={First=now,Last=now,StableAt=now,StablePosition=part.Position,StableSize=part.Size,PeakY=part.Position.Y,LastY=part.Position.Y,LastAlpha=part.Transparency}; if eventRecord then eventRecord.Rocks+=1 end end
-                rocks[part].Last=now
-                rocks[part].HalfHeight=e.Y
-                part.LocalTransparencyModifier=0
-            end
+            lava.Rocks[part].Last=now;lava.Rocks[part].HalfHeight=extents.Y;part.LocalTransparencyModifier=0
         end
     end
-    local added=workspace.DescendantAdded:Connect(function(part)
-        if state.AutoDodge and part:IsA("BasePart") and currentEvent() then
-            classify(part,os.clock())
-            task.delay(0.12,function() if part.Parent and state.Running then classify(part,os.clock()) end end)
-        end
+    local listener=workspace.DescendantAdded:Connect(function(part)
+        if closed or not state.AutoDodge or not part:IsA("BasePart")or not detect()then return end
+        classify(part,os.clock())
+        task.delay(.12,function()if not closed and part.Parent and state.Running then classify(part,os.clock())end end)
     end)
     function api.IsHazardPart(part)
-        return rocks[part]~=nil or strikes[part]~=nil or (ctx.BossDodge and ctx.BossDodge.IsHazardPart(part))
+        return lava.Rocks[part]~=nil or strikes[part]~=nil or (ctx.BossDodge and ctx.BossDodge.IsHazardPart(part))
     end
-    local function recordMove(kind, point)
-        api.Moves+=1
-        if eventRecord then eventRecord.Moves=(eventRecord.Moves or 0)+1 end
-        if string.sub(kind,1,3)=="Bob" and api.Seen.Bob and api.Seen.Bob~=eventRecord then
-            api.Seen.Bob.ResidualMoves=(api.Seen.Bob.ResidualMoves or 0)+1
-        end
-        if eventRecord then eventRecord.Moves+=1 end
-        api.History[#api.History+1]={Kind=kind,Position=point,At=os.clock(),Wave=workspace:GetAttribute("Wave")}
-        if #api.History>40 then table.remove(api.History,1) end
+    local function release()
+        if api.Active then ctx.Release()end
+        api.Active=false;state.Dodging=false
     end
-    local function hold(point,kind,now)
+    local function hold(point,reason,now)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
-        api.Active, state.Dodging = true, true
-        ctx.Hold(point)
-        if now-lastMove>0.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2) then recordMove(kind,point); lastMove=now end
-        api.LastPosition=point
-        return true
+        api.Active=true;state.Dodging=true;ctx.Hold(point)
+        if now-timing.LastMove>.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2)then
+            timing.LastMove=now;api.Moves+=1
+            if event then event.Moves=(event.Moves or 0)+1 end
+            if reason:sub(1,3)=="Bob"and api.Seen.Bob and api.Seen.Bob~=event then api.Seen.Bob.ResidualMoves=(api.Seen.Bob.ResidualMoves or 0)+1 end
+            api.History[#api.History+1]={Kind=reason,Position=point,At=now,Wave=workspace:GetAttribute("Wave")}
+            if #api.History>40 then table.remove(api.History,1)end
+        end
+        api.LastPosition=point;return true
     end
-    local function threatened(point)
-        for part in pairs(strikes) do
-            if part.Parent then
-                local e=extent(part)
-                local radius=math.max(10,e.X,e.Z)+4
+    local function danger(point)
+        for part in pairs(strikes)do
+            if not part.Parent then strikes[part]=nil
+            else
+                local extent=halfSize(part);local radius=math.max(10,extent.X,extent.Z)+4
                 if horizontal(point,part.Position)<radius*radius then return true end
             end
         end
         return false
     end
-    function api.Update()
-        if state.StopEverything then return false end
-        local now=os.clock()
-        if now<nextUpdate then return api.Active end
-        local fast=state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.Active and not state.NetworkPressureLimited
-        nextUpdate=now+(fast and 1/60 or .04)
-        local area=currentEvent()
-        api.Event=area
-        state.OffsetMode=state.FarmAbove and "Above" or "Below"
-        local character=player.Character
-        local root=character and character:FindFirstChild("HumanoidRootPart")
-        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-        local entity=character and character:FindFirstChild("Entity")
-        local health=entity and entity:FindFirstChild("Health")
-        if area=="Bob" then bobUntil=now+5 end
-        if area=="Bob" and lastArea~="Bob" then bobDepth=40; bobPoint=nil; nextBobPlan=0 end
-        if area~=lastArea then
-            if eventRecord then eventRecord.EndHealth=health and health.Value; eventRecord.Completed=true; eventRecord.Ended=now; saveAudit() end
-            if api.Active then ctx.Release() end
-            api.Active, state.Dodging=false,false
-            rocks, strikes, currentRock={}, {}, nil
-            api.LastPosition=nil
-            if area then
-                local old=api.Seen[area]
-                if old and old.JobId==game.JobId and old.Wave==workspace:GetAttribute("Wave") and not old.Completed then eventRecord=old
-                else eventRecord={Name=area,Wave=workspace:GetAttribute("Wave"),JobId=game.JobId,Count=(old and old.Count or 0)+1,Started=now,StartHealth=health and health.Value,Damage=0,Moves=0,Rocks=0,Warnings=0,Enabled=state.AutoDodge} end
-                api.Seen[area]=eventRecord
-                eventRecord.DodgeVersion=state.Version
-                saveAudit()
-            else eventRecord=nil end
-            lastArea=area
-            nextScan=0
+    local function bobRefuge(point,now)
+        local env=environment()
+        if bob.Environment~=env then bob.Environment=env;bob.Point=nil;bob.PlanAt=0 end
+        if bob.Point and now<bob.PlanAt then return bob.Point end
+        bob.PlanAt=now+.25
+        local shelter=api.BlackoutPoint(point)
+        if not shelter then return nil end
+        local y=math.max(workspace.FallenPartsDestroyHeight+36,shelter.Y-bob.Depth)
+        if y>=shelter.Y+1 then return nil end
+        local region,origin=bounds()
+        if not region then return Vector3.new(shelter.X,y,shelter.Z)end
+        if ctx.BossDodge then ctx.BossDodge.RefreshThreats()end
+        local positions={};local mobs=workspace:FindFirstChild("Mobs")
+        if mobs then for _,mob in ipairs(mobs:GetChildren())do
+            local entity=mob:FindFirstChild("Entity");local hp=entity and entity:FindFirstChild("Health")
+            local root=mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart
+            if root and hp and hp.Value>0 and #positions<64 then positions[#positions+1]=root.Position+root.AssemblyLinearVelocity*math.min(.3,(state.PingMs or 100)/1000+.1)end
+        end end
+        local function clearance(candidate)
+            if ctx.BossDodge and ctx.BossDodge.IsThreatened(candidate)then return -1 end
+            local score=math.huge
+            for _,position in ipairs(positions)do score=math.min(score,(candidate-position).Magnitude)end
+            return #positions>0 and score or math.sqrt(horizontal(candidate,origin and origin.Position or region.Position))
+        end
+        local chosen,score=nil,-1
+        for _,x in ipairs({-.85,0,.85})do for _,z in ipairs({-.85,0,.85})do
+            if x~=0 or z~=0 then
+                local raw=region.CFrame:PointToWorldSpace(Vector3.new(region.Size.X*.5*x,0,region.Size.Z*.5*z))
+                local candidate=Vector3.new(raw.X,y,raw.Z);local gap=clearance(candidate)
+                if gap>score then chosen=candidate;score=gap end
+            end
+        end end
+        if bob.Point then
+            local current=Vector3.new(bob.Point.X,y,bob.Point.Z);local gap=clearance(current)
+            if gap>=80 and gap>=score*.85 then chosen=current;score=gap end
+        end
+        bob.Point=chosen or Vector3.new(shelter.X,y,shelter.Z)
+        state.BobRefuge=bob.Point;state.BobClearance=score;state.BobExtraDepth=bob.Depth
+        return bob.Point
+    end
+    local function observeEvent(kind,health,now)
+        if kind=="Bob"then bob.Until=now+5 end
+        if kind=="Bob"and lastEvent~="Bob"then bob.Depth=40;bob.Point=nil;bob.PlanAt=0 end
+        if kind~=lastEvent then
+            if event then event.EndHealth=health and health.Value;event.Completed=true;event.Ended=now;persist()end
+            release();lava.Rocks={};lava.Current=nil;strikes={};api.LastPosition=nil
+            if kind then
+                local old=api.Seen[kind]
+                if old and old.JobId==game.JobId and old.Wave==workspace:GetAttribute("Wave")and not old.Completed then event=old
+                else event={Name=kind,Wave=workspace:GetAttribute("Wave"),JobId=game.JobId,Count=(old and old.Count or 0)+1,Started=now,StartHealth=health and health.Value,Damage=0,Moves=0,Rocks=0,Warnings=0,Enabled=state.AutoDodge}end
+                api.Seen[kind]=event;event.DodgeVersion=state.Version;persist()
+            else event=nil end
+            lastEvent=kind;timing.ScanAt=0
         end
         if health then
             if lastHealth and health.Value<lastHealth then
-                if eventRecord then eventRecord.Damage+=lastHealth-health.Value end
-                if now<bobUntil and api.Seen.Bob and api.Seen.Bob~=eventRecord then
-                    api.Seen.Bob.ResidualDamage=(api.Seen.Bob.ResidualDamage or 0)+lastHealth-health.Value
-                end
-                if now<bobUntil and health.Value>0 then bobDepth=math.min(80,bobDepth+20); nextBobPlan=0 end
+                local loss=lastHealth-health.Value
+                if event then event.Damage+=loss end
+                if now<bob.Until and api.Seen.Bob and api.Seen.Bob~=event then api.Seen.Bob.ResidualDamage=(api.Seen.Bob.ResidualDamage or 0)+loss end
+                if now<bob.Until and health.Value>0 then bob.Depth=math.min(80,bob.Depth+20);bob.PlanAt=0 end
             end
             lastHealth=health.Value
         end
         state.WaveEventsSeen=api.Seen
-        local seen=0; for _ in pairs(api.Seen) do seen+=1 end
-        if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
-            local target=state.FollowTarget
-            local tr=target and target:FindFirstChild("HumanoidRootPart")
-            local desired=tr and Vector3.new(tr.Position.X,root.Position.Y,tr.Position.Z) or root.Position
-            local point,reason=ctx.AtheonDodge.Plan(root.Position,desired,api.FloorY)
-            if point then
-                hold(point,"Atheon evade: "..tostring(reason),now)
-                ctx.Status("Atheon Dodge · "..tostring(reason))
-                return true
+    end
+    local function scanHazards(kind,now)
+        if (kind~="Lava"and kind~="Tempest")or now<timing.ScanAt then return end
+        timing.ScanAt=now+3
+        local container=kind=="Lava"and workspace:FindFirstChild("ActiveLavaHazard")or workspace
+        if container then for _,part in ipairs(container:QueryDescendants("BasePart"))do classify(part,now)end end
+        for part in pairs(lava.Rocks)do if not part.Parent then lava.Rocks[part]=nil end end
+        for part in pairs(strikes)do if not part.Parent then strikes[part]=nil end end
+    end
+    local function lavaStep(root,humanoid,now,seen)
+        local region,origin=bounds();local base=region and region.Position.Y or origin and origin.Position.Y or root.Position.Y
+        local replacement,score
+        for rock,entry in pairs(lava.Rocks)do
+            if not rock.Parent then lava.Rocks[rock]=nil
+            else
+                local position,size,alpha=rock.Position,rock.Size,rock.Transparency
+                entry.SurfaceTop=position.Y+(entry.HalfHeight or size.Y/2)
+                if (position-entry.StablePosition).Magnitude>.035 or (size-entry.StableSize).Magnitude>.04 then entry.StableAt=now;entry.StablePosition=position;entry.StableSize=size end
+                if entry.WasReady and (entry.SurfaceTop<base+2 or alpha>.1 or not rock.CanCollide or size.Magnitude<(entry.ReadySize or size.Magnitude)*.97)then entry.Dying=true end
+                entry.Ready=position.Y>=base-.12 and position.Y<=base+.15 and rock.CanCollide and alpha<.08 and not entry.Dying and now-entry.StableAt>=.24
+                if entry.Ready then
+                    entry.WasReady=true;entry.ReadySize=math.max(entry.ReadySize or 0,size.Magnitude);entry.ReadySince=entry.ReadySince or now
+                    local distance=horizontal(root.Position,position)
+                    if rock~=lava.Current and (not score or distance<score)then replacement=rock;score=distance end
+                end
             end
+        end
+        local current=lava.Current and lava.Rocks[lava.Current]
+        local solid=current and lava.Current.Parent and lava.Current.CanCollide and lava.Current.Transparency<.9 and (current.SurfaceTop or 0)>base+.75
+        local reason=not solid and "Current rock unavailable"or current.Dying and "Current rock disappearing"or "Initial rock"
+        local switching=not solid or current.Dying or not current.WasReady
+        local chosen=not switching and lava.Current or replacement or solid and lava.Current
+        api.RockStatus={Current=lava.Current,ReadyReplacement=chosen~=lava.Current and chosen or nil,CurrentDying=current and current.Dying or false,Reason=reason}
+        if chosen then
+            if chosen~=lava.Current then
+                lava.Current=chosen;api.RockChanges+=1
+                api.LastRockSwitch={At=now,Reason=reason,ReplacementReady=lava.Rocks[chosen]and lava.Rocks[chosen].Ready,Position=chosen.Position}
+                if event then event.RockChanges=(event.RockChanges or 0)+1 end
+            end
+            local extent=halfSize(chosen);local top=chosen.Position+Vector3.new(0,extent.Y,0)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Include;params.FilterDescendantsInstances={chosen}
+            local hit=workspace:Raycast(top+Vector3.new(0,4,0),Vector3.new(0,-extent.Y*2-8,0),params)
+            if hit then top=hit.Position end
+            hold(top+Vector3.new(0,humanoid.HipHeight+root.Size.Y/2+.25,0),"Lava rock",now)
+            ctx.Status("Lava · "..(lava.Rocks[chosen].Dying and "waiting for a settled rock"or "holding current rock").." · events "..seen.."/8")
+        else
+            local minimum=(origin and origin.Position.Y or root.Position.Y)+18
+            local fallback=api.LastPosition and api.LastPosition.Y>=minimum and api.LastPosition or Vector3.new(root.Position.X,minimum,root.Position.Z)
+            hold(fallback,"Waiting for rock",now);ctx.Status("Lava · waiting for a solid rock · events "..seen.."/8")
+        end
+        return true
+    end
+    local function tempestStep(root,humanoid,now,seen,desired)
+        if not danger(root.Position)and not danger(desired)and now>=timing.EvadeUntil then return false end
+        local candidate=api.LastPosition or root.Position
+        if danger(candidate)then
+            local region=bounds();candidate=nil
+            for radius=10,60,5 do
+                if candidate then break end
+                local best,score
+                for direction=1,16 do
+                    local angle=direction*math.pi/8
+                    local point=root.Position+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
+                    local localPoint=region and region.CFrame:PointToObjectSpace(point)
+                    local inside=not region or math.abs(localPoint.X)<region.Size.X/2-10 and math.abs(localPoint.Z)<region.Size.Z/2-10
+                    if inside and not danger(point)then local distance=horizontal(point,root.Position);if not score or distance<score then best=point;score=distance end end
+                end
+                if best then candidate=best;timing.EvadeUntil=now+.45 end
+            end
+        end
+        if not candidate or danger(candidate)then return false end
+        local elevation=api.FloorY(candidate)+(state.AutoFarm and -20 or humanoid.HipHeight+root.Size.Y/2+.25)
+        hold(Vector3.new(candidate.X,elevation,candidate.Z),"Lightning evade",now)
+        ctx.Status("Tempest · outside strike circles · events "..seen.."/8");return true
+    end
+    function api.Update()
+        if closed or state.StopEverything then return false end
+        local now=os.clock()
+        if now<timing.UpdateAt then return api.Active end
+        local fast=state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.Active and not state.NetworkPressureLimited
+        timing.UpdateAt=now+(fast and 1/60 or .04)
+        local kind=detect();api.Event=kind;state.OffsetMode=state.FarmAbove and "Above"or "Below"
+        local character=player.Character
+        local root=character and character:FindFirstChild("HumanoidRootPart")
+        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        local entity=character and character:FindFirstChild("Entity");local health=entity and entity:FindFirstChild("Health")
+        observeEvent(kind,health,now)
+        local seen=0;for _ in pairs(api.Seen)do seen+=1 end
+        local target=state.FollowTarget;local targetRoot=target and target:FindFirstChild("HumanoidRootPart")
+        local desired=root and targetRoot and Vector3.new(targetRoot.Position.X,root.Position.Y,targetRoot.Position.Z)or root and root.Position
+        if root and humanoid and health and health.Value>0 and not state.TravelBusy and ctx.AtheonDodge then
+            local point,reason=ctx.AtheonDodge.Plan(root.Position,desired,api.FloorY)
+            if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
         if not state.AutoDodge or not root or not humanoid or not health or health.Value<=0 or state.TravelBusy then
-            if api.Active then ctx.Release() end
-            api.Active,state.Dodging=false,false
-            ctx.Status((state.AutoDodge and "Ready" or "Off").." · events "..seen.."/8")
-            return false
+            release();ctx.Status((state.AutoDodge and "Ready"or "Off").." · events "..seen.."/8");return false
         end
-        if area=="Lava" or area=="Tempest" then
-            if now>=nextScan then
-                nextScan=now+3
-                local container=area=="Lava" and workspace:FindFirstChild("ActiveLavaHazard") or workspace
-                if container then for _,part in ipairs(container:QueryDescendants("BasePart")) do classify(part,now) end end
-                for part in pairs(rocks) do if not part.Parent then rocks[part]=nil end end
-                for part in pairs(strikes) do if not part.Parent then strikes[part]=nil end end
-            end
-        end
-        if now<bobUntil and area~="Blackout" and area~="Lava" then
+        scanHazards(kind,now)
+        if now<bob.Until and kind~="Blackout"and kind~="Lava"then
             local point=bobRefuge(root.Position,now)
-            if point then hold(point,area=="Bob" and "Bob refuge" or "Bob residual-attack refuge",now)
-            else hold(root.Position,"Bob waiting for map geometry",now) end
-            ctx.Status(area=="Bob" and "Bob · keeping clear of enemies" or "Bob · waiting for residual attacks to end")
-            return true
+            hold(point or root.Position,point and (kind=="Bob"and "Bob refuge"or "Bob residual-attack refuge")or "Bob waiting for map geometry",now)
+            ctx.Status(kind=="Bob"and "Bob · keeping clear of enemies"or "Bob · waiting for residual attacks to end");return true
         end
-        if area~="Blackout" and area~="Lava" and ctx.BossDodge and not (state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss) then
-            local region=bounds()
-            local target=state.FollowTarget
-            local tr=target and target:FindFirstChild("HumanoidRootPart")
-            local desired=tr and Vector3.new(tr.Position.X,root.Position.Y,tr.Position.Z) or root.Position
-            local point,reason=ctx.BossDodge.Plan(root.Position,desired,region,area=="Tempest" and threatened or nil)
-            if point then
-                hold(point,"Boss evade: "..tostring(reason),now)
-                ctx.Status("Boss attack · outside danger zone")
-                return true
-            elseif ctx.BossDodge.Blocked then
-                local fallback=api.BlackoutPoint(root.Position)
-                if fallback then hold(fallback,"Boss evade below map bottom",now); return true end
-            end
+        if kind~="Blackout"and kind~="Lava"and ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
+            local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region,kind=="Tempest"and danger or nil)
+            if point then hold(point,"Boss evade: "..tostring(reason),now);ctx.Status("Boss attack · outside danger zone");return true end
+            if ctx.BossDodge.Blocked then local shelter=api.BlackoutPoint(root.Position);if shelter then hold(shelter,"Boss evade below map bottom",now);return true end end
         end
-        if area=="Blackout" then
-            local point=api.BlackoutPoint(root.Position)
-            if point then
-                hold(point,"Blackout below map bottom",now)
-                state.IdleBelowMap=true; state.IdleAboveMap=false
-                ctx.Status("Blackout · sheltering below map bottom")
-            else
-                hold(root.Position,"Blackout waiting for map geometry",now)
-                ctx.Status("Blackout · waiting for map bottom geometry")
-            end
-            return true
-        elseif area=="Lava" then
-            local region,origin=bounds()
-            local baseY=region and region.Position.Y or (origin and origin.Position.Y or root.Position.Y)
-            local best,score
-            for part,data in pairs(rocks) do
-                if not part.Parent then rocks[part]=nil
-                else
-                    local position,size,alpha=part.Position,part.Size,part.Transparency
-                    local atSurface=position.Y>=baseY-0.12 and position.Y<=baseY+0.15
-                    data.SurfaceTop=position.Y+(data.HalfHeight or size.Y/2)
-                    local moved=(position-data.StablePosition).Magnitude>0.035 or (size-data.StableSize).Magnitude>0.04
-                    if moved then data.StableAt=now; data.StablePosition=position; data.StableSize=size end
-                    if data.WasReady and (data.SurfaceTop<baseY+2 or alpha>0.1
-                        or not part.CanCollide or size.Magnitude<(data.ReadySize or size.Magnitude)*0.97) then data.Dying=true end
-                    data.Ready=atSurface and part.CanCollide and alpha<0.08 and not data.Dying and now-data.StableAt>=0.24
-                    if data.Ready then
-                        data.WasReady=true; data.ReadySize=math.max(data.ReadySize or 0,size.Magnitude)
-                        data.ReadySince=data.ReadySince or now
-                        local value=horizontal(root.Position,position)
-                        if part~=currentRock and (not score or value<score) then best,score=part,value end
-                    end
-                    data.LastY,data.LastAlpha=position.Y,alpha
-                end
-            end
-            local current= currentRock and rocks[currentRock]
-            local currentSolid=current and currentRock.Parent and currentRock.CanCollide and currentRock.Transparency<0.9 and (current.SurfaceTop or 0)>baseY+0.75
-            local switch=not currentSolid or current.Dying or not current.WasReady
-            local reason=not currentSolid and "Current rock unavailable" or (current and current.Dying and "Current rock disappearing" or "Initial rock")
-            if not switch then best=currentRock
-            elseif not best and currentSolid then best=currentRock end
-            api.RockStatus={Current=currentRock,ReadyReplacement=best~=currentRock and best or nil,CurrentDying=current and current.Dying or false,Reason=reason}
-            if best then
-                if best~=currentRock then
-                    currentRock,rockSince=best,now; api.RockChanges+=1
-                    api.LastRockSwitch={At=now,Reason=reason,ReplacementReady=rocks[best] and rocks[best].Ready,Position=best.Position}
-                    if eventRecord then eventRecord.RockChanges=(eventRecord.RockChanges or 0)+1 end
-                end
-                local e=extent(best)
-                local top=best.Position+Vector3.new(0,e.Y,0)
-                local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Include; params.FilterDescendantsInstances={best}
-                local hit=workspace:Raycast(top+Vector3.new(0,4,0),Vector3.new(0,-e.Y*2-8,0),params)
-                if hit then top=hit.Position end
-                hold(top+Vector3.new(0,humanoid.HipHeight+root.Size.Y/2+0.25,0),"Lava rock",now)
-                ctx.Status("Lava · "..((rocks[best] and rocks[best].Dying) and "waiting for a settled rock" or "holding current rock").." · events "..seen.."/8")
-                return true
-            end
-            -- Do not let auto farm drive into the floor while rocks are loading.
-            local _,origin=bounds()
-            local minimumY=(origin and origin.Position.Y or root.Position.Y)+18
-            local fallback=api.LastPosition and api.LastPosition.Y>=minimumY and api.LastPosition or Vector3.new(root.Position.X,minimumY,root.Position.Z)
-            hold(fallback,"Waiting for rock",now)
-            ctx.Status("Lava · waiting for a solid rock · events "..seen.."/8")
-            return true
-        elseif area=="Tempest" then
-            local target=state.FollowTarget
-            local tr=target and target:FindFirstChild("HumanoidRootPart")
-            local desired=tr and Vector3.new(tr.Position.X,root.Position.Y,tr.Position.Z) or root.Position
-            if threatened(root.Position) or threatened(desired) or now<holdUntil then
-                local point=api.LastPosition or root.Position
-                if threatened(point) then
-                    local best,score
-                    local region,origin=bounds()
-                    for radius=10,60,5 do
-                        for i=1,16 do
-                            local angle=i*math.pi/8
-                            local p=root.Position+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
-                            local inArena=not region or (math.abs(region.CFrame:PointToObjectSpace(p).X)<region.Size.X/2-10 and math.abs(region.CFrame:PointToObjectSpace(p).Z)<region.Size.Z/2-10)
-                            if inArena and not threatened(p) then local value=horizontal(p,root.Position); if not score or value<score then best,score=p,value end end
-                        end
-                        if best then break end
-                    end
-                    if best then point=best; holdUntil=now+0.45 end
-                end
-                if not threatened(point) then
-                    point=Vector3.new(point.X,api.FloorY(point)+(state.AutoFarm and -20 or humanoid.HipHeight+root.Size.Y/2+0.25),point.Z)
-                    hold(point,"Lightning evade",now)
-                    ctx.Status("Tempest · outside strike circles · events "..seen.."/8")
-                    return true
-                end
-            end
+        if kind=="Blackout"then
+            local shelter=api.BlackoutPoint(root.Position)
+            hold(shelter or root.Position,shelter and "Blackout below map bottom"or "Blackout waiting for map geometry",now)
+            if shelter then state.IdleBelowMap=true;state.IdleAboveMap=false end
+            ctx.Status(shelter and "Blackout · sheltering below map bottom"or "Blackout · waiting for map bottom geometry");return true
         end
-        if api.Active then ctx.Release() end
-        api.Active,state.Dodging=false,false
-        ctx.Status((area and area.." · watching" or "Ready").." · events "..seen.."/8")
-        return false
+        if kind=="Lava"then return lavaStep(root,humanoid,now,seen)end
+        if kind=="Tempest"and tempestStep(root,humanoid,now,seen,desired)then return true end
+        release();ctx.Status((kind and kind.." · watching"or "Ready").." · events "..seen.."/8");return false
     end
     function api.Idle(anchor)
         if state.StopEverything then return end
@@ -3742,18 +3364,14 @@ return function(ctx)
         local point=anchor or root.Position
         local floor=anchor and anchor.Y or api.FloorY(point)
         ctx.Hold(Vector3.new(point.X,floor-20,point.Z))
-        state.IdleFloorY=floor
-        state.IdleBelowMap=true
-        state.IdleAboveMap=false
+        state.IdleFloorY=floor;state.IdleBelowMap=true;state.IdleAboveMap=false
     end
     function api.Destroy()
-        saveAudit()
-        added:Disconnect()
-        if ctx.BossDodge then ctx.BossDodge.Destroy() end
-        if ctx.AtheonDodge then ctx.AtheonDodge.Destroy() end
-        if api.Active then ctx.Release() end
-        api.Active=false
-        state.Dodging=false
+        if closed then return end
+        closed=true;persist();listener:Disconnect()
+        if ctx.BossDodge then ctx.BossDodge.Destroy()end
+        if ctx.AtheonDodge then ctx.AtheonDodge.Destroy()end
+        release();table.clear(lava.Rocks);table.clear(strikes);lava.Current=nil;bob.Point=nil;terrain.Refuge=nil
     end
     return api
 end
@@ -3807,244 +3425,245 @@ bind(dodgeToggle.Activated, function() state.SetAutoDodge(not state.AutoDodge) e
 state.SetAutoDodge(restore.AutoDodge)
 
 do
-    local oldZoom = player.CameraMaxZoomDistance
-    local restoringZoom = false
-    local function applyZoom()
-        if restoringZoom or state.StopEverything or not state.Running then return end
-        if player.CameraMaxZoomDistance < 1000000 then player.CameraMaxZoomDistance=1000000 end
+    local savedZoom=player.CameraMaxZoomDistance
+    local restoringZoom=false
+    local original={}
+    local roots={}
+    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
+    local function zoom()
+        if not restoringZoom and state.Running and not state.StopEverything and player.CameraMaxZoomDistance<1000000 then player.CameraMaxZoomDistance=1000000 end
     end
-    applyZoom()
-    bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"), applyZoom)
-    local original = {}
-    local excludedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
-    local excludedRoots={}
-    for name in pairs(excludedNames)do excludedRoots[name]=workspace:FindFirstChild(name)end
-    bind(workspace.ChildAdded,function(root)if excludedNames[root.Name]then excludedRoots[root.Name]=root end end)
-    bind(workspace.ChildRemoved,function(root)if excludedRoots[root.Name]==root then excludedRoots[root.Name]=nil end end)
+    for name in pairs(excluded)do roots[name]=workspace:FindFirstChild(name)end
+    bind(workspace.ChildAdded,function(object)if excluded[object.Name]then roots[object.Name]=object end end)
+    bind(workspace.ChildRemoved,function(object)if roots[object.Name]==object then roots[object.Name]=nil end end)
+    bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"),zoom);zoom()
     local function mapPart(part)
-        if state.StopEverything then return false end
-        if not part:IsA("BasePart") then return false end
-        if state.SkillVisuals and state.SkillVisuals.IsEffect(part) then return false end
-        if player.Character and part:IsDescendantOf(player.Character) then return false end
-        for _,root in pairs(excludedRoots)do
-            if part:IsDescendantOf(root)then return false end
-        end
+        if state.StopEverything or not part:IsA("BasePart")then return false end
+        if state.SkillVisuals and state.SkillVisuals.IsEffect(part)then return false end
+        if player.Character and part:IsDescendantOf(player.Character)then return false end
+        for _,root in pairs(roots)do if part:IsDescendantOf(root)then return false end end
         return not waveDodge.IsHazardPart(part)
     end
-    state.ExcludeMapPart=function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+    function state.ExcludeMapPart(part)
+        local before=original[part]
+        if before==nil then return end
+        original[part]=nil;part.LocalTransparencyModifier=before
     end
     local function applyPart(part)
-        if not mapPart(part) then return end
+        if not mapPart(part)then return end
         if state.TransparentMap and not state.StopEverything then
             if original[part]==nil then
                 local value=part.LocalTransparencyModifier
-                original[part]=math.abs(value-0.7)<0.0001 and 0 or value
+                original[part]=math.abs(value-.7)<.0001 and 0 or value
             end
-            part.LocalTransparencyModifier=0.7
-        elseif original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+            part.LocalTransparencyModifier=.7
+        else state.ExcludeMapPart(part)end
     end
     local scanGeneration=0
     function state.SetTransparentMap(enabled)
-    if state.StopEverything and enabled==true then return false end
-        state.TransparentMap=enabled==true
-        scanGeneration+=1
-        local generation=scanGeneration
+        if enabled==true and state.StopEverything then return false end
+        state.TransparentMap=enabled==true;scanGeneration+=1
+        local token=scanGeneration
         if state.TransparentMap then
             task.defer(function()
                 local slice=os.clock()
-                for _,part in ipairs(workspace:QueryDescendants("BasePart")) do
-                    if generation~=scanGeneration or not state.Running then return end
-                    if part.Parent then applyPart(part)end
+                for _,part in ipairs(workspace:QueryDescendants("BasePart"))do
+                    if token~=scanGeneration or not state.Running then return end
+                    if part.Parent then pcall(applyPart,part)end
                     if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
                 end
             end)
+        else
+            for part,value in pairs(original)do
+                original[part]=nil
+                if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
+            end
         end
-        if not state.TransparentMap then
-            for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end; original[part]=nil end
-        end
-        requestSave()
+        requestSave();return true
     end
-    local pendingParts,queuedParts={},setmetatable({}, {__mode="k"})
-    local pendingHead,pendingTail,streamWorker=1,0,false
+    local pendingParts,queuedParts=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
+    local pendingHead,pendingTail=1,0
+    local streamWorker=false
     bind(workspace.DescendantAdded,function(part)
         if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
-        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=true
+        if pendingTail-pendingHead>=8192 then return end
+        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=pendingTail
         if streamWorker then return end
         streamWorker=true
         task.defer(function()
             while state.Running and not restoringZoom and pendingHead<=pendingTail do
-                local deadline=os.clock()+.001
                 local count=0
-                while pendingHead<=pendingTail and count<48 and os.clock()<deadline do
-                    local current=pendingParts[pendingHead];pendingParts[pendingHead]=nil;pendingHead+=1;queuedParts[current]=nil
-                    if current.Parent and state.TransparentMap then pcall(applyPart,current)end
-                    count+=1
+                local expires=os.clock()+.001
+                while pendingHead<=pendingTail and count<48 and os.clock()<expires do
+                    local current=pendingParts[pendingHead]
+                    pendingParts[pendingHead]=nil;pendingHead+=1;count+=1
+                    if current then
+                        queuedParts[current]=nil
+                        if current.Parent and state.TransparentMap then pcall(applyPart,current)end
+                    end
                 end
                 task.wait()
             end
-            table.clear(pendingParts);table.clear(queuedParts);pendingHead,pendingTail=1,0;streamWorker=false
+            table.clear(pendingParts);table.clear(queuedParts);pendingHead=1;pendingTail=0;streamWorker=false
         end)
     end)
     bind(workspace.DescendantRemoving,function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
+        local slot=queuedParts[part]
+        if slot then pendingParts[slot]=nil;queuedParts[part]=nil end
+        if original[part]~=nil then pcall(state.ExcludeMapPart,part)end
     end)
-    state.RestoreWorldVisuals=function()
-        scanGeneration+=1
-        restoringZoom=true
-        player.CameraMaxZoomDistance=oldZoom
-        for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
+    function state.RestoreWorldVisuals()
+        scanGeneration+=1;restoringZoom=true
+        player.CameraMaxZoomDistance=savedZoom
+        for part,value in pairs(original)do
+            original[part]=nil
+            if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
+        end
+        table.clear(pendingParts);table.clear(queuedParts)
     end
     local makeDeletion=(function()
 -- BEGIN BUNDLED MAP DELETION
--- Client-only static geometry removal; never delete gameplay containers/models.
+-- Explicit static-world cleanup owns one cancellable streamed-work session.
 return function(ctx)
     local api={Removed=0,Pending=0,MaxQueued=0}
-    local enabled,disposed,worker=false,false,false
-    local generation=0
-    local added
-    local needsScan=false
-    local queue,queued={},setmetatable({}, {__mode="k"})
-    local head,tail=1,0
-    local protectedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,
-        WaveDefenseStuff=true,MobSpawnEffects=true,CurrentCamera=true}
-    local protectedWords={"teleport","portal","spawn","checkpoint","trigger","hazard","npc","shop","quest","pad","door"}
-    local function removable(part)
-        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")then return false end
-        if ctx.Protected(part)then return false end
-        local current=part
-        while current and current~=ctx.Root do
-            if protectedNames[current.Name]or current:IsA("Camera")or current:IsA("Tool")then return false end
-            local name=current.Name:lower()
-            for _,word in ipairs(protectedWords)do
-                if name:find(word,1,true)then return false end
-            end
-            if current:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(current)
-                or current:FindFirstChildOfClass("Humanoid")or current:FindFirstChild("Entity"))then return false end
-            if current:FindFirstChildOfClass("ProximityPrompt")or current:FindFirstChildOfClass("ClickDetector")
-                or current:FindFirstChildOfClass("TouchTransmitter")then return false end
-            current=current.Parent
-        end
-        return current==ctx.Root
+    local session,closed=nil,false
+    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true,CurrentCamera=true}
+    local names={"teleport","portal","spawn","checkpoint","trigger","hazard","npc","shop","quest","pad","door"}
+    local function protected(node)
+        if excluded[node.Name]or node:IsA("Camera")or node:IsA("Tool")then return true end
+        local normalized=node.Name:lower()
+        for _,word in ipairs(names)do if normalized:find(word,1,true)then return true end end
+        if node:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(node)or node:FindFirstChildOfClass("Humanoid")or node:FindFirstChild("Entity"))then return true end
+        for _,kind in ipairs({"ProximityPrompt","ClickDetector","TouchTransmitter"})do if node:FindFirstChildOfClass(kind)then return true end end
+        return false
     end
-    api.Removable=removable
-    local function start()
-        if worker or not enabled or disposed then return end
-        worker=true
-        local token=generation
+    function api.Removable(part)
+        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")or ctx.Protected(part)then return false end
+        local node=part
+        repeat
+            if node==ctx.Root then return true end
+            if protected(node)then return false end
+            node=node.Parent
+        until not node
+        return false
+    end
+    local function active(owner)return not closed and session==owner and ctx.State.Running end
+    local function census(owner)
+        owner.Scan=ctx.Root:QueryDescendants("BasePart");owner.Cursor=1;owner.Length=#owner.Scan;owner.Rescan=false
+    end
+    local function pending(owner)return math.max(0,owner.Length-owner.Cursor+1)+math.max(0,owner.Tail-owner.Head+1)end
+    local function start(owner)
+        if owner.Worker then return end
+        owner.Worker=true
         ctx.Defer(function()
-            if token~=generation or disposed or not ctx.State.Running then return end
-            local scan=needsScan and ctx.Root:QueryDescendants("BasePart")or {}
-            needsScan=false
-            local index,scanTail=1,#scan
+            if not active(owner)then return end
+            if owner.Rescan then census(owner)end
             if ctx.ClearTerrain then
-                local ok,reason=pcall(ctx.ClearTerrain)
-                api.TerrainCleared=ok
+                local ok,reason=pcall(ctx.ClearTerrain);api.TerrainCleared=ok
                 if not ok then api.LastError=tostring(reason)end
             end
-            while token==generation and enabled and not disposed and ctx.State.Running do
+            while active(owner)do
                 if ctx.State.StopEverything then ctx.Wait(.25)
                 else
-                    local deadline=ctx.Now()+.0015
-                    local count=0
-                    while count<128 and ctx.Now()<deadline and token==generation and enabled do
+                    local due=ctx.Now()+.0015
+                    local processed=0
+                    while processed<128 and ctx.Now()<due and active(owner)do
                         local part
-                        if index<=scanTail then part=scan[index];scan[index]=nil;index+=1
-                        elseif head<=tail then part=queue[head];queue[head]=nil;head+=1;queued[part]=nil
+                        if owner.Cursor<=owner.Length then
+                            part=owner.Scan[owner.Cursor];owner.Scan[owner.Cursor]=nil;owner.Cursor+=1
+                        elseif owner.Head<=owner.Tail then
+                            part=owner.Queue[owner.Head];owner.Queue[owner.Head]=nil;owner.Head+=1;owner.Seen[part]=nil
                         else break end
-                        local checked,canRemove=pcall(removable,part)
-                        if checked and canRemove then
-                            local ok=pcall(function()part:Destroy()end)
-                            if ok then api.Removed+=1 end
-                        end
-                        count+=1
+                        local checked,allowed=pcall(api.Removable,part)
+                        if checked and allowed and pcall(function()part:Destroy()end)then api.Removed+=1 end
+                        processed+=1
                     end
-                    api.Pending=math.max(0,scanTail-index+1)+math.max(0,tail-head+1)
-                    if index>scanTail and head>tail then
-                        if needsScan then scan=ctx.Root:QueryDescendants("BasePart");index=1;scanTail=#scan;needsScan=false
-                        else break end
+                    api.Pending=pending(owner)
+                    if api.Pending==0 then
+                        if owner.Rescan then census(owner)else break end
                     end
                     ctx.Wait()
                 end
             end
-            if token==generation then
-                table.clear(queue);table.clear(queued);head,tail=1,0;worker=false;api.Pending=0
+            if active(owner)then
+                owner.Worker=false;owner.Queue={};owner.Seen={};owner.Head=1;owner.Tail=0;owner.Scan={};owner.Cursor=1;owner.Length=0;api.Pending=0
             end
         end)
     end
-    function api.Set(value)
-        if disposed then return false end
-        value=value==true
-        if value==enabled then return true end
-        enabled=value;generation+=1
-        if added then added:Disconnect();added=nil end
-        table.clear(queue);table.clear(queued);head,tail=1,0;worker=false;api.Pending=0
+    function api.Set(enabled)
+        if closed then return false end
+        enabled=enabled==true
+        if enabled==(session~=nil)then return true end
+        local previous=session;session=nil
+        if previous then
+            previous.Added:Disconnect();table.clear(previous.Queue);table.clear(previous.Scan);table.clear(previous.Seen)
+        end
+        api.Pending=0
         if enabled then
-            needsScan=true
-            added=ctx.Root.DescendantAdded:Connect(function(part)
-                if not enabled or not part:IsA("BasePart")or queued[part]then return end
-                if tail-head+1>=8192 then needsScan=true;return end
-                tail+=1;queue[tail]=part;queued[part]=true
-                api.MaxQueued=math.max(api.MaxQueued,tail-head+1)
-                start()
+            local owner={Queue={},Seen=setmetatable({}, {__mode="k"}),Head=1,Tail=0,Scan={},Cursor=1,Length=0,Rescan=true,Worker=false}
+            session=owner
+            owner.Added=ctx.Root.DescendantAdded:Connect(function(part)
+                if not active(owner)or not part:IsA("BasePart")or owner.Seen[part]then return end
+                if owner.Tail-owner.Head+1>=8192 then owner.Rescan=true;return end
+                owner.Tail+=1;owner.Queue[owner.Tail]=part;owner.Seen[part]=true
+                api.MaxQueued=math.max(api.MaxQueued,owner.Tail-owner.Head+1)
+                start(owner)
             end)
-            start()
+            start(owner)
         end
         return true
     end
-    function api.Destroy()
-        if disposed then return end
-        api.Set(false);disposed=true
-    end
+    function api.Destroy()if closed then return end;api.Set(false);closed=true end
     return api
 end
 
 -- END BUNDLED MAP DELETION
     end)()
     state.MapDeletion=makeDeletion({State=state,Root=workspace,Players=Players,Now=os.clock,Defer=task.defer,Wait=task.wait,
-        ClearTerrain=function()workspace.Terrain:Clear()end,
-        Protected=function(part)return not mapPart(part)end})
-    state.MapDeletion.Set(state.PerformanceBoosters["Delete map"]==true or state.PerformanceBoosters["Remove everything"]==true)
+        ClearTerrain=function()workspace.Terrain:Clear()end,Protected=function(part)return not mapPart(part)end})
     local makeAnimations=(function()
 -- BEGIN BUNDLED ANIMATION REMOVAL
--- Stop local animation playback without retaining tracks or destroying rigs.
+-- Animator subscriptions are scoped to one enabled session and never retain tracks.
 return function(ctx)
     local api={Stopped=0}
-    local enabled,disposed=false,false
-    local added,removed
-    local connections={}
+    local session=nil
+    local closed=false
     local function stop(track)
-        if not enabled or disposed or ctx.State.StopEverything then return end
-        local ok=pcall(function()track:Stop(0)end)
-        if ok then api.Stopped+=1 end
+        if closed or not session or ctx.State.StopEverything then return end
+        if pcall(function()track:Stop(0)end)then api.Stopped+=1 end
     end
-    local function attach(animator)
-        if not enabled or not animator:IsA("Animator")or connections[animator]then return end
-        connections[animator]=animator.AnimationPlayed:Connect(stop)
+    local function forget(animator)
+        if not session then return end
+        local connection=session.Animators[animator]
+        if connection then connection:Disconnect();session.Animators[animator]=nil end
+    end
+    local function watch(animator)
+        if not session or not animator:IsA("Animator")or session.Animators[animator]then return end
+        session.Animators[animator]=animator.AnimationPlayed:Connect(stop)
         for _,track in ipairs(animator:GetPlayingAnimationTracks())do stop(track)end
     end
-    local function detach(animator)
-        local connection=connections[animator]
-        if connection then connection:Disconnect();connections[animator]=nil end
+    local function release()
+        if not session then return end
+        for _,connection in ipairs(session.Roots)do connection:Disconnect()end
+        for animator in pairs(session.Animators)do forget(animator)end
+        session=nil
     end
-    function api.Set(value)
-        if disposed then return false end
-        value=value==true
-        if enabled==value then return true end
-        enabled=value;ctx.State.RemovingAnimations=enabled
-        if added then added:Disconnect();added=nil end
-        if removed then removed:Disconnect();removed=nil end
-        for animator in pairs(connections)do detach(animator)end
+    function api.Set(enabled)
+        if closed then return false end
+        enabled=enabled==true
+        if enabled==(session~=nil)then return true end
+        release();ctx.State.RemovingAnimations=enabled
         if enabled then
-            added=ctx.Root.DescendantAdded:Connect(attach)
-            removed=ctx.Root.DescendantRemoving:Connect(detach)
-            for _,animator in ipairs(ctx.Root:QueryDescendants("Animator"))do attach(animator)end
+            session={Animators={},Roots={}}
+            session.Roots[1]=ctx.Root.DescendantAdded:Connect(watch)
+            session.Roots[2]=ctx.Root.DescendantRemoving:Connect(forget)
+            for _,animator in ipairs(ctx.Root:QueryDescendants("Animator"))do watch(animator)end
         end
         return true
     end
     function api.Destroy()
-        if disposed then return end
-        api.Set(false);disposed=true
+        if closed then return end
+        api.Set(false);closed=true
     end
     return api
 end
@@ -4052,45 +3671,62 @@ end
 -- END BUNDLED ANIMATION REMOVAL
     end)()
     state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
-    state.AnimationRemoval.Set(state.PerformanceBoosters["Remove animations"]==true or state.PerformanceBoosters["Remove everything"]==true)
+    local all=state.PerformanceBoosters["Remove everything"]==true
+    state.MapDeletion.Set(all or state.PerformanceBoosters["Delete map"]==true)
+    state.AnimationRemoval.Set(all or state.PerformanceBoosters["Remove animations"]==true)
     state.SetTransparentMap(restore.TransparentMap)
 end
 
 do
     local makeQueue=(function()
 -- BEGIN BUNDLED INSTANCE QUEUE
--- Bounded priority queue with O(1) removal of streamed-out instances.
-return function(capacity)
+-- Fixed-capacity pooled FIFO lanes release instance references on unlink.
+return function(limit)
+    assert(type(limit)=="number"and limit>=1,"A positive capacity is required")
     local api={Count=0,Dropped=0,Peak=0}
-    local records,heads,tails={},{},{}
-    local disposed=false
-    function api.Contains(value)return records[value]~=nil end
-    function api.Push(value,priority)
-        if disposed or records[value]then return false end
-        if api.Count>=capacity then api.Dropped+=1;return false end
-        local kind=priority and 1 or 2
-        local node={Value=value,Kind=kind,Previous=tails[kind]}
-        if tails[kind]then tails[kind].Next=node else heads[kind]=node end
-        tails[kind]=node;records[value]=node;api.Count+=1;api.Peak=math.max(api.Peak,api.Count)
+    local first,last={0,0},{0,0}
+    local slots,locations,reusable={},{},{}
+    local allocated,closed=0,false
+    local function erase(value)
+        local slot=locations[value]
+        if not slot then return false end
+        local node=slots[slot];local lane=node.Lane
+        if node.Before==0 then first[lane]=node.After else slots[node.Before].After=node.After end
+        if node.After==0 then last[lane]=node.Before else slots[node.After].Before=node.Before end
+        locations[value]=nil;node.Value=nil;node.Before=0;node.After=0
+        reusable[#reusable+1]=slot;api.Count-=1
         return true
     end
-    function api.Remove(value)
-        local node=records[value]
-        if not node then return false end
-        if node.Previous then node.Previous.Next=node.Next else heads[node.Kind]=node.Next end
-        if node.Next then node.Next.Previous=node.Previous else tails[node.Kind]=node.Previous end
-        records[value]=nil;node.Value=nil;node.Next=nil;node.Previous=nil;api.Count-=1
+    function api.Contains(value)return locations[value]~=nil end
+    function api.Push(value,urgent)
+        if closed or value==nil or locations[value]then return false end
+        if api.Count>=limit then api.Dropped+=1;return false end
+        local slot=table.remove(reusable)
+        if not slot then allocated+=1;slot=allocated;slots[slot]={}end
+        local lane=urgent and 1 or 2;local node=slots[slot]
+        node.Value=value;node.Lane=lane;node.Before=last[lane];node.After=0
+        if last[lane]==0 then first[lane]=slot else slots[last[lane]].After=slot end
+        last[lane]=slot;locations[value]=slot
+        api.Count+=1;api.Peak=math.max(api.Peak,api.Count)
         return true
     end
+    api.Remove=erase
     function api.Pop()
-        local node=heads[1]or heads[2]
-        if not node then return nil end
-        local value=node.Value;api.Remove(value);return value
+        local slot=first[1]~=0 and first[1]or first[2]
+        if slot==0 then return nil end
+        local result=slots[slot].Value;erase(result);return result
     end
     function api.Clear()
-        table.clear(records);table.clear(heads);table.clear(tails);api.Count=0
+        table.clear(locations);table.clear(reusable)
+        for slot=1,allocated do
+            local node=slots[slot];node.Value=nil;node.Before=0;node.After=0
+            reusable[slot]=slot
+        end
+        first[1],first[2],last[1],last[2]=0,0,0,0;api.Count=0
     end
-    function api.Destroy()api.Clear();disposed=true end
+    function api.Destroy()
+        closed=true;api.Clear();table.clear(slots);table.clear(reusable);allocated=0
+    end
     return api
 end
 
@@ -4098,316 +3734,270 @@ end
     end)()
     local create=(function()
 -- BEGIN BUNDLED SKILL VISUALS
--- Suppress rendering while retaining animation timelines, hitboxes and callbacks.
+-- Local visual overlays preserve native hitbox geometry, timers and animation markers.
 return function(ctx)
-    local state,player=ctx.State,game.Players.LocalPlayer
-    local api={AnimationsHidden=0,EffectsHidden=0}
-    local assets,names,effectNames,sounds,ordinaryAnimations={},{},{},{},{}
-    local managed,tracks={},{}
-    local maintenance,maintenanceQueued=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
-    local maintenanceHead,maintenanceTail=1,0
-    local maintenanceNext,maintenanceNextTail=setmetatable({}, {__mode="v"}),0
-    local ordinaryTracks=setmetatable({}, {__mode="k"})
-    local connections={}
+    local state=ctx.State
+    local player=game.Players.LocalPlayer
+    local api={AnimationsHidden=0,EffectsHidden=0,Pending=0}
     local disposed=false
-    local animator,played,nextCheck=nil,nil,0
-    local pendingQueue=assert(ctx.Queue,"Bounded visual queue is required")
+    local pending=assert(ctx.Queue,"Bounded visual queue is required")
+    local managed,tracks={},{}
+    local maintenance=setmetatable({}, {__mode="v"})
+    local maintenanceNext=setmetatable({}, {__mode="v"})
+    local maintenanceQueued=setmetatable({}, {__mode="k"})
+    local maintenanceHead,maintenanceTail,maintenanceNextTail=1,0,0
+    local ordinaryTracks=setmetatable({}, {__mode="k"})
     local invisible=NumberSequence.new(1)
-    local hiddenWeight=0.0001 -- A zero-weight track can stop before its damage markers.
-    local gunUntil,gunOrigin=0,nil
+    local catalogs={Animation={},Sound={},Name={},Skill={},Ordinary={}}
     local gunModels=setmetatable({}, {__mode="k"})
-    local function normalize(value) return string.lower((string.gsub(value or "","[^%w]",""))) end
-    local function assetId(value) return string.match(value or "","%d+") end
+    local gunOrigin,gunUntil=nil,0
+    local connections={}
+    local animator,animationConnection
+    local nextAnimation=0
+    local hiddenWeight=.0001
+    local function normalize(value)return tostring(value or ""):lower():gsub("[^%w]","")end
+    local function id(value)return tostring(value or ""):match("%d+")end
     local generic={part=true,meshpart=true,model=true,folder=true,attachment=true,rock=true,rocks=true,groundrocks=true,floor=true,terrain=true,baseplate=true,spawnlocation=true,humanoidrootpart=true,uppertorso=true,lowertorso=true,vfx=true,handle=true,trail=true,beam=true,light=true,animation=true,particleemitter=true,pointlight=true,spotlight=true,surfacelight=true,sound=true,smoke=true,texture=true,decal=true}
     local locomotion={idle=true,walk=true,run=true,jump=true,fall=true,climb=true,swim=true,swimidle=true,sit=true,toolnone=true}
-    for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren()) do names[normalize(definition.Name)]=true end
-    for _,root in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects}) do
-        for _,instance in ipairs(root:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound")) do
-            if instance:IsA("Animation")then
-                local id=assetId(instance.AnimationId);if id then assets[id]=true end
+    for _,definition in ipairs(game.ReplicatedStorage.Database.Skills:GetChildren())do catalogs.Skill[normalize(definition.Name)]=true end
+    for _,service in ipairs({ctx.Services.Skills,ctx.Services.SkillEffects})do
+        for _,object in ipairs(service:QueryDescendants("Animation,BasePart,ParticleEmitter,Beam,Trail,Model,Sound"))do
+            if object:IsA("Animation")then local key=id(object.AnimationId);if key then catalogs.Animation[key]=true end
             else
-                if instance:IsA("Sound")then local id=assetId(instance.SoundId);if id then sounds[id]=true end end
-                local key=normalize(instance.Name)
-                if #key>=5 and not generic[key]then effectNames[key]=true end
+                if object:IsA("Sound")then local key=id(object.SoundId);if key then catalogs.Sound[key]=true end end
+                local key=normalize(object.Name);if #key>=5 and not generic[key]then catalogs.Name[key]=true end
             end
             if state.YieldStartup then state.YieldStartup()end
         end
     end
-    for _,style in pairs(ctx.Actions.animations) do
-        if type(style)=="table" then for key,track in pairs(style) do
-            if type(key)=="string" and typeof(track)=="Instance" and track:IsA("AnimationTrack") and track.Animation then
-                local id=assetId(track.Animation.AnimationId)
-                if id then if names[normalize(key)] then assets[id]=true else ordinaryAnimations[id]=true end end
+    for _,pack in pairs(ctx.Actions.animations)do if type(pack)=="table"then
+        for name,track in pairs(pack)do
+            if type(name)=="string"and typeof(track)=="Instance"and track:IsA("AnimationTrack")and track.Animation then
+                local key=id(track.Animation.AnimationId)
+                if key then local collection=catalogs.Skill[normalize(name)]and catalogs.Animation or catalogs.Ordinary;collection[key]=true end
             end
-        end end
-    end
-    local function keep(instance)
-        if (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui"))
-            and #instance:QueryDescendants("TextLabel,TextButton")>0 then return true end
-        if ctx.Preserve and ctx.Preserve(instance) then return true end
+        end
+    end end
+    local function keep(object)
+        if (object:IsA("BillboardGui")or object:IsA("SurfaceGui"))and #object:QueryDescendants("TextLabel,TextButton")>0 then return true end
+        if ctx.Preserve and ctx.Preserve(object)then return true end
         local mobs=workspace:FindFirstChild("Mobs")
+        if mobs and object:IsDescendantOf(mobs)then return true end
         local characters=workspace:FindFirstChild("Characters")
+        if characters and object:IsDescendantOf(characters)and not(player.Character and object:IsDescendantOf(player.Character))then return true end
         local items=workspace:FindFirstChild("CharacterItems")
-        local ownItems=items and items:FindFirstChild(tostring(player.UserId))
-        if items and instance:IsDescendantOf(items) and not (ownItems and instance:IsDescendantOf(ownItems)) then return true end
-        if mobs and instance:IsDescendantOf(mobs) then return true end
-        if characters and instance:IsDescendantOf(characters) and not (player.Character and instance:IsDescendantOf(player.Character)) then return true end
+        local own=items and items:FindFirstChild(tostring(player.UserId))
+        return items and object:IsDescendantOf(items)and not(own and object:IsDescendantOf(own))or false
+    end
+    local function gunEffect(object)
+        local part=object:IsA("BasePart")and object or object:FindFirstAncestorWhichIsA("BasePart")
+        if not part then return false end
+        local near=false
+        for model,expires in pairs(gunModels)do
+            if not model.Parent or os.clock()>expires then gunModels[model]=nil
+            else local gun=model:FindFirstChild("Gun");if gun and gun:IsA("BasePart")and (part.Position-gun.Position).Magnitude<160 then near=true;break end end
+        end
+        if not near and gunOrigin and os.clock()<gunUntil then
+            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            near=(part.Position-gunOrigin).Magnitude<160 or root and (part.Position-root.Position).Magnitude<160
+        end
+        if not near then return false end
+        if object:IsA("Trail")or object:IsA("Beam")or object:IsA("ParticleEmitter")then return true end
+        local sphere=part:IsA("Part")and part.Name=="Part"and not part.CanCollide and part.Shape==Enum.PartType.Ball and part.Transparency>=.95 and part.Size.X>=8 and part.Size.X<=16
+        if object:IsA("Decal")then return sphere or object.Texture:find("3170098415",1,true)~=nil or object.Texture:find("3170224154",1,true)~=nil end
+        if sphere and (object:IsA("Light")or object:IsA("Sound"))then return true end
+        if object:IsA("BasePart")and not object.CanCollide and object.Material==Enum.Material.Neon then
+            if object.BrickColor==BrickColor.new("Bright yellow")then return true end
+            if object:IsA("Part")and object.Name=="Part"and object.BrickColor==BrickColor.new("Bright blue")then
+                return object.Shape==Enum.PartType.Ball or object.Size.Z>object.Size.X*3 and object.Size.Z>object.Size.Y*3
+            end
+        end
         return false
     end
-    local function effect(instance)
-        if managed[instance] then return true end
-        if keep(instance) then return false end
-        local gunNearby=false
-        local part=instance:IsA("BasePart") and instance or instance:FindFirstAncestorWhichIsA("BasePart")
-        if part then
-            for model,expires in pairs(gunModels) do
-                if not model.Parent or os.clock()>expires then gunModels[model]=nil
-                else local gun=model:FindFirstChild("Gun"); if gun and gun:IsA("BasePart") and (part.Position-gun.Position).Magnitude<160 then gunNearby=true; break end end
-            end
-        end
-        if (gunOrigin and os.clock()<gunUntil) or gunNearby then
-            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if part and (gunNearby or (gunOrigin and (part.Position-gunOrigin).Magnitude<160) or (root and (part.Position-root.Position).Magnitude<160)) then
-                local sphere=part:IsA("Part") and part.Name=="Part" and not part.CanCollide and part.Shape==Enum.PartType.Ball
-                    and part.Transparency>=.95 and part.Size.X>=8 and part.Size.X<=16
-                if instance:IsA("Trail") or instance:IsA("Beam") or instance:IsA("ParticleEmitter") then return true end
-                if instance:IsA("Decal") and (sphere or string.find(instance.Texture,"3170098415",1,true) or string.find(instance.Texture,"3170224154",1,true)) then return true end
-                if sphere and (instance:IsA("Light") or instance:IsA("Sound")) then return true end
-                if instance:IsA("BasePart") and not instance.CanCollide and instance.Material==Enum.Material.Neon
-                    and (instance.BrickColor==BrickColor.new("Bright yellow")
-                        or (instance:IsA("Part") and instance.Name=="Part" and instance.BrickColor==BrickColor.new("Bright blue")
-                            and (instance.Shape==Enum.PartType.Ball or (instance.Size.Z>instance.Size.X*3 and instance.Size.Z>instance.Size.Y*3)))) then return true end
-            end
-        end
-        if instance:IsA("Sound") and sounds[assetId(instance.SoundId)] then return true end
-        local own=player.Character and instance:IsDescendantOf(player.Character)
-        if own and instance:IsA("BasePart") and (instance.Parent==player.Character or instance.Parent:IsA("Accessory") or instance.Parent:IsA("Tool")) then return false end
-        if own and (instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") or instance:IsA("Light") or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles")) then return true end
-        local node=instance
+    local function effect(object)
+        if managed[object]then return true end
+        if keep(object)then return false end
+        if gunEffect(object)then return true end
+        if object:IsA("Sound")and catalogs.Sound[id(object.SoundId)]then return true end
+        local own=player.Character and object:IsDescendantOf(player.Character)
+        if own and object:IsA("BasePart")and (object.Parent==player.Character or object.Parent:IsA("Accessory")or object.Parent:IsA("Tool"))then return false end
+        if own and (object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")or object:IsA("Light")or object:IsA("Smoke")or object:IsA("Fire")or object:IsA("Sparkles"))then return true end
+        local node=object
         while node and node~=workspace do
             local key=normalize(node.Name)
-            local rifle=key=="ar" and node:IsA("Model") and node:FindFirstChild("Gun")
-                and (node:FindFirstChild("Portal1") or node:FindFirstChild("Portal2"))
-            if node.Name=="HitEffects" or names[key] or effectNames[key] or key=="pistol" or key=="rifle" or key=="summonrifle" or rifle then return true end
+            if node.Name=="HitEffects"or catalogs.Skill[key]or catalogs.Name[key]or key=="pistol"or key=="rifle"or key=="summonrifle"then return true end
+            if key=="ar"and node:IsA("Model")and node:FindFirstChild("Gun")and (node:FindFirstChild("Portal1")or node:FindFirstChild("Portal2"))then return true end
             node=node.Parent
         end
         return false
     end
-    -- Mobile executors may reject LocalTransparencyModifier on effect classes.
-    -- Treat each property independently so one unsupported member cannot stall VFX cleanup.
-    local function write(instance,property,value)
-        return pcall(function()instance[property]=value end)
+    -- Isolated property access handles mobile executors that reject optional members.
+    local function write(object,property,value)
+        return pcall(function()object[property]=value end)
     end
-    local function restore(instance,record)
-        for property,value in pairs(record.Before) do write(instance,property,value) end
+    local function restore(object,record)
+        for property,value in pairs(record.Before)do write(object,property,value)end
     end
-    local function suppress(instance)
-        if disposed or state.StopEverything then return end
-        if managed[instance] or not effect(instance) then return end
+    local function suppress(object)
+        if disposed or state.StopEverything or managed[object]or not effect(object)then return end
         if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
-        local properties
-        if instance:IsA("BasePart") then
-            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
-            properties={LocalTransparencyModifier=1,Transparency=1}
-        elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
-        elseif instance:IsA("Light") then properties={Enabled=false,Brightness=0}
-        elseif instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles") then properties={Enabled=false}
-        elseif instance:IsA("Sound") then properties={Volume=0}
-        elseif instance:IsA("Decal") or instance:IsA("Texture") then properties={Transparency=1}
-        elseif instance:IsA("BillboardGui") or instance:IsA("SurfaceGui") then properties={Enabled=false}
-        elseif instance:IsA("Highlight") then properties={Enabled=false,FillTransparency=1,OutlineTransparency=1} end
-        if not properties then return end
-        local record={Before={},Hidden=properties,Parent=instance.Parent}
-        for property,value in pairs(properties) do
-            local readable,before=pcall(function()return instance[property]end)
-            if readable and write(instance,property,value) then record.Before[property]=before
-            else record.Hidden[property]=nil end
+        local hidden
+        if object:IsA("BasePart")then
+            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(object)end
+            hidden={Transparency=1,LocalTransparencyModifier=1}
+        elseif object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")then hidden={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
+        elseif object:IsA("Light")then hidden={Brightness=0,Enabled=false}
+        elseif object:IsA("Sound")then hidden={Volume=0}
+        elseif object:IsA("Decal")or object:IsA("Texture")then hidden={Transparency=1}
+        elseif object:IsA("Highlight")then hidden={Enabled=false,FillTransparency=1,OutlineTransparency=1}
+        elseif object:IsA("Smoke")or object:IsA("Fire")or object:IsA("Sparkles")or object:IsA("BillboardGui")or object:IsA("SurfaceGui")then hidden={Enabled=false}end
+        if not hidden then return end
+        local before={}
+        for property,value in pairs(hidden)do
+            local readable,original=pcall(function()return object[property]end)
+            if readable and write(object,property,value)then before[property]=original else hidden[property]=nil end
         end
-        if not next(record.Hidden)then return end
-        managed[instance]=record
-        if not maintenanceQueued[instance]then
-            maintenanceTail+=1;maintenance[maintenanceTail]=instance;maintenanceQueued[instance]=true
-        end
-        if instance:IsA("ParticleEmitter") or instance:IsA("Trail") then pcall(function()instance:Clear()end) end
+        if not next(hidden)then return end
+        managed[object]={Before=before,Hidden=hidden,Parent=object.Parent}
+        if not maintenanceQueued[object]then maintenanceTail+=1;maintenance[maintenanceTail]=object;maintenanceQueued[object]=true end
+        if object:IsA("ParticleEmitter")or object:IsA("Trail")then pcall(function()object:Clear()end)end
         api.EffectsHidden+=1
     end
     local function isSkill(track)
-        if ordinaryTracks[track] then return false end
-        local key=normalize(track.Name)
-        if locomotion[key] or string.sub(key,1,5)=="swing" then return false end
-        local id=track.Animation and assetId(track.Animation.AnimationId)
-        if id and assets[id] then return true end
-        if id and ordinaryAnimations[id] then return false end
-        if names[key] then return true end
-        if track.Priority.Value>=Enum.AnimationPriority.Action.Value then return true end
-        return (state.SkillCastRunning or (ctx.SkillState and ctx.SkillState.usingSkill~="none")) and not locomotion[key]
+        if ordinaryTracks[track]then return false end
+        local name=normalize(track.Name)
+        if locomotion[name]or name:sub(1,5)=="swing"then return false end
+        local asset=track.Animation and id(track.Animation.AnimationId)
+        if asset and catalogs.Animation[asset]then return true end
+        if asset and catalogs.Ordinary[asset]then return false end
+        if catalogs.Skill[name]or track.Priority.Value>=Enum.AnimationPriority.Action.Value then return true end
+        return (state.SkillCastRunning or ctx.SkillState and ctx.SkillState.usingSkill~="none")and not locomotion[name]
     end
     api.IsSkillAnimation=isSkill
     function api.MarkGunCast(name,origin)
-        if name=="Summon Pistol" or name=="Summon Rifle" then gunUntil=os.clock()+5; gunOrigin=origin end
+        if name=="Summon Pistol"or name=="Summon Rifle"then gunOrigin=origin;gunUntil=os.clock()+5 end
     end
     function api.AllowSwingTrack(track)
         ordinaryTracks[track]=true
-        local before=tracks[track]
-        if before and track.IsPlaying then track:AdjustWeight(before.Weight,0) end
-        tracks[track]=nil
+        local weight=tracks[track];tracks[track]=nil
+        if weight and track.IsPlaying then track:AdjustWeight(weight.Weight,0)end
     end
     local function hideTrack(track)
-        if disposed or state.StopEverything then return end
-        if not isSkill(track) then return end
-        if not tracks[track] then
-            tracks[track]={Weight=track.WeightTarget}
-            api.AnimationsHidden+=1
-        end
-        if math.abs(track.WeightTarget-hiddenWeight)>0.00001 or track.WeightCurrent>0.001 then track:AdjustWeight(hiddenWeight,0) end
+        if disposed or state.StopEverything or not isSkill(track)then return end
+        if not tracks[track]then tracks[track]={Weight=track.WeightTarget};api.AnimationsHidden+=1 end
+        if math.abs(track.WeightTarget-hiddenWeight)>.00001 or track.WeightCurrent>.001 then track:AdjustWeight(hiddenWeight,0)end
     end
-    local function enqueue(instance,priority)
-        if disposed or state.StopEverything or pendingQueue.Contains(instance)or managed[instance]then return end
-        local name=instance.ClassName
-        if not (instance:IsA("BasePart") or instance:IsA("Light") or name=="ParticleEmitter" or name=="Beam" or name=="Trail"
-            or name=="Smoke" or name=="Fire" or name=="Sparkles" or name=="Texture" or name=="Sound" or name=="Decal" or name=="BillboardGui" or name=="SurfaceGui" or name=="Highlight") then return end
-        pendingQueue.Push(instance,priority)
+    local eligible={ParticleEmitter=true,Beam=true,Trail=true,Smoke=true,Fire=true,Sparkles=true,Texture=true,Sound=true,Decal=true,BillboardGui=true,SurfaceGui=true,Highlight=true}
+    local function candidate(object)return object:IsA("BasePart")or object:IsA("Light")or eligible[object.ClassName]end
+    local function queue(object,priority)
+        if not disposed and not state.StopEverything and not managed[object]and candidate(object)then pending.Push(object,priority)end
     end
     function api.ProcessPending()
         local deadline=os.clock()+.0006
-        local count=0
-        while count<64 and (count==0 or os.clock()<deadline) do
-            local instance=pendingQueue.Pop()
-            if not instance then break end
-            if instance.Parent then pcall(suppress,instance) end
-            count+=1
+        local processed=0
+        while processed<64 and (processed==0 or os.clock()<deadline)do
+            local object=pending.Pop();if not object then break end
+            if object.Parent then pcall(suppress,object)end
+            processed+=1
         end
-        api.Pending=pendingQueue.Count
-        state.VisualQueueSize=api.Pending
+        api.Pending=pending.Count;state.VisualQueueSize=api.Pending
     end
-    local immediateCount,immediateSince=0,0
-    local function added(instance)
+    local burst={At=0,Count=0}
+    local function added(object)
         if disposed or state.StopEverything or not state.Running then return end
-        if instance:IsA("Model") and (instance.Name=="AR" or instance.Name=="Pistol") then
-            gunModels[instance]=os.clock()+5
-            for _,part in ipairs(instance:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Sound,Decal,Texture")) do enqueue(part,true) end
+        if object:IsA("Model")and (object.Name=="AR"or object.Name=="Pistol")then
+            gunModels[object]=os.clock()+5
+            for _,child in ipairs(object:QueryDescendants("BasePart,ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Sound,Decal,Texture"))do queue(child,true)end
         end
-        if instance:IsA("TextLabel") or instance:IsA("TextButton") then
-            local gui=instance:FindFirstAncestorWhichIsA("BillboardGui") or instance:FindFirstAncestorWhichIsA("SurfaceGui")
-            local record=gui and managed[gui]
-            if record then
-                restore(gui,record)
-                managed[gui]=nil
-            end
+        if object:IsA("TextLabel")or object:IsA("TextButton")then
+            local gui=object:FindFirstAncestorWhichIsA("BillboardGui")or object:FindFirstAncestorWhichIsA("SurfaceGui")
+            if gui and managed[gui]then restore(gui,managed[gui]);managed[gui]=nil end
             return
         end
-        -- Streaming also adds attachments, constraints, value objects and UI
-        -- layout nodes. They cannot render effects and must not grow the queue.
-        if not(instance:IsA("BasePart")or instance:IsA("ParticleEmitter")or instance:IsA("Beam")or instance:IsA("Trail")
-            or instance:IsA("Smoke")or instance:IsA("Fire")or instance:IsA("Sparkles")or instance:IsA("Light")
-            or instance:IsA("Decal")or instance:IsA("Texture")or instance:IsA("BillboardGui")or instance:IsA("SurfaceGui")
-            or instance:IsA("Highlight")or instance:IsA("Sound"))then return end
-        -- Hide proven effects on arrival, before waiting for the next mobile frame.
-        -- Cap synchronous work during bursty casts; overflow uses the bounded queue.
-        local now=os.clock()
-        if now-immediateSince>=.05 then immediateSince=now;immediateCount=0 end
-        if immediateCount<24 then
-            immediateCount+=1
-            pcall(suppress,instance)
-        end
-        enqueue(instance,state.SkillCastRunning or state.MiscCastRunning or instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail")
-            or instance:IsA("Sound") or effectNames[normalize(instance.Name)]~=nil)
+        if not candidate(object)then return end
+        local stamp=os.clock();if stamp-burst.At>=.05 then burst.At=stamp;burst.Count=0 end
+        if burst.Count<24 then burst.Count+=1;pcall(suppress,object)end
+        queue(object,state.SkillCastRunning or state.MiscCastRunning or object:IsA("ParticleEmitter")or object:IsA("Beam")or object:IsA("Trail")or object:IsA("Sound")or catalogs.Name[normalize(object.Name)])
     end
-    connections[#connections+1]=workspace.DescendantAdded:Connect(added)
-    connections[#connections+1]=workspace.DescendantRemoving:Connect(function(instance)
-        pendingQueue.Remove(instance)
-        local record=managed[instance]
-        if record then restore(instance,record); managed[instance]=nil end
+    connections[1]=workspace.DescendantAdded:Connect(added)
+    connections[2]=workspace.DescendantRemoving:Connect(function(object)
+        pending.Remove(object)
+        local record=managed[object];managed[object]=nil
+        if record then restore(object,record)end
     end)
-    for _,instance in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound")) do
-        enqueue(instance,false)
+    for _,object in ipairs(workspace:QueryDescendants("ParticleEmitter,Beam,Trail,Smoke,Fire,Sparkles,Light,BasePart,Decal,Texture,BillboardGui,SurfaceGui,Highlight,Sound"))do
+        queue(object,false)
         if state.YieldStartup then state.YieldStartup()end
     end
-    for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol")) do if model:IsA("Model") then gunModels[model]=os.clock()+5 end end
-    function api.IsEffect(instance) return effect(instance) end
+    for _,model in ipairs(workspace:QueryDescendants("#AR,#Pistol"))do if model:IsA("Model")then gunModels[model]=os.clock()+5 end end
+    function api.IsEffect(object)return effect(object)end
     function api.ProcessManaged()
         local dynamic=not ctx.DynamicHazards or ctx.DynamicHazards()
         local deadline=os.clock()+.0006
         local available=math.min(64,maintenanceTail-maintenanceHead+1)
-        local count=0
-        while count<available and (count==0 or os.clock()<deadline)do
-            local instance=maintenance[maintenanceHead]
-            maintenance[maintenanceHead]=nil;maintenanceHead+=1
-            if instance then maintenanceQueued[instance]=nil end
-            local record=instance and managed[instance]
+        local processed=0
+        while processed<available and (processed==0 or os.clock()<deadline)do
+            local object=maintenance[maintenanceHead];maintenance[maintenanceHead]=nil;maintenanceHead+=1
+            if object then maintenanceQueued[object]=nil end
+            local record=object and managed[object]
             if record then
-                pcall(function()
-                    if not instance.Parent then managed[instance]=nil
-                    elseif (instance:IsA("BillboardGui") or instance:IsA("SurfaceGui")) and keep(instance) then
-                        restore(instance,record)
-                        managed[instance]=nil
-                    elseif (dynamic or instance.Parent~=record.Parent) and keep(instance) then
-                        restore(instance,record)
-                        managed[instance]=nil
-                    else
-                        record.Parent=instance.Parent
-                        for property,value in pairs(record.Hidden) do
-                            local ok,current=pcall(function()return instance[property]end)
-                            if ok then
-                                if typeof(value)=="NumberSequence" then
-                                    local points=current.Keypoints
-                                    if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(instance,property,value) end
-                                elseif current~=value then write(instance,property,value) end
-                            end
+                local protect=false
+                pcall(function()protect=object.Parent==nil or (dynamic or object.Parent~=record.Parent)and keep(object)or (object:IsA("BillboardGui")or object:IsA("SurfaceGui"))and keep(object)end)
+                if protect then restore(object,record);managed[object]=nil
+                else
+                    record.Parent=object.Parent
+                    for property,value in pairs(record.Hidden)do
+                        local ok,current=pcall(function()return object[property]end)
+                        if ok then
+                            if typeof(value)=="NumberSequence"then
+                                local points=current.Keypoints
+                                if #points~=2 or points[1].Value~=1 or points[2].Value~=1 then write(object,property,value)end
+                            elseif current~=value then write(object,property,value)end
                         end
                     end
-                end)
-                if managed[instance]then
-                    maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=instance;maintenanceQueued[instance]=true
                 end
+                if managed[object]then maintenanceNextTail+=1;maintenanceNext[maintenanceNextTail]=object;maintenanceQueued[object]=true end
             end
-            count+=1
+            processed+=1
         end
         if maintenanceHead>maintenanceTail then
-            table.clear(maintenance)
-            maintenance,maintenanceNext=maintenanceNext,maintenance
-            maintenanceHead,maintenanceTail=1,maintenanceNextTail;maintenanceNextTail=0
+            table.clear(maintenance);maintenance,maintenanceNext=maintenanceNext,maintenance
+            maintenanceHead=1;maintenanceTail=maintenanceNextTail;maintenanceNextTail=0
         end
-        return count
+        return processed
     end
     function api.Update()
         if disposed or state.StopEverything then return end
         api.ProcessPending()
-        local now=os.clock()
-        if now<nextCheck then return end
-        nextCheck=now+0.08
+        local stamp=os.clock();if stamp<nextAnimation then return end;nextAnimation=stamp+.08
         local character=player.Character
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
         local current=humanoid and humanoid:FindFirstChildOfClass("Animator")
-        if current~=animator then
-            if played then played:Disconnect(); played=nil end
-            animator=current
-            if animator then played=animator.AnimationPlayed:Connect(function(track)
-                hideTrack(track)
-                task.defer(function() if state.Running and track.IsPlaying then hideTrack(track) end end)
-            end) end
+        if animator~=current then
+            if animationConnection then animationConnection:Disconnect()end
+            animator=current;animationConnection=nil
+            if current then animationConnection=current.AnimationPlayed:Connect(function(track)
+                hideTrack(track);task.defer(function()if not disposed and state.Running and track.IsPlaying then hideTrack(track)end end)
+            end)end
         end
-        if animator then for _,track in ipairs(animator:GetPlayingAnimationTracks()) do hideTrack(track) end end
-        for track,record in pairs(tracks) do
+        if animator then for _,track in ipairs(animator:GetPlayingAnimationTracks())do hideTrack(track)end end
+        for track,record in pairs(tracks)do
             if not track.IsPlaying then tracks[track]=nil
-            elseif track.WeightCurrent>0.001 or math.abs(track.WeightTarget-hiddenWeight)>0.00001 then track:AdjustWeight(hiddenWeight,0) end
+            elseif track.WeightCurrent>.001 or math.abs(track.WeightTarget-hiddenWeight)>.00001 then track:AdjustWeight(hiddenWeight,0)end
         end
-        api.ProcessManaged()
-        state.HiddenSkillAnimations=api.AnimationsHidden
-        state.HiddenSkillEffects=api.EffectsHidden
+        api.ProcessManaged();state.HiddenSkillAnimations=api.AnimationsHidden;state.HiddenSkillEffects=api.EffectsHidden
     end
     function api.Destroy()
         if disposed then return end
         disposed=true
-        if played then played:Disconnect() end
-        for _,connection in ipairs(connections) do connection:Disconnect() end
-        for track,record in pairs(tracks) do if track.IsPlaying then track:AdjustWeight(record.Weight,0) end end
-        for instance,record in pairs(managed) do if instance.Parent then restore(instance,record) end end
-        table.clear(managed); table.clear(tracks)
-        table.clear(maintenance);table.clear(maintenanceNext);maintenanceNextTail=0;table.clear(maintenanceQueued);maintenanceHead,maintenanceTail=1,0
-        pendingQueue.Destroy()
-        table.clear(gunModels)
-        api.Pending=0; state.VisualQueueSize=0
+        if animationConnection then animationConnection:Disconnect();animationConnection=nil end
+        for _,connection in ipairs(connections)do connection:Disconnect()end;table.clear(connections)
+        for track,record in pairs(tracks)do pcall(function()if track.IsPlaying then track:AdjustWeight(record.Weight,0)end end)end
+        for object,record in pairs(managed)do if object.Parent then restore(object,record)end end
+        table.clear(managed);table.clear(tracks);table.clear(gunModels);table.clear(ordinaryTracks)
+        table.clear(maintenance);table.clear(maintenanceNext);table.clear(maintenanceQueued)
+        maintenanceHead,maintenanceTail,maintenanceNextTail=1,0,0
+        pending.Destroy();api.Pending=0;state.VisualQueueSize=0
     end
     api.Update()
     return api
@@ -4432,27 +4022,23 @@ end
 end
 
 -- Area coordinates remain usable when distance-based spawning removes the mob.
-local destinations = {}
+local destinations={}
 local destinationsDirty=false
 local function finitePoint(point)
-    return typeof(point) == "Vector3" and point.X == point.X and point.Y == point.Y and point.Z == point.Z
-        and math.abs(point.X) < 1000000 and math.abs(point.Y) < 1000000 and math.abs(point.Z) < 1000000
+    if typeof(point)~="Vector3"then return false end
+    for _,value in ipairs({point.X,point.Y,point.Z})do if value~=value or math.abs(value)>=1000000 then return false end end
+    return true
 end
-local function rememberDestination(id, name, kind, point)
-    if not finitePoint(point) then return end
-    local old=destinations[id]
-    if old and old.Name==name and old.Kind==kind and (old.Position-point).Magnitude<.01 then return end
-    destinations[id] = { Id = id, Name = name, Kind = kind, Position = point }
-    destinationsDirty=true
+local function rememberDestination(id,name,kind,point)
+    if not finitePoint(point)then return end
+    local previous=destinations[id]
+    if previous and previous.Name==name and previous.Kind==kind and (previous.Position-point).Magnitude<.01 then return end
+    destinations[id]={Id=id,Name=name,Kind=kind,Position=point};destinationsDirty=true
 end
--- Verified on the current Floor 7 map; independent of whether Frogazoid exists.
-if game.PlaceId == 582198062 then
-    rememberDestination("mob:Frogazoid", "Frogazoid", "Mini boss", Vector3.new(-154.811, 1214.301, -758.796))
-end
--- Only user-created spots use a position file; built-in arenas stay in source.
+if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid","Mini boss",Vector3.new(-154.811,1214.301,-758.796))end
 if importedConfig and filePersistence then
-    for id,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/custom-spots_"..id..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(id),Areas=areas}))
+    for floor,areas in pairs(importedConfig.CustomSpots or {})do
+        writefile(configFolder.."/custom-spots_"..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
     end
 end
 local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
@@ -4462,15 +4048,14 @@ if filePersistence then
         if not isfile(customSpotPath)then return end
         local raw=readfile(customSpotPath)
         assert(#raw<=32768,"Custom spots file exceeds size limit")
-        local data=HttpService:JSONDecode(raw)
-        if data.Version~=1 or data.PlaceId~=game.PlaceId or type(data.Areas)~="table"then return end
-        for index,area in ipairs(data.Areas)do
+        local saved=HttpService:JSONDecode(raw)
+        if saved.Version~=1 or saved.PlaceId~=game.PlaceId or type(saved.Areas)~="table"then return end
+        for index,entry in ipairs(saved.Areas)do
             if index>20 then break end
-            if type(area.Id)=="string"and area.Id:sub(1,16)=="saved:multispot:"and type(area.Name)=="string"and type(area.Position)=="table"then
-                local p=area.Position
-                if type(p[1])=="number"and type(p[2])=="number"and type(p[3])=="number"then
-                    rememberDestination(area.Id,area.Name,"Arena",Vector3.new(p[1],p[2],p[3]))
-                end
+            local at=entry.Position
+            if type(entry.Id)=="string"and entry.Id:sub(1,16)=="saved:multispot:"and type(entry.Name)=="string"and type(at)=="table"
+                and type(at[1])=="number"and type(at[2])=="number"and type(at[3])=="number"then
+                rememberDestination(entry.Id,entry.Name,"Arena",Vector3.new(at[1],at[2],at[3]))
             end
         end
         lastCustomSpots=raw
@@ -4555,89 +4140,76 @@ local function saveDestinations()
     destinationsDirty=false
     if not filePersistence then return end
     local areas={}
-    for id,area in pairs(destinations)do
+    for id,entry in pairs(destinations)do
         if id:sub(1,16)=="saved:multispot:"then
-            local p=area.Position
-            areas[#areas+1]={Id=id,Name=area.Name,Position={p.X,p.Y,p.Z}}
+            local at=entry.Position
+            areas[#areas+1]={Id=id,Name=entry.Name,Position={at.X,at.Y,at.Z}}
         end
     end
     if #areas==0 then return end
     table.sort(areas,function(a,b)return a.Id<b.Id end)
     local ok,reason=pcall(function()
-        local raw=HttpService:JSONEncode({Version=1,PlaceId=game.PlaceId,Areas=areas})
-        if raw~=lastCustomSpots then writefile(customSpotPath,raw);lastCustomSpots=raw end
+        local serialized=HttpService:JSONEncode({Version=1,PlaceId=game.PlaceId,Areas=areas})
+        if serialized~=lastCustomSpots then writefile(customSpotPath,serialized);lastCustomSpots=serialized end
     end)
     state.CustomSpotSaveError=not ok and tostring(reason)or nil
 end
 local function rankMob(mob)
-    local priority=targetPriority.Rank(mob)
-    return priority==1 and "Boss" or priority==2 and "Mini boss" or nil
+    local rank=targetPriority.Rank(mob)
+    if rank==1 then return "Boss"end
+    if rank==2 then return "Mini boss"end
 end
 local function discoverDestinations(onlyMobs)
-    if workspace:FindFirstChild("WaveDefenseStuff") then
-        local stage=tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if state.DestinationEnvironment~=stage then
-            for id in pairs(destinations) do if string.sub(id,1,4)=="mob:" or id=="wave:rift" then destinations[id]=nil; destinationsDirty=true end end
+    local wave=workspace:FindFirstChild("WaveDefenseStuff")
+    if wave then
+        local stage=tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")
+        if stage~=state.DestinationEnvironment then
+            for id in pairs(destinations)do if id:sub(1,4)=="mob:"or id=="wave:rift"then destinations[id]=nil;destinationsDirty=true end end
             state.DestinationEnvironment=stage
         end
-        local marker=workspace.WaveDefenseStuff:FindFirstChild("RiftBossSpawn")
-        if marker and string.find(string.lower(stage),"rift",1,true) then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position) end
+        local marker=wave:FindFirstChild("RiftBossSpawn")
+        if marker and stage:lower():find("rift",1,true)then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position)end
     end
     if not onlyMobs then
-    local mapContainers = { workspace }
-    for _, folderName in ipairs({ "Models", "OptimizedGame" }) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then mapContainers[#mapContainers + 1] = folder end
-    end
-    for _, models in ipairs(mapContainers) do
-        for _, model in ipairs(models:GetChildren()) do
-            if model:IsA("Model") or model:IsA("BasePart") then
-                local key = string.lower((string.gsub(model.Name, "[^%w]", "")))
-                local kind
-                if key == "bossroom" or key == "bossarena" or key == "bossspawn" or key == "aspawnboss" then kind = "Boss"
-                elseif key == "minibossroom" or key == "minibossarena" or key == "minibossspawn" or key == "aspawnminiboss" then kind = "Mini boss"
-                elseif key == "entryroom" or key == "dungeonentrance" then kind = "Dungeon"
-                elseif key == "exitteleportroom" or key == "exitportal" then kind = "Exit"
-                elseif string.match(key, "^bigdungeonroom%d+$") then kind = "Dungeon" end
-                if kind then
-                    local displayName = model.Name == "BossRoom" and "Boss room" or model.Name
-                    if key == "aspawnboss" then displayName = "Boss spawn area"
-                    elseif key == "aspawnminiboss" then displayName = "Mini-boss spawn area" end
-                    local room = string.match(key, "^bigdungeonroom(%d+)$")
-                    if room then displayName = "Room " .. room end
-                    rememberDestination("map:" .. model.Name, displayName, kind, model:GetPivot().Position)
+        local containers={workspace}
+        for _,name in ipairs({"Models","OptimizedGame"})do local folder=workspace:FindFirstChild(name);if folder then containers[#containers+1]=folder end end
+        local kinds={bossroom="Boss",bossarena="Boss",bossspawn="Boss",aspawnboss="Boss",minibossroom="Mini boss",minibossarena="Mini boss",
+            minibossspawn="Mini boss",aspawnminiboss="Mini boss",entryroom="Dungeon",dungeonentrance="Dungeon",exitteleportroom="Exit",exitportal="Exit"}
+        for _,container in ipairs(containers)do
+            for _,object in ipairs(container:GetChildren())do
+                if object:IsA("Model")or object:IsA("BasePart")then
+                    local normalized=object.Name:lower():gsub("[^%w]","")
+                    local room=normalized:match("^bigdungeonroom(%d+)$")
+                    local kind=kinds[normalized]or room and "Dungeon"
+                    if kind then
+                        local label=room and "Room "..room or normalized=="aspawnboss"and "Boss spawn area"or normalized=="aspawnminiboss"and "Mini-boss spawn area"or object.Name=="BossRoom"and "Boss room"or object.Name
+                        rememberDestination("map:"..object.Name,label,kind,object:GetPivot().Position)
+                    end
                 end
             end
         end
-    end
-    local checkpoints = workspace:FindFirstChild("CheckpointPortals")
-    if checkpoints then
-        local points = {}
-        for _, model in ipairs(checkpoints:GetChildren()) do
-            if model:IsA("Model") or model:IsA("BasePart") then points[#points + 1] = model:GetPivot().Position end
+        local portals=workspace:FindFirstChild("CheckpointPortals")
+        if portals then
+            local positions={}
+            for _,object in ipairs(portals:GetChildren())do if object:IsA("Model")or object:IsA("BasePart")then positions[#positions+1]=object:GetPivot().Position end end
+            table.sort(positions,function(a,b)return a.X~=b.X and a.X<b.X or a.X==b.X and a.Z<b.Z end)
+            for index,position in ipairs(positions)do rememberDestination("checkpoint:"..index,"Checkpoint "..index,"Checkpoint",position)end
         end
-        table.sort(points, function(a, b) if a.X ~= b.X then return a.X < b.X end; return a.Z < b.Z end)
-        for index, point in ipairs(points) do rememberDestination("checkpoint:" .. index, "Checkpoint " .. index, "Checkpoint", point) end
+        local spawns=workspace:QueryDescendants("SpawnLocation")
+        if #spawns>0 then
+            local average=Vector3.zero
+            for _,spawn in ipairs(spawns)do average+=spawn.Position end
+            rememberDestination("spawn","Floor spawn","Spawn",average/#spawns)
+        end
     end
-    local spawns = workspace:QueryDescendants("SpawnLocation")
-    if #spawns > 0 then
-        local total = Vector3.zero
-        for _, spawn in ipairs(spawns) do total += spawn.Position end
-        rememberDestination("spawn", "Floor spawn", "Spawn", total / #spawns)
-    end
-    end
-    for mob in pairs(trackedMobs) do
+    for mob in pairs(trackedMobs)do
         if mob.Parent then
-            local kind, root = rankMob(mob), mob:FindFirstChild("HumanoidRootPart")
-            if kind and root then
-                local id = "mob:" .. mob.Name
-                -- Keep the first observed spawn area instead of following a boss that chases players.
-                if not destinations[id] or workspace:FindFirstChild("WaveDefenseStuff") then rememberDestination(id, mob.Name, kind, root.Position) end
-            end
+            local kind=rankMob(mob);local root=mob:FindFirstChild("HumanoidRootPart")
+            local id="mob:"..mob.Name
+            if kind and root and (not destinations[id]or wave)then rememberDestination(id,mob.Name,kind,root.Position)end
         end
     end
-    state.FloorDestinations = destinations
-    saveDestinations()
+    state.FloorDestinations=destinations;saveDestinations()
 end
 local floorName = "Floor " .. tostring(game.PlaceId)
 pcall(function()
@@ -4647,113 +4219,104 @@ pcall(function()
 end)
 state.FloorName = floorName
 function state.ReadAutomationEncounter(spot)
-    local tracked=state.MultiSpotEncounter or {}
-    state.MultiSpotEncounter=tracked
+    local remembered=state.MultiSpotEncounter or {}
+    state.MultiSpotEncounter=remembered
     local now=os.clock()
-    local function scan()
+    local function eligible(mob)return not state.BossOnly or targetPriority.Rank(mob)<=2 end
+    local function living(data)return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)end
+    local function collect()
         state.MultiSpotNextScan=now+1
-        for mob in pairs(trackedMobs) do
-            if mob.Parent and (not state.BossOnly or targetPriority.Rank(mob)<=2)then
+        for mob in pairs(trackedMobs)do
+            if mob.Parent and eligible(mob)then
                 local data=getMobData(mob)
-                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-                if root and ((spot.EncounterNames and spot.EncounterNames[mob.Name]) or (root.Position-spot.Position).Magnitude<=220)
-                    and (not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))) then
-                    tracked[mob]=true
-                end
-                if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1) end
+                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+                local belongs=root and ((spot.EncounterNames and spot.EncounterNames[mob.Name])or (root.Position-spot.Position).Magnitude<=220)
+                if belongs and living(data)then remembered[mob]=true end
+                if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1)end
             end
         end
     end
-    local function count()
-        local alive,seen=0,false
-        for mob in pairs(tracked) do
-            if not mob.Parent then
-                tracked[mob]=nil;seen=true
-            else
-            if not state.BossOnly or targetPriority.Rank(mob)<=2 then
-                local data=getMobData(mob)
-                -- Missing streamed health is not proof that a previously seen mob died.
-                if not data or (data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0))then alive+=1
-                else tracked[mob]=nil end
-            seen=true
-            end
+    local function summarize()
+        local count,seen=0,false
+        for mob in pairs(remembered)do
+            if not mob.Parent then remembered[mob]=nil;seen=true
+            elseif eligible(mob)then
+                seen=true
+                if living(getMobData(mob))then count+=1 else remembered[mob]=nil end
             end
         end
-        return alive,seen
+        return count,seen
     end
-    local scanned=now>=(state.MultiSpotNextScan or 0)
-    if scanned then scan() end
-    local alive,seen=count()
-    -- A cached zero must never authorize travel without checking for new adds.
-    if alive==0 and not scanned then
-        scan();local refreshed,observed=count();alive=refreshed;seen=seen or observed
+    local refreshed=now>=(state.MultiSpotNextScan or 0)
+    if refreshed then collect()end
+    local alive,observed=summarize()
+    if alive==0 and not refreshed then
+        collect();local count,seen=summarize();alive=count;observed=observed or seen
     end
-    return alive,seen
+    return alive,observed
 end
+
 do
     local make=(function()
 -- BEGIN BUNDLED RESPAWN SCHEDULE
--- Respawn estimates are based only on observed living -> dead transitions in this runtime/job.
+-- A respawn record advances only after a living sample is observed dead.
 return function(ctx)
-    local api={Records={}}
-    local nextScan=0
-    local descriptors=setmetatable({}, {__mode="k"})
-    local names=setmetatable({}, {__mode="k"})
-    api.NameNormalizations=0
-    local function clean(text)
+    local api={Records={},NameNormalizations=0}
+    local due=0
+    local definitions=setmetatable({}, {__mode="k"})
+    local normalized=setmetatable({}, {__mode="k"})
+    local function name(text)
         api.NameNormalizations+=1
         return tostring(text or ""):lower():gsub("[^%w]","")
     end
-    local function descriptor(spot)
-        local value=descriptors[spot]
-        if value and value.Name==spot.Name and value.Source==spot.EncounterNames then return value end
-        value={Name=spot.Name,Source=spot.EncounterNames,Expected={},Count=0}
+    local function describe(spot)
+        local old=definitions[spot]
+        if old and old.Name==spot.Name and old.Source==spot.EncounterNames then return old end
+        local definition={Name=spot.Name,Source=spot.EncounterNames,Keys={},Count=0}
         if spot.EncounterNames then
-            for expected in pairs(spot.EncounterNames)do
-                local key=clean(expected);value.Expected[key]=true;value.Count+=1;value.Only=key
-            end
-        else local key=clean(spot.Name);value.Expected[key]=true;value.Count=1;value.Only=key end
-        descriptors[spot]=value
-        return value
+            for key in pairs(spot.EncounterNames)do local value=name(key);definition.Keys[value]=true;definition.Only=value;definition.Count+=1 end
+        else definition.Only=name(spot.Name);definition.Keys[definition.Only]=true;definition.Count=1 end
+        definitions[spot]=definition;return definition
     end
-    local function slotName(spot,sample,definition)
-        local cached=sample.Model and names[sample.Model]
-        if not cached or cached.Name~=sample.Name then
-            cached={Name=sample.Name,Key=clean(sample.Name)}
-            if sample.Model then names[sample.Model]=cached end
+    local function match(spot,sample,definition)
+        local found=sample.Model and normalized[sample.Model]
+        if not found or found.Name~=sample.Name then
+            found={Name=sample.Name,Key=name(sample.Name)}
+            if sample.Model then normalized[sample.Model]=found end
         end
-        if definition.Expected[cached.Key]then return cached.Key end
-        if definition.Count==1 and spot.Position and sample.Position then
-            local a,b=spot.Position,sample.Position
-            if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=220^2 then return definition.Only end
+        if definition.Keys[found.Key]then return found.Key end
+        if definition.Count~=1 or not spot.Position or not sample.Position then return nil end
+        local a,b=spot.Position,sample.Position
+        if (a.X-b.X)^2+(a.Y-b.Y)^2+(a.Z-b.Z)^2<=48400 then return definition.Only end
+    end
+    local function observe(record,key,sample,seconds,now)
+        local slot=record.Slots[key]
+        if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
+        if sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)then
+            slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
+        elseif slot.WasAlive and not slot.Dead then
+            slot.Dead=true;slot.KilledAt=now
+            slot.DueAt=ctx.Deadline and ctx.Deadline(now,seconds)or now+seconds
         end
     end
     function api.Update(now,spots)
-        if now<nextScan then return end
-        nextScan=now+.1
-        local samples
-        local floor=ctx.CurrentFloor()
+        if now<due then return end
+        due=now+.1
+        local floor=ctx.CurrentFloor();local samples
         for _,spot in ipairs(spots)do
-            if spot.PlaceId==floor and type(spot.RespawnSeconds)=="number"and spot.RespawnSeconds>0 then
-                samples=samples or ctx.Samples()
-                local definition=descriptor(spot)
+            local seconds=spot.RespawnSeconds
+            if spot.PlaceId==floor and type(seconds)=="number"and seconds>0 then
+                if not samples then samples=ctx.Samples()end
                 local record=api.Records[spot.Id]
                 if not record then record={Slots={}};api.Records[spot.Id]=record end
+                local definition=describe(spot)
                 for _,sample in ipairs(samples)do
-                    local key=slotName(spot,sample,definition)
-                    if key then
-                        local slot=record.Slots[key]
-                        if not slot or slot.Model~=sample.Model then slot={Model=sample.Model};record.Slots[key]=slot end
-                        local living=sample.Health>0 and (sample.HitLives==nil or sample.HitLives>0)
-                        if living then slot.WasAlive=true;slot.Dead=false;slot.DueAt=nil
-                        elseif slot.WasAlive and not slot.Dead then
-                            slot.Dead=true;slot.KilledAt=now;slot.DueAt=ctx.Deadline and ctx.Deadline(now,spot.RespawnSeconds)or now+spot.RespawnSeconds
-                        end
-                    end
+                    local key=match(spot,sample,definition)
+                    if key then observe(record,key,sample,seconds,now)end
                 end
                 record.HasLive=false;record.DueAt=nil
                 for _,slot in pairs(record.Slots)do
-                    if slot.WasAlive and not slot.Dead then record.HasLive=true end
+                    record.HasLive=record.HasLive or (slot.WasAlive and not slot.Dead)or false
                     if slot.DueAt then record.DueAt=math.min(record.DueAt or math.huge,slot.DueAt)end
                     if slot.KilledAt then record.KilledAt=math.max(record.KilledAt or -math.huge,slot.KilledAt)end
                 end
@@ -4780,13 +4343,13 @@ end
 end
 function state.RegisterAutomationDestination(spot)
     if spot.PlaceId~=game.PlaceId then return false end
-    local existing=destinations[spot.DestinationId]
-    if existing then
-        if spot.MainBoss or spot.PositionLocked then rememberDestination(spot.DestinationId,existing.Name,spot.Kind,spot.Position)end
-        if spot.DestinationId:sub(1,4)=="mob:" then existing.Name=spot.DestinationId:sub(5) end
-        return true
+    local id=spot.DestinationId
+    local saved=destinations[id]
+    if not saved then rememberDestination(id,spot.Name,spot.Kind,spot.Position)
+    else
+        if spot.MainBoss or spot.PositionLocked then rememberDestination(id,saved.Name,spot.Kind,spot.Position)end
+        if id:sub(1,4)=="mob:"then saved.Name=id:sub(5)end
     end
-    rememberDestination(spot.DestinationId,spot.Name,spot.Kind,spot.Position)
     return true
 end
 travelHeading.Text = "TELEPORTS · " .. floorName
@@ -4795,52 +4358,40 @@ travelHeading.TextTruncate = Enum.TextTruncate.AtEnd
 do
     local make=(function()
 -- BEGIN BUNDLED ARENA TRAVEL
--- Stream from near the destination, then confirm an actual stable landing.
--- Engine operations are injected for offline delayed-stream/cancellation tests.
+-- Arena travel is a cancellable staging/probe/settle transaction.
 return function(ctx)
     local api={}
     function api.Move(point,_automatic,active)
         local character,root,humanoid=ctx.Character()
         assert(character and root and humanoid and humanoid.Health>0 and not root.Anchored,"Character is not ready")
-        local function current()
-            local latest=ctx.Character()
-            return active() and latest==character and root.Parent~=nil and humanoid.Health>0
+        local function validate()
+            local current=ctx.Character()
+            assert(active()and current==character and root.Parent~=nil and humanoid.Health>0,"Travel cancelled")
         end
-        local function check()assert(current(),"Travel cancelled")end
-        check()
-        local stage=point-Vector3.new(0,20,0)
-        assert(ctx.Valid(stage),"Invalid arena position")
-        ctx.Hold(character,root,humanoid,stage)
-        local surface
-        -- Moving nearby also triggers streaming when RequestStreamAroundAsync is
-        -- unavailable in a mobile executor. Never raycast an unloaded remote map.
+        local destination=point-Vector3.new(0,20,0)
+        validate();assert(ctx.Valid(destination),"Invalid arena position")
+        ctx.Hold(character,root,humanoid,destination)
+        local ground
         for attempt=1,4 do
-            check()
-            if ctx.Stream then pcall(ctx.Stream,point,attempt==1 and 2 or .5) end
-            check()
-            surface=ctx.Surface(point)
-            if not surface and ctx.MapDeleted and ctx.MapDeleted()then surface=point end
-            if surface then break end
+            validate()
+            if ctx.Stream then pcall(ctx.Stream,point,attempt==1 and 2 or .5)end
+            validate();ground=ctx.Surface(point)
+            if not ground and ctx.MapDeleted and ctx.MapDeleted()then ground=point end
+            if ground then break end
             ctx.Wait(.15)
         end
-        assert(surface,"Arena collision has not streamed in yet")
-        check()
-        local destination=stage
-        assert(ctx.Valid(destination),"Landing surface is too low")
-        local stableSince
-        local deadline=ctx.Clock()+2
-        repeat
-            check()
-            ctx.Hold(character,root,humanoid,destination)
-            ctx.Wait(.1)
-            check()
+        assert(ground,"Arena collision has not streamed in yet")
+        validate();assert(ctx.Valid(destination),"Landing surface is too low")
+        local expires,settled=ctx.Clock()+2,nil
+        while true do
+            validate();ctx.Hold(character,root,humanoid,destination);ctx.Wait(.1);validate()
+            local now=ctx.Clock()
             if (root.Position-destination).Magnitude<=3 then
-                stableSince=stableSince or ctx.Clock()
-                if ctx.Clock()-stableSince>=.3 then
-                    return {Position=destination,SurfaceY=surface.Y,Character=character}
-                end
-            else stableSince=nil end
-        until ctx.Clock()>=deadline
+                settled=settled or now
+                if now-settled>=.3 then return {Position=destination,SurfaceY=ground.Y,Character=character}end
+            else settled=nil end
+            if now>=expires then break end
+        end
         error("The game corrected this teleport; retrying the same arena")
     end
     return api
@@ -4877,33 +4428,33 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED ARENA FLOAT
--- Hold vertical velocity at zero; gravity cancellation alone preserves jump velocity.
+-- Own a single vertical-velocity constraint for the current character root.
 return function(ctx)
     local api={}
-    local attachment,force,nextUpdate
+    local owned
+    local due=0
     function api.Release()
-        if force then force:Destroy();force=nil end
-        if attachment then attachment:Destroy();attachment=nil end
-        api.Root=nil
+        local record=owned;owned=nil;api.Root=nil
+        if not record then return end
+        record.Velocity:Destroy();record.Attachment:Destroy()
     end
     function api.Attach(root)
-        if ctx.Active and not ctx.Active()then api.Release();return end
+        if (ctx.Active and not ctx.Active())then api.Release();return end
         if root.Anchored then return end
-        if api.Root==root and force and force.Parent then return end
-        api.Release();api.Root=root
-        attachment=ctx.Create("Attachment",{Name="SB2ArenaFloatAttachment"},root)
-        force=ctx.Create("LinearVelocity",{Name="SB2ArenaFloat",Attachment0=attachment,
+        if owned and api.Root==root and owned.Velocity.Parent then return end
+        api.Release()
+        local anchor=ctx.Create("Attachment",{Name="SB2ArenaFloatAttachment"},root)
+        local velocity=ctx.Create("LinearVelocity",{Name="SB2ArenaFloat",Attachment0=anchor,
             RelativeTo=Enum.ActuatorRelativeTo.World,VelocityConstraintMode=Enum.VelocityConstraintMode.Line,
             LineDirection=Vector3.new(0,1,0),LineVelocity=0,ForceLimitsEnabled=false},root)
-        nextUpdate=0
+        owned={Attachment=anchor,Velocity=velocity};api.Root=root;due=0
     end
     function api.Update(now)
         if ctx.Active and not ctx.Active()then api.Release();return end
-        if not api.Root then return end
-        if not api.Root.Parent or api.Root.Anchored or ctx.Root()~=api.Root then api.Release();return end
-        if now<(nextUpdate or 0) then return end
-        nextUpdate=now+.5
-        force.LineVelocity=0
+        if not owned then return end
+        local root=api.Root
+        if not root.Parent or root.Anchored or ctx.Root()~=root then api.Release();return end
+        if now>=due then owned.Velocity.LineVelocity=0;due=now+.5 end
     end
     api.Destroy=api.Release
     return api
@@ -4922,423 +4473,253 @@ function state.FinishMultiSpotArrival()
     return true
 end
 function state.HoldMultiSpotIdle()
-    if not state.AutoFarm or not state.MultiSpot or state.MultiSpotPriorityActive or not state.MultiSpotAnchor or state.StopEverything or state.SafeModePanic
-        or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering then state.MultiSpotEmptySince=nil;return false end
+    local blocked=not state.AutoFarm or not state.MultiSpot or state.MultiSpotPriorityActive or not state.MultiSpotAnchor
+        or state.StopEverything or state.SafeModePanic or state.TravelBusy or state.MultiSpotOwnsTravel or state.Dodging or state.Recovering
     local spot=state.MultiSpotController and state.MultiSpotController.Current
-    if not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
-    if state.MultiSpotEmptyAnchor~=state.MultiSpotAnchor then
-        state.MultiSpotEmptyAnchor=state.MultiSpotAnchor;state.MultiSpotEmptySince=nil
-    end
-    local now=os.clock()
-    state.MultiSpotEmptySince=state.MultiSpotEmptySince or now
+    if blocked or not spot or state.ReadAutomationEncounter(spot)~=0 then state.MultiSpotEmptySince=nil;return false end
+    if state.MultiSpotEmptyAnchor~=state.MultiSpotAnchor then state.MultiSpotEmptyAnchor=state.MultiSpotAnchor;state.MultiSpotEmptySince=nil end
+    local now=os.clock();state.MultiSpotEmptySince=state.MultiSpotEmptySince or now
     if now-state.MultiSpotEmptySince<5 then return false end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-    if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-    waveDodge.Idle(state.MultiSpotAnchor)
-    return true
+    local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+    local human=character and character:FindFirstChildOfClass("Humanoid")
+    if not root or root.Anchored or not human or human.Health<=0 then return false end
+    waveDodge.Idle(state.MultiSpotAnchor);return true
 end
 function state.TeleportToDestination(id,urgent,automatic)
-    if state.SafeModePanic or state.StopEverything or state.TravelBusy or not state.Running then return false,"Another movement has priority" end
+    if state.SafeModePanic or state.StopEverything or state.TravelBusy or not state.Running then return false,"Another movement has priority"end
     discoverDestinations()
     local area=destinations[id]
-    if not area then setTravelStatus("Area not located on this floor yet");return false,"Arena is not available" end
-    state.TravelSerial=(state.TravelSerial or 0)+1
-    local serial=state.TravelSerial
-    state.TravelBusy=true;state.MultiSpotTravelPending=automatic==true
-    state.TravelStartedAt=os.clock()
-    state.LastTravelDestination=nil;state.LastTravelPosition=nil
-    state.TravelError=nil
+    if not area then setTravelStatus("Area not located on this floor yet");return false,"Arena is not available"end
+    local serial=(state.TravelSerial or 0)+1
+    state.TravelSerial=serial;state.TravelBusy=true;state.MultiSpotTravelPending=automatic==true;state.TravelStartedAt=os.clock()
+    state.LastTravelDestination=nil;state.LastTravelPosition=nil;state.TravelError=nil
     setTravelOpen(false)
-    -- Prevent continuous skills from taking a new lease before travel gets a turn.
-    if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena") end
+    if automatic and state.CancelSkillAura then state.CancelSkillAura("Moving to next selected arena")end
     stopMovement("Travelling · farming will resume",true)
     task.spawn(function()
         state.TravelWorker=coroutine.running()
         local function current()return state.Running and not state.SafeModePanic and not state.StopEverything and state.TravelSerial==serial end
-        local ok,message=pcall(function()
+        local ok,reason=pcall(function()
             local deadline=os.clock()+4
-            while current() and (state.Recovering or state.SkillCastRunning) and os.clock()<deadline do task.wait(.05) end
-            if not current() then return end
+            while current()and (state.Recovering or state.SkillCastRunning)and os.clock()<deadline do task.wait(.05)end
+            if not current()then return end
             assert(not state.Recovering and not state.SkillCastRunning,"Wait for the current movement or skill to finish")
             setTravelStatus("Loading "..area.Name.."...")
             local landing=state.ArenaTravel.Move(area.Position,automatic==true,current)
-            if not current() then return end
-            local destination=landing.Position
-            state.LastTravelLanding={SourcePosition=area.Position,SurfaceY=landing.SurfaceY,Requested=destination,Actual=destination,Depth=landing.SurfaceY-destination.Y}
-            state.LastTravelDestination=id;state.LastTravelPosition=destination
-            state.MultiSpotLandingPosition=automatic and destination or nil
-            state.TeleportsSent+=1
-            state.TravelHold=automatic==true or not (state.AutoFarm and state.Enabled)
-            state.TravelHoldPosition=state.TravelHold and destination or nil
-            if area.Kind=="Boss" or area.Kind=="Mini boss" then
-                state.TravelFocus={Kind=area.Kind,Name=id:sub(1,4)=="mob:" and area.Name or nil,Until=os.clock()+8}
-                state.FollowTarget=nil
-            end
+            if not current()then return end
+            local at=landing.Position
+            state.LastTravelLanding={SourcePosition=area.Position,SurfaceY=landing.SurfaceY,Requested=at,Actual=at,Depth=landing.SurfaceY-at.Y}
+            state.LastTravelDestination=id;state.LastTravelPosition=at;state.MultiSpotLandingPosition=automatic and at or nil
+            state.TeleportsSent+=1;state.TravelHold=automatic==true or not(state.AutoFarm and state.Enabled)
+            state.TravelHoldPosition=state.TravelHold and at or nil
+            if area.Kind=="Boss"or area.Kind=="Mini boss"then state.TravelFocus={Kind=area.Kind,Name=id:sub(1,4)=="mob:"and area.Name or nil,Until=os.clock()+8};state.FollowTarget=nil end
             setTravelStatus("Arrived: "..area.Name.." · 20 studs below position")
-            if automatic and state.MultiSpotController and state.MultiSpotController.Current then
-                local _,seen=state.ReadAutomationEncounter(state.MultiSpotController.Current)
-                if seen then state.MultiSpotController.EncounterSeen=true end
-            end
+            local multi=state.MultiSpotController
+            if automatic and multi and multi.Current then local _,seen=state.ReadAutomationEncounter(multi.Current);if seen then multi.EncounterSeen=true end end
             lastSurfaceY=landing.SurfaceY+4
         end)
         if state.TravelSerial~=serial then return end
-        if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(message);setTravelStatus(state.TravelError) end
         state.TravelBusy=false;state.MultiSpotTravelPending=false;state.TravelStartedAt=nil;state.TravelWorker=nil
-        if ok and automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
-            local confirmed,reason=pcall(state.MultiSpotController.Update,state.FarmClock())
-            if not confirmed then state.MultiSpotController.Pause(tostring(reason)) end
+        if not ok then stopMovement("Travel will retry",true);state.TravelError=tostring(reason);setTravelStatus(state.TravelError);return end
+        if automatic and state.MultiSpotOwnsTravel and state.MultiSpotController then
+            local confirmed,error=pcall(state.MultiSpotController.Update,state.FarmClock())
+            if not confirmed then state.MultiSpotController.Pause(tostring(error))end
         end
     end)
     return true
 end
 local function refreshTravelChoices()
     discoverDestinations()
-    for _, child in ipairs(travelList:GetChildren()) do if child:IsA("GuiButton") then child:Destroy() end end
-    local choices, hasMini = {}, false
-    local order = { Boss = 1, ["Mini boss"] = 2, Spawn = 3, Checkpoint = 4, Dungeon = 5, Exit = 6 }
-    for _, area in pairs(destinations) do choices[#choices + 1] = area; if area.Kind == "Mini boss" then hasMini = true end end
-    table.sort(choices, function(a, b) local x,y=order[a.Kind] or 7,order[b.Kind] or 7; if x ~= y then return x < y end; return a.Name < b.Name end)
-    local function option(text, index, callback)
-        local button = create("TextButton", {
-            Name = "Destination" .. index, Text = text, Font = Enum.Font.Gotham, TextSize = 11,
-            Size = UDim2.new(1, -4, 0, 30), LayoutOrder = index, BorderSizePixel = 0,
-            BackgroundColor3 = Color3.fromRGB(41, 44, 59), TextColor3 = Color3.fromRGB(226, 229, 243),
-            TextTruncate = Enum.TextTruncate.AtEnd,
-        }, travelList)
-        corner(button, 6)
-        button.Activated:Connect(callback)
-    end
-    for index, area in ipairs(choices) do
-        option(area.Kind .. " · " .. area.Name, index, function() state.TeleportToDestination(area.Id) end)
-    end
-    if not hasMini then
-        option("Mini boss · area not discovered yet", 100, function() setTravelStatus("Visit the mini-boss area once, then save it below") end)
-        option("Save current spot as mini-boss area", 101, function()state.SaveCurrentMiniBossArea()end)
-    end
+    state.FloorDestinations=destinations
 end
 function state.SaveCurrentMiniBossArea()
     if state.StopEverything then return false end
-            local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if root then rememberDestination("saved:mini", "Saved mini-boss area", "Mini boss", root.Position); saveDestinations(); refreshTravelChoices(); setTravelStatus("Mini-boss area saved for " .. floorName) end
+    local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    rememberDestination("saved:mini","Saved mini-boss area","Mini boss",root.Position)
+    saveDestinations();refreshTravelChoices();setTravelStatus("Mini-boss area saved for "..floorName)
+    return true
 end
 function state.SaveMultiSpot()
     if state.StopEverything or state.TravelBusy or state.AutomationTeleporting then return false end
     local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
-    local point=root.Position
-    local surface=waveDodge.FloorY(point)
-    if type(surface)=="number"then point=Vector3.new(point.X,surface,point.Z)end
+    local point=root.Position;local floor=waveDodge.FloorY(point)
+    if type(floor)=="number"then point=Vector3.new(point.X,floor,point.Z)end
     if not finitePoint(point)then return false end
-    local count=0
-    for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
-    if count>=20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
+    local count=0;for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
+    if count==20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
     local id="saved:multispot:"..HttpService:GenerateGUID(false)
     rememberDestination(id,"Saved Spot "..(count+1),"Arena",point)
-    state.FloorDestinations=destinations
-    saveDestinations()
+    state.FloorDestinations=destinations;saveDestinations()
     if state.AutomationCatalog then state.AutomationCatalog.AddCurrent(destinations,game.PlaceId);state.AutomationCatalog.Sort()end
     state.MultiSpotStatus="Saved Spot "..(count+1).." saved · select it in arenas"
     if state.RefreshAutomationUI then state.RefreshAutomationUI()end
     return true
 end
-state.RefreshTeleportDestinations = refreshTravelChoices
-bind(travelDropdown.Activated, function()
-    if state.StopEverything or state.TravelBusy then return end
-    if not travelList.Visible then refreshTravelChoices() end
-    skillList.Visible = false
-    setTravelOpen(not travelList.Visible)
-end)
+state.RefreshTeleportDestinations=refreshTravelChoices
 refreshTravelChoices()
-local nextAreaDiscovery = 0
-
-local nextExploreAt, exploreAngle = 0, 0
-local exploredCenters = {}
-local function freshExplorePoint(position)
-    for _, center in ipairs(exploredCenters) do
-        local delta = (position - center) * Vector3.new(1, 0, 1)
-        if delta:Dot(delta) < 420 * 420 then return false end
-    end
-    return true
-end
-local function exploreEmptyArea(character, root, humanoid, now)
-    if now < nextExploreAt then movementStatus("Exploring · waiting for the new area to load"); return end
-    local destination, hint
-    local best = 1500 * 1500
-    for mob in pairs(trackedMobs) do
-        local mobRoot = validMob(mob, indexedMobFolder)
-        if mobRoot then
-            local delta = (mobRoot.Position - root.Position) * Vector3.new(1, 0, 1)
-            local distance = delta:Dot(delta)
-            if distance > 540 * 540 and distance < best and freshExplorePoint(mobRoot.Position) and mobRoot.Position.Y > workspace.FallenPartsDestroyHeight + 60 then
-                best = distance
-                destination = mobRoot.Position + Vector3.new(0, state.TeleportOffset, 0)
-                hint = mob
-            end
-        end
-    end
-    if hint then
-        local hintRoot = getMobRoot(hint)
-        if hintRoot then
-            local offset = state.ResolveAutoOffset(hint)
-            if not offset then return end
-            destination = state.AutoOffsetDestination or hintRoot.Position + Vector3.new(0, offset, 0)
-        end
-    end
-    if not destination then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { character, indexedMobFolder or character, workspace:FindFirstChild("Characters") or character }
-        params.RespectCanCollide = true
-        params.IgnoreWater = false
-        for index = 1, 12 do
-            local angle = exploreAngle + (index - 1) * math.pi / 6
-            local point = root.Position + Vector3.new(math.cos(angle) * 560, 0, math.sin(angle) * 560)
-            local floor = workspace:Raycast(point + Vector3.new(0, 400, 0), Vector3.new(0, -900, 0), params)
-            if floor and floor.Normal.Y >= 0.65 and floor.Material ~= Enum.Material.Water and floor.Position.Y > workspace.FallenPartsDestroyHeight + 60 and freshExplorePoint(floor.Position) then
-                destination = floor.Position + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2 + 1.5, 0)
-                exploreAngle = angle + 2.399963
-                break
-            end
-        end
-    end
-    if not destination then nextExploreAt = now + 2; movementStatus("Exploring paused · no safe destination found"); return end
-    exploredCenters[#exploredCenters + 1] = root.Position
-    if #exploredCenters > 8 then table.remove(exploredCenters, 1) end
-    ensureMovementController(character, root, humanoid, destination)
-    positionAlign.Position = destination
-    positionAlign.Enabled, orientationAlign.Enabled = true, true
-    pivotRoot(root, destination)
-    teleportTarget, correctionTarget = nil, nil
-    correctionStrikes = 0
-    lastTeleportTime, lastTeleportPosition = now, destination
-    state.OffsetGraceUntil = now + 1
-    state.FollowTarget = hint
-    state.Exploring = true
-    state.LastExploreDestination = destination
-    state.ExploreConfirmAt = now + 0.6
-    state.ExploreHops += 1
-    state.TeleportsSent += 1
-    nextExploreAt = now + 4
-    nextAcquisition = now + (hint and 0.25 or 0.75)
-    targetMissingSince = now
-    state.AttackingTarget = nil
-    trackHealth(nil)
-    movementStatus("Exploring · moved beyond the previous spawn area")
-end
+local nextAreaDiscovery=0
 
 local function updateMovement(now)
     now=now or os.clock()
-    if now < nextMovementUpdate then return end
-    nextMovementUpdate = now + 0.08
+    if now<nextMovementUpdate then return end
+    nextMovementUpdate=now+.08
     if not state.MovementOwnership.CanFarm(now)then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
     end
-    state.TravelHold=false; state.TravelHoldPosition=nil
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local entity = character and character:FindFirstChild("Entity")
-    local health = entity and entity:FindFirstChild("Health")
-    local mobs = refreshMobIndex()
-    if not root or not humanoid or humanoid.Health <= 0 or (health and health.Value <= 0) or not mobs then
-        state.FollowTarget = nil
-        stopMovement("Waiting for a living character")
-        return
+    state.TravelHold=false;state.TravelHoldPosition=nil
+    local character=player.Character
+    local root=character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+    local entity=character and character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
+    local mobs=refreshMobIndex()
+    if not root or not humanoid or humanoid.Health<=0 or (health and health.Value<=0)or not mobs then state.FollowTarget=nil;stopMovement("Waiting for a living character");return end
+    if movementRoot and movementRoot~=root then stopMovement();return end
+    if (state.SkillCastRunning or Skills.usingSkill~="none")and not(state.SkillCastRunning and state.SuppressSkillMotion)then
+        if positionAlign then positionAlign.Enabled=false end
+        if orientationAlign then orientationAlign.Enabled=false end
+        state.SkillMovementSuspended=true;movementStatus("Casting "..tostring(state.SelectedSkill));return
     end
-    if root ~= movementRoot and movementRoot then stopMovement(); return end
-    if state.Exploring and state.LastExploreDestination and now >= (state.ExploreConfirmAt or 0) then
-        if (root.Position - state.LastExploreDestination).Magnitude > 18 then
-            state.ExploreFailures = (state.ExploreFailures or 0) + 1
-            if state.ExploreFailures >= 2 then state.FarmPauseUntil=os.clock()+1; state.ExploreFailures=0; state.FollowTarget=nil; pauseHold("Reacquiring after a corrected position"); return end
-        else state.ExploreFailures = 0 end
-        state.LastExploreDestination = nil
-    end
-    if (state.SkillCastRunning or Skills.usingSkill ~= "none") and not (state.SkillCastRunning and state.SuppressSkillMotion) then
-        if positionAlign then positionAlign.Enabled = false end
-        if orientationAlign then orientationAlign.Enabled = false end
-        state.SkillMovementSuspended = true
-        movementStatus("Casting " .. tostring(state.SelectedSkill))
-        return
-    end
-    if state.SkillMovementSuspended then
-        state.SkillMovementSuspended = false
-        teleportTarget = nil
-        state.OffsetGraceUntil = now + 0.5
-    end
-    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then pauseHold("Paused in place · waiting for lag"); return end
-    if root.Anchored or humanoid.SeatPart then stopMovement("Paused · character cannot move"); return end
-    if character:GetAttribute("Disabled") then pauseHold("Paused in place · character disabled"); return end
-    if holdPaused then
-        holdPaused = false
-        teleportTarget = nil
-        state.OffsetGraceUntil = now + 0.5
-    end
+    if state.SkillMovementSuspended then state.SkillMovementSuspended=false;teleportTarget=nil;state.OffsetGraceUntil=now+.5 end
+    if now<state.LagPauseUntil or (state.PingMs and state.PingMs>500)then pauseHold("Paused in place · waiting for lag");return end
+    if root.Anchored or humanoid.SeatPart then stopMovement("Paused · character cannot move");return end
+    if character:GetAttribute("Disabled")then pauseHold("Paused in place · character disabled");return end
+    if holdPaused then holdPaused=false;teleportTarget=nil;state.OffsetGraceUntil=now+.5 end
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
+    -- BEGIN TEST FARM SELECTION
     if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
-        nextAcquisition=now+0.15
+        nextAcquisition=now+.15
         local locked=state.FarmTargetLock
-        if state.FarmLockArena~=state.MultiSpotAnchor or state.FarmLockProgression~=state.ProgressionBossMob then locked=nil end
-        if locked and locked.Parent==mobs then
-            local data=getMobData(locked)
-            -- Missing streamed data, invulnerability or a rejected offset is
-            -- not a confirmed kill. Wait for this enemy instead of retargeting.
-            if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
-        else locked=nil end
-        if not state.AccountProgression and state.CreditController then
-            locked=state.CreditController.FarmTarget(locked,trackedMobs,function(mob)return validMob(mob,mobs)end,targetPriority.FarmLess)
-        end
-        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
-            local priority=state.GetFarmPriorityTarget(now)
-            if priority and targetPriority.Rank(priority)<targetPriority.Rank(locked)then locked=priority end
-        end
-        if locked then
-            state.FarmTargetLock=locked
-            state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
-            state.FollowTarget=locked
-            targetRoot=validMob(locked,mobs)
-            state.TargetPriority=targetPriority.Rank(locked)
+        local scopeMatches=state.FarmLockArena==state.MultiSpotAnchor and state.FarmLockProgression==state.ProgressionBossMob
+        if not scopeMatches or not locked or locked.Parent~=mobs then locked=nil
         else
-        local preferred=targetRoot and state.FollowTarget or nil
-        local best=preferred
-        state.TargetScans+=1
-        for mob in pairs(trackedMobs) do
-            local mobRoot=validMob(mob,mobs)
-            if mobRoot and (mobRoot.Position-root.Position).Magnitude<=state.FarmRange then
-                if not best or targetPriority.FarmLess(mob,best) then best=mob end
+            local data=getMobData(locked)
+            if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
+        end
+        local function admitted(mob)return validMob(mob,mobs)end
+        if not state.AccountProgression and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
+        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
+            local higher=state.GetFarmPriorityTarget(now)
+            if higher and targetPriority.Rank(higher)<targetPriority.Rank(locked)then locked=higher end
+        end
+        if not locked then
+            state.TargetScans+=1
+            for candidate in pairs(trackedMobs)do
+                local candidateRoot=admitted(candidate)
+                if candidateRoot and (candidateRoot.Position-root.Position).Magnitude<=state.FarmRange and (not locked or targetPriority.FarmLess(candidate,locked))then locked=candidate end
             end
         end
-        state.FollowTarget=best
-        targetRoot=best and validMob(best,mobs)
-        state.TargetPriority=best and targetPriority.Rank(best) or nil
-        state.FarmTargetLock=best
-        state.FarmLockArena=state.MultiSpotAnchor
-        state.FarmLockProgression=state.ProgressionBossMob
-        end
+        state.FarmTargetLock=locked;state.FollowTarget=locked
+        state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob
+        state.TargetPriority=locked and targetPriority.Rank(locked)or nil
+        targetRoot=locked and admitted(locked)
     end
+    -- END TEST FARM SELECTION
     if not targetRoot then
         if state.AccountProgression and state.ProgressionAnchor then
-            state.FollowTarget=nil;waveDodge.Idle(state.ProgressionAnchor)
-            movementStatus("Account Progression · waiting for the main boss");return
+            state.FollowTarget=nil;waveDodge.Idle(state.ProgressionAnchor);movementStatus("Account Progression · waiting for the main boss");return
         end
         if state.MultiSpot and state.MultiSpotAnchor then
             state.FollowTarget=nil
-            if not state.HoldMultiSpotIdle() then waveDodge.Idle() end
+            if not state.HoldMultiSpotIdle()then waveDodge.Idle()end
             movementStatus("Multi Spot · waiting for selected arena mobs");return
         end
-        state.AutoOffsetTarget,state.AutoOffsetDestination = nil,nil
-        activeOffsetMob, offsetSample = nil, nil
-        targetMissingSince = targetMissingSince or now
-        if now - targetMissingSince > 0.9 then
-            waveDodge.Idle()
-            movementStatus("No loaded enemy · unlimited detection · idle -20")
-        else waveDodge.Idle(); movementStatus("Waiting below the map · 20 studs") end
+        state.AutoOffsetTarget=nil;state.AutoOffsetDestination=nil;activeOffsetMob=nil;offsetSample=nil
+        targetMissingSince=targetMissingSince or now
+        waveDodge.Idle()
+        movementStatus(now-targetMissingSince>.9 and "No loaded enemy · unlimited detection · idle -20"or "Waiting below the map · 20 studs")
         return
     end
-    state.MultiSpotEmptySince=nil
-    targetMissingSince = nil
-    state.IdleBelowMap = false
-    state.Exploring = false
-    state.LastExploreDestination = nil
-    if correctionTarget ~= state.FollowTarget then correctionTarget = state.FollowTarget; correctionStrikes = 0 end
+    state.MultiSpotEmptySince=nil;targetMissingSince=nil;state.IdleBelowMap=false;state.Exploring=false;state.LastExploreDestination=nil
+    if correctionTarget~=state.FollowTarget then correctionTarget=state.FollowTarget;correctionStrikes=0 end
+    -- BEGIN TEST MOVEMENT BUDGET
     if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
-    local autoOffset = state.ResolveAutoOffset(state.FollowTarget)
+    local autoOffset=state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
-    local destination = state.AutoOffsetDestination or targetRoot.Position + Vector3.new(0, autoOffset, 0)
-    lastSurfaceY = targetRoot.Position.Y + 3
-    if destination.Y <= workspace.FallenPartsDestroyHeight + 30 then stopMovement("Paused · destination is too low"); return end
-    if teleportTarget == state.FollowTarget and positionAlign and now > (state.OffsetGraceUntil or 0) and now - lastTeleportTime > 0.2 then
-        local errorDistance = (root.Position - positionAlign.Position).Magnitude
-        local tolerance = math.max(5, math.min(12, targetRoot.AssemblyLinearVelocity.Magnitude * 0.25 + 3))
-        if errorDistance > tolerance and now - correctionWindow > 0.35 then
-            if now - correctionWindow > 2.5 then correctionStrikes = 0 end
-            correctionStrikes += 1
-            correctionWindow = now
-            state.TeleportCorrections = (state.TeleportCorrections or 0) + 1
-            if correctionStrikes >= 3 then
-                state.FarmPauseUntil = os.clock()+1
-                correctionStrikes = 0
-                state.FollowTarget = nil
-                pauseHold("Reacquiring after position corrections")
-                return
+    -- END TEST MOVEMENT BUDGET
+    local destination = state.AutoOffsetDestination or targetRoot.Position+Vector3.new(0,autoOffset,0)
+    lastSurfaceY=targetRoot.Position.Y+3
+    if destination.Y<=workspace.FallenPartsDestroyHeight+30 then stopMovement("Paused · destination is too low");return end
+    local current=state.FollowTarget
+    local correction=teleportTarget==current and positionAlign and now>(state.OffsetGraceUntil or 0)and now-lastTeleportTime>.2
+    if correction then
+        local distance=(root.Position-positionAlign.Position).Magnitude
+        local tolerance=math.clamp(targetRoot.AssemblyLinearVelocity.Magnitude*.25+3,5,12)
+        if distance>tolerance and now-correctionWindow>.35 then
+            correctionStrikes=now-correctionWindow>2.5 and 1 or correctionStrikes+1;correctionWindow=now
+            state.TeleportCorrections=(state.TeleportCorrections or 0)+1
+            if correctionStrikes>=3 then
+                state.FarmPauseUntil=now+1;correctionStrikes=0;state.FollowTarget=nil;pauseHold("Reacquiring after position corrections");return
             end
-            teleportTarget = nil
-        elseif errorDistance < 2 and now - correctionWindow > 2.5 then correctionStrikes = 0 end
+            teleportTarget=nil
+        elseif distance<2 and now-correctionWindow>2.5 then correctionStrikes=0 end
     end
-    ensureMovementController(character, root, humanoid, destination)
-    positionAlign.Position = destination
-    positionAlign.Enabled = true
-    orientationAlign.Enabled = true
-    local changedTarget = teleportTarget ~= state.FollowTarget
-    if changedTarget or (now - lastTeleportTime >= state.TeleportInterval and (destination - root.Position).Magnitude > 3.5) then
-        pivotRoot(root, destination)
-        if changedTarget then state.OffsetGraceUntil = now + 0.35 end
-        teleportTarget = state.FollowTarget
-        lastTeleportTime, lastTeleportPosition = now, destination
-        state.TeleportsSent += 1
-        if state.DodgeReturnPending then
-            state.LastDodgeReturnDelay=os.clock()-(state.LastDodgeFinishedAt or os.clock())
-            state.DodgeReturnPending=false
-        end
+    ensureMovementController(character,root,humanoid,destination)
+    positionAlign.Position=destination;positionAlign.Enabled=true;orientationAlign.Enabled=true
+    local changed=teleportTarget~=current
+    if changed or (now-lastTeleportTime>=state.TeleportInterval and (destination-root.Position).Magnitude>3.5)then
+        pivotRoot(root,destination);teleportTarget=current;lastTeleportTime=now;lastTeleportPosition=destination;state.TeleportsSent+=1
+        if changed then state.OffsetGraceUntil=now+.35 end
+        if state.DodgeReturnPending then state.LastDodgeReturnDelay=os.clock()-(state.LastDodgeFinishedAt or os.clock());state.DodgeReturnPending=false end
     end
-    if now >= nextMovementStatusUpdate or changedTarget then
-        nextMovementStatusUpdate = now + 0.2
-        movementStatus(state.FixedFarmPosition and "Suspended Unborn · fixed arena position +10 studs"or string.format("Auto offset %.1f %s %s", math.abs(state.TeleportOffset),state.OffsetMode=="Above" and "above" or "below",state.FollowTarget.Name))
+    if changed or now>=nextMovementStatusUpdate then
+        nextMovementStatusUpdate=now+.2
+        movementStatus(state.FixedFarmPosition and "Suspended Unborn · fixed arena position +10 studs"or string.format("Auto offset %.1f %s %s",math.abs(state.TeleportOffset),state.OffsetMode=="Above"and "above"or "below",current.Name))
     end
 end
 
 do
     local make=(function()
 -- BEGIN BUNDLED AURA TOUCH
--- The supplied source disables native blade touches while aura sends damage.
--- Watch only this player's weapon container and restore original properties.
+-- A small ownership ledger prevents duplicate native blade touches during aura use.
 return function(ctx)
     local api={}
-    local originals=setmetatable({}, {__mode="k"})
-    local root,connection,enabled
-    local nextPoll=0
-    local function restore()
-        for blade,value in pairs(originals)do pcall(function()blade.CanTouch=value end)end
-        table.clear(originals)
+    local held=setmetatable({}, {__mode="k"})
+    local container,listener
+    local active,closed,nextCheck=false,false,0
+    local function releaseBlades()
+        for blade,value in pairs(held)do pcall(function()blade.CanTouch=value end)end
+        table.clear(held)
     end
-    local function apply(blade)
-        local tool=blade and blade.Parent
-        local weapon=tool and tool.Parent
-        if not enabled or not blade or not blade:IsA("BasePart")or blade.Name~="Blade"or not tool or tool.Name~="Tool"
-            or not weapon or weapon.Parent~=root or (weapon.Name~="RightWeapon"and weapon.Name~="LeftWeapon")then return end
+    local function own(blade)
+        if not active or closed or not blade or blade.Name~="Blade"or not blade:IsA("BasePart")then return end
+        local tool=blade.Parent;local weapon=tool and tool.Parent
+        if not tool or tool.Name~="Tool"or not weapon or weapon.Parent~=container then return end
+        if weapon.Name~="RightWeapon"and weapon.Name~="LeftWeapon"then return end
         pcall(function()
-            if originals[blade]==nil then originals[blade]=blade.CanTouch end
-            if blade.CanTouch then blade.CanTouch=false end
+            if held[blade]==nil then held[blade]=blade.CanTouch end
+            blade.CanTouch=false
         end)
     end
+    local function switch(nextContainer)
+        if listener then listener:Disconnect();listener=nil end
+        releaseBlades();container=nextContainer
+        if container then listener=container.DescendantAdded:Connect(own)end
+    end
     function api.Update(now)
+        if closed then return end
         now=now or os.clock()
-        local active=ctx.Active()==true
-        if now<nextPoll and active==enabled then return end
-        nextPoll=now+.5
-        local current=ctx.Items()
-        if current~=root then
-            if connection then connection:Disconnect();connection=nil end
-            restore();root=current
-            if root then connection=root.DescendantAdded:Connect(apply)end
-        end
-        enabled=active
-        if not enabled then restore();return end
-        if not root then return end
-        for _,name in ipairs({"RightWeapon","LeftWeapon"})do
-            local weapon=root:FindFirstChild(name)
+        local desired=ctx.Active()==true
+        if now<nextCheck and active==desired then return end
+        nextCheck=now+.5;active=desired
+        local nextContainer=ctx.Items()
+        if nextContainer~=container then switch(nextContainer)end
+        if not active then releaseBlades();return end
+        if not container then return end
+        for _,slot in ipairs({"RightWeapon","LeftWeapon"})do
+            local weapon=container:FindFirstChild(slot)
             local tool=weapon and weapon:FindFirstChild("Tool")
-            local blade=tool and tool:FindFirstChild("Blade")
-            if blade then apply(blade)end
+            own(tool and tool:FindFirstChild("Blade"))
         end
     end
     function api.Destroy()
-        if connection then connection:Disconnect();connection=nil end
-        enabled=false;restore();root=nil
+        if closed then return end
+        closed=true;active=false;switch(nil)
     end
     return api
 end
@@ -5352,179 +4733,176 @@ end
         end})
 end
 local swingThread
-local swingTrack,nextSwingAt,swingIndex=nil,0,0
-local function stopSword(force)
-    if not force and state.Enabled and state.AutoSwing and not state.StopEverything then return end
-    state.SwordSwinging=false
-    if swingTrack and swingTrack.IsPlaying then swingTrack:Stop(.08) end
-    swingTrack=nil; nextSwingAt=0
+local swingTrack
+local swingClock={Due=0,Index=0}
+local function swingAllowed()
+    return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations
 end
-function state.SetAutoSwing(enabled)
-    state.AutoSwing=enabled==true
-    if not state.AutoSwing then stopSword(true) end
+local function stopSword(force)
+    if not force and swingAllowed()then return end
+    local active=swingTrack;swingTrack=nil;swingClock.Due=0;state.SwordSwinging=false
+    if active and active.IsPlaying then active:Stop(.08)end
+end
+function state.SetAutoSwing(requested)
+    state.AutoSwing=requested==true
+    if not requested then stopSword(true)end
     requestSave()
 end
 local function playBurstSwing()
-    if not state.Running or not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations then return end
-    local now=os.clock()
-    if now<nextSwingAt then return end
+    if not swingAllowed()then return end
+    local at=os.clock()
+    if at<swingClock.Due then return end
     local character=player.Character
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-    if not humanoid or humanoid.Health<=0 then stopSword(true); return end
-    if state.WeaponSkills and not state.WeaponSkills.Ready then return end
-    local style=state.WeaponSkills and state.WeaponSkills.Style or Combat.CalculateCombatStyle(false)
-    local animations=Actions.animations[style]
-    if not animations then return end
-    swingIndex=swingIndex%3+1
-    local track=animations["Swing"..swingIndex] or animations.Swing1
-    if not track then return end
-    if state.SkillVisuals then state.SkillVisuals.AllowSwingTrack(track) end
-    if swingTrack and swingTrack~=track and swingTrack.IsPlaying then swingTrack:Stop(.06) end
-    swingTrack=track
-    track:Play(.12,1,1)
-    nextSwingAt=now+math.max(.65,(track.Length>0 and track.Length or .6)+.1)
-    state.SwordSwinging=true; state.SwingStarts+=1
-    state.SwingMode="Continuous visuals"
+    if not humanoid or humanoid.Health<=0 then stopSword(true);return end
+    local equipped=state.WeaponSkills
+    if equipped and not equipped.Ready then return end
+    local class=equipped and equipped.Style or Combat.CalculateCombatStyle(false)
+    local bank=Actions.animations[class]
+    if not bank then return end
+    swingClock.Index=swingClock.Index%3+1
+    local animation=bank["Swing"..swingClock.Index]or bank.Swing1
+    if not animation then return end
+    if state.SkillVisuals then state.SkillVisuals.AllowSwingTrack(animation)end
+    if swingTrack~=animation and swingTrack and swingTrack.IsPlaying then swingTrack:Stop(.06)end
+    swingTrack=animation;animation:Play(.12,1,1)
+    local duration=animation.Length>0 and animation.Length or .6
+    swingClock.Due=at+math.max(.65,duration+.1)
+    state.SwingStarts+=1;state.SwordSwinging=true;state.SwingMode="Continuous visuals"
 end
 local function updateAutoSwing()
-    if not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations then stopSword(true); return end
-    playBurstSwing()
+    if swingAllowed()then playBurstSwing()else stopSword(true)end
 end
 
 do
-    local create=(function()
+    local activation=(function()
 -- BEGIN BUNDLED SKILL ACTIVATION
--- Supplied-source activation: activate once and keep the skill name active
--- for its duration. Damage uses the same per-target cooldown as Kill Aura.
+-- Activation owns one native skill lease until explicit release.
 return function(ctx)
     local api={}
-    local windows={['Sweeping Strike']=1.4,['Downward Smash']=1,['Leaping Slash']=1.8,['Piercing Dash']=1,['Beam Rush']=2.8,
-        ['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.2,['Meteor Shot']=1,
-        ['Everfrost Strike']=1.5,['Cursed Three Fold Slash']=3.3,['Water Blast']=1.2,['Spearitual Strike']=1,
-        ['Summon Rifle']=3,['Summon Minigun']=3}
-    local retry={}
-    local gunProfiles={['Summon Pistol']={FirstHitDelay=0},['Summon Rifle']={FirstHitDelay=0}}
-    local owner
+    local durations={['Sweeping Strike']=1.4,['Downward Smash']=1,['Leaping Slash']=1.8,['Piercing Dash']=1,
+        ['Beam Rush']=2.8,['Whirlwind Spin']=1,['Reaper Frenzy']=3.5,['Infinity Slash']=1,['Summon Pistol']=.2,
+        ['Meteor Shot']=1,['Everfrost Strike']=1.5,['Cursed Three Fold Slash']=3.3,['Water Blast']=1.2,
+        ['Spearitual Strike']=1,['Summon Rifle']=3,['Summon Minigun']=3}
+    local profiles={['Summon Pistol']={FirstHitDelay=0},['Summon Rifle']={FirstHitDelay=0}}
+    local cooldowns={}
+    local lease
     local clock=ctx.Clock or os.clock
     local wait=ctx.Wait or task.wait
-    function api.Window(name) return windows[name] or (ctx.ResolveWindow and ctx.ResolveWindow(name)) end
-    function api.Profile(name) return gunProfiles[name] end
-    function api.CanHandle(name) return api.Window(name)~=nil and clock()>=(retry[name] or 0) end
-    function api.Reset() table.clear(retry) end
-    function api.Begin(name,definition,entity,root,current,onEmit,aimDirection)
-        if not api.CanHandle(name) then return false,"Waiting for a supported activation window" end
-        local function valid() return ctx.CanRun() and (not current or current()) end
-        if not valid() then return false,"Cast interrupted" end
-        if ctx.Skills.usingSkill and ctx.Skills.usingSkill~="none" then return false,"Another skill is active" end
-        if ctx.Skills.GetCooldown(name)<0 then return false,"Waiting for cooldown" end
+    function api.Window(name)return durations[name]or (ctx.ResolveWindow and ctx.ResolveWindow(name))end
+    function api.Profile(name)return profiles[name]end
+    function api.CanHandle(name)return api.Window(name)~=nil and clock()>=(cooldowns[name]or 0)end
+    function api.Reset()table.clear(cooldowns)end
+    local function permitted(current)return ctx.CanRun()and (not current or current())end
+    function api.Release(name)
+        if not lease or (name and name~=lease.Name)then return end
+        if ctx.Skills.usingSkill==lease.Name then ctx.Skills.usingSkill="none"end
+        lease=nil
+    end
+    function api.Result(name,damage,requests)ctx.State.LastSkillActivationResult={Name=name,Damage=damage,Requests=requests}end
+    local function resources(name,definition,entity)
+        if ctx.Skills.usingSkill and ctx.Skills.usingSkill~="none"then return nil,"Another skill is active"end
+        if ctx.Skills.GetCooldown(name)<0 then return nil,"Waiting for cooldown"end
         local stamina=entity:FindFirstChild("Stamina")
-        local cost=definition.Cost.Value
-        if not stamina or stamina.Value<cost then return false,"Waiting for stamina" end
+        if not stamina or stamina.Value<definition.Cost.Value then return nil,"Waiting for stamina"end
         local buffs=entity:FindFirstChild("Buffs")
         local reduction=buffs and buffs:FindFirstChild("SkillReduction")
-        local cooldown=definition.Cooldown.Value*math.clamp(1-(reduction and reduction.Value or 0),0,1)
-        local before=stamina.Value
-        local profile=gunProfiles[name]
+        return {Stamina=stamina,Before=stamina.Value,Cost=definition.Cost.Value,
+            Cooldown=definition.Cooldown.Value*math.clamp(1-(reduction and reduction.Value or 0),0,1)}
+    end
+    function api.Begin(name,definition,entity,root,current,onEmit,aim)
+        if not api.CanHandle(name)then return false,"Waiting for a supported activation window"end
+        if not permitted(current)then return false,"Cast interrupted"end
+        local budget,reason=resources(name,definition,entity)
+        if not budget then return false,reason end
         local started=clock()
-        local lease={Name=name,Started=started,ExpiresAt=started+api.Window(name),
-            FirstHitAt=started+(profile and profile.FirstHitDelay or 0),SourceWindow=true,
-            HoldWindow=true,RefreshTargets=true,MinimumInterval=.3}
-        owner=lease
-        ctx.Skills.usingSkill=name
-        ctx.Skills.SetCooldown(name,cooldown)
-        pcall(ctx.SkillUsed,name,cooldown)
-        local direction=typeof(aimDirection)=="Vector3" and aimDirection.Magnitude>.001 and aimDirection.Unit or root.CFrame.LookVector
-        lease.Direction=direction
-        ctx.Emit(name,{Direction=direction})
-        ctx.State.SkillActiveUntil=lease.ExpiresAt
-        if onEmit then onEmit(lease) end
-        local deadline=clock()+math.clamp(.35+(ctx.State.PingMs or 100)/500,.4,1.2)
-        repeat
-            if cost<=0 or before-stamina.Value>=math.max(1,cost*.5) then
-                return true,nil,lease
-            end
-            if not stamina.Parent or not root.Parent or not valid() then return false,"Cast interrupted" end
+        local direction=typeof(aim)=="Vector3"and aim.Magnitude>.001 and aim.Unit or root.CFrame.LookVector
+        lease={Name=name,Started=started,ExpiresAt=started+api.Window(name),FirstHitAt=started+(profiles[name]and profiles[name].FirstHitDelay or 0),
+            SourceWindow=true,HoldWindow=true,RefreshTargets=true,MinimumInterval=.3,Direction=direction}
+        local emitted=lease
+        ctx.Skills.usingSkill=name;ctx.Skills.SetCooldown(name,budget.Cooldown)
+        pcall(ctx.SkillUsed,name,budget.Cooldown)
+        ctx.Emit(name,{Direction=direction});ctx.State.SkillActiveUntil=emitted.ExpiresAt
+        if onEmit then onEmit(emitted)end
+        local expires=clock()+math.clamp(.35+(ctx.State.PingMs or 100)/500,.4,1.2)
+        while true do
+            if budget.Cost<=0 or budget.Before-budget.Stamina.Value>=math.max(1,budget.Cost*.5)then return true,nil,emitted end
+            if not budget.Stamina.Parent or not root.Parent or not permitted(current)then return false,"Cast interrupted"end
             wait(.02)
-        until clock()>=deadline
-        retry[name]=clock()+2
-        return false,"Skill start not acknowledged; retrying after cooldown"
-    end
-    function api.Release(name)
-        if owner and (not name or name==owner.Name) then
-            if ctx.Skills.usingSkill==owner.Name then ctx.Skills.usingSkill="none" end
-            owner=nil
+            if clock()>=expires then break end
         end
-    end
-    function api.Result(name,damage,requests)
-        ctx.State.LastSkillActivationResult={Name=name,Damage=damage,Requests=requests}
+        cooldowns[name]=clock()+2
+        return false,"Skill start not acknowledged; retrying after cooldown"
     end
     return api
 end
 
 -- END BUNDLED SKILL ACTIVATION
     end)()
-    state.SkillActivation=create({State=state,Skills=Skills,SkillUsed=GameUI.SkillUsed,
-        ResolveWindow=function(name) if AttackStats[name] and Skills.skillHandlers[name] then return 1 end end,
+    local function castable()
+        if not state.Running or not state.SkillAura then return false end
+        for _,field in ipairs({"TravelBusy","Dodging","Recovering","ProtectionRetreating","StopEverything","SafeModePanic","ModeratorBlocking","AutoTradeBusy"})do
+            if state[field]then return false end
+        end
+        local character=player.Character
+        local entity=character and character:FindFirstChild("Entity")
+        local health=entity and entity:FindFirstChild("Health")
+        return health~=nil and health.Value>0
+    end
+    state.SkillActivation=activation({State=state,Skills=Skills,SkillUsed=GameUI.SkillUsed,CanRun=castable,
+        ResolveWindow=function(name)if AttackStats[name]and Skills.skillHandlers[name]then return 1 end end,
         Emit=function(name,options)
             options.TimeStarted=workspace:GetServerTimeNow()
-            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if root and state.SkillVisuals then state.SkillVisuals.MarkGunCast(name,root.Position) end
+            local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+            if root and state.SkillVisuals then state.SkillVisuals.MarkGunCast(name,root.Position)end
             ReplicatedStorage.Event:FireServer("Skills",{"UseSkill",name,options})
-        end,
-        CanRun=function()
-            local c=player.Character; local e=c and c:FindFirstChild("Entity"); local hp=e and e:FindFirstChild("Health")
-            return state.Running and state.SkillAura and hp and hp.Value>0 and not state.TravelBusy and not state.Dodging and not state.Recovering and not state.ProtectionRetreating
-                and not state.StopEverything and not state.SafeModePanic and not state.ModeratorBlocking and not state.AutoTradeBusy
-        end,
-    })
+        end})
 end
 local skillThread,nextSkillCheck=nil,0
-function state.WakeSkillAura()nextSkillCheck=0 end
 local skillCastSerial=0
-function state.CancelSkillAura(reason)
-    state.ReserveGunStamina=false
-    state.SkillRegistrationTarget=nil
+function state.WakeSkillAura()nextSkillCheck=0 end
+function state.CancelSkillAura(message)
     local active=state.ActiveSkillCast
+    state.ReserveGunStamina=false;state.SkillRegistrationTarget=nil
     if active then
         active.Cancelled=true
-        if active.Multi then active.Multi.Cancel(reason or "Cast interrupted") end
+        if active.Multi then active.Multi.Cancel(message or "Cast interrupted")end
         state.SkillActivation.Release(active.Name)
     end
-    if state.FinishSkillObservation then state.FinishSkillObservation(); state.FinishSkillObservation=nil end
-    if skillThread then pcall(task.cancel,skillThread); skillThread=nil end
-    state.ActiveSkillCast=nil
-    state.SkillPreparing=false; state.SkillCastRunning=false; state.SkillWantsWindow=false
-    state.CombatReadyAt=os.clock()
-    nextSkillCheck=0
+    local observe=state.FinishSkillObservation;state.FinishSkillObservation=nil
+    if observe then pcall(observe)end
+    if skillThread then pcall(task.cancel,skillThread);skillThread=nil end
+    state.ActiveSkillCast=nil;state.SkillPreparing=false;state.SkillCastRunning=false;state.SkillWantsWindow=false
+    state.CombatReadyAt=os.clock();nextSkillCheck=0
 end
 state.CleanupSkillCast=state.CancelSkillAura
-do
-    local make=(function()
+state.SkillDamageBudget=(function()
 -- BEGIN BUNDLED SKILL DAMAGE BUDGET
--- Reserves expected damage while HP replication catches up; never changes real HP.
+-- Per-cast reservations are observations, never mutations of replicated health.
 return function()
     local api={}
-    local samples,order={},{}
-    function api.Learn(key,damage,requests,smallestDrop)
-        if type(damage)~="number" or damage<=0 or not requests or requests<=0 then return end
-        local estimate=damage/requests
-        if smallestDrop and smallestDrop>0 then estimate=math.min(estimate,smallestDrop) end
-        local old=samples[key]
-        if not old then
-            if #order>=128 then samples[table.remove(order,1)]=nil end
-            order[#order+1]=key
-        end
-        samples[key]=old and math.min(old,estimate) or estimate
+    local values,slots={},{}
+    local cursor=1
+    function api.Estimate(key)return values[key]or 0 end
+    function api.Learn(key,damage,requests,smallest)
+        if type(damage)~="number"or damage~=damage or damage<=0 or damage==math.huge or not requests or requests<=0 then return end
+        local amount=damage/requests
+        if smallest and smallest>0 then amount=math.min(amount,smallest)end
+        if values[key]then values[key]=math.min(values[key],amount);return end
+        if slots[cursor]then values[slots[cursor]]=nil end
+        slots[cursor]=key;cursor=cursor%128+1;values[key]=amount
     end
-    function api.Estimate(key)return samples[key] or 0 end
-    function api.Remaining(item,health,now)
-        if not item.ReservationUntil or now>=item.ReservationUntil then
+    local function rebase(item,health,now)
+        if not item.ReservationUntil or item.ReservationUntil<=now then
             item.ReservationBase=health;item.ReservedDamage=0
         end
+    end
+    function api.Remaining(item,health,now)
+        rebase(item,health,now)
         return math.min(health,(item.ReservationBase or health)-(item.ReservedDamage or 0))
     end
     function api.Reserve(item,health,damage,now,ttl)
-        api.Remaining(item,health,now)
+        rebase(item,health,now)
         if not damage or damage<=0 then return end
         item.ReservedDamage=(item.ReservedDamage or 0)+damage
         item.ReservationUntil=now+(ttl or .5)
@@ -5533,757 +4911,656 @@ return function()
 end
 
 -- END BUNDLED SKILL DAMAGE BUDGET
-    end)()
-    state.SkillDamageBudget=make()
-end
+end)()()
 local function updateSkillAura()
     local now=os.clock()
     if now<nextSkillCheck then return end
     nextSkillCheck=now+(state.NetworkPressureLimited and .04 or 1/60)
-    state.SkillWantsWindow=false; state.SkillPreparing=false
-    state.ReserveGunStamina=false
-    state.SkillRegistrationTarget=nil
-    if state.SafeModePanic or state.MultiSpotTravelPending or state.MultiSpotOwnsTravel or not state.SkillAura or state.StopEverything then return end
+    state.SkillWantsWindow=false;state.SkillPreparing=false;state.ReserveGunStamina=false;state.SkillRegistrationTarget=nil
+    if not state.SkillAura or state.StopEverything or state.SafeModePanic or state.MultiSpotOwnsTravel or state.MultiSpotTravelPending then return end
     local weapons=state.WeaponSkills
-    if not weapons or not weapons.Ready or not weapons.IsCompatible(state.SelectedSkill) then state.SkillStatus="Waiting for equipped weapon skills"; return end
-    if state.ActiveSkillCast or skillThread or Skills.usingSkill~="none" then return end
-    if state.MiscReserveStamina or state.MiscCastRunning then state.SkillStatus="Reserving stamina for Misc Skill"; return end
+    local name=state.SelectedSkill
+    if not(weapons and weapons.Ready and weapons.IsCompatible(name))then state.SkillStatus="Waiting for equipped weapon skills";return end
+    if state.ActiveSkillCast or skillThread or Skills.usingSkill~="none"then return end
+    if state.MiscReserveStamina or state.MiscCastRunning then state.SkillStatus="Reserving stamina for Misc Skill";return end
     if state.TravelBusy or state.Dodging or state.Recovering or now<(state.FarmPauseUntil or 0)
-        or now<state.LagPauseUntil or now<(state.SkillRetryAt or 0) or (state.PingMs and state.PingMs>500) then return end
+        or now<(state.LagPauseUntil or 0)or now<(state.SkillRetryAt or 0)or(state.PingMs and state.PingMs>500)then return end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local entity=character and character:FindFirstChild("Entity")
     local health=entity and entity:FindFirstChild("Health")
-    if not root or not health or health.Value<=0 then return end
-    local name=state.SelectedSkill
+    if not(root and health and health.Value>0)then return end
     local definition=ReplicatedStorage.Database.Skills:FindFirstChild(name)
-    if not definition or not GameUI.IsSkillValid(definition) then weapons.Notify("Updating compatible weapon skill"); return end
-    local remaining=Skills.GetCooldown(name)
-    if remaining<0 then nextSkillCheck=now+math.clamp(-remaining,1/60,.25); return end
-    local gunProfile=state.SkillActivation.Profile(name)
-    if not gunProfile and not Skills.HasStamina(definition.Cost.Value) then return end
-    if not CanRunSkill(player,name) or GameUI.IsMenuOpen() or not state.SkillActivation.CanHandle(name) then return end
+    if not definition or not GameUI.IsSkillValid(definition)then weapons.Notify("Updating compatible weapon skill");return end
+    local cooldown=Skills.GetCooldown(name)
+    if cooldown<0 then nextSkillCheck=now+math.clamp(-cooldown,1/60,.25);return end
+    if not state.SkillActivation.Profile(name)and not Skills.HasStamina(definition.Cost.Value)then return end
+    if not(CanRunSkill(player,name)and not GameUI.IsMenuOpen()and state.SkillActivation.CanHandle(name))then return end
     local mobs=refreshMobIndex()
     local target,targetRoot
     local function consider(mob)
-        local mobRoot=validMob(mob,mobs)
-        if not mobRoot then return end
+        local candidate=validMob(mob,mobs)
+        if not candidate then return end
         local data=getMobData(mob)
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"SkillStart")then return end
-        local reach=state.AutoRanges.Range("Skill",data,name)
-        if attackDeltaFor(data,root).Magnitude<=reach and (not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)) then target,targetRoot=mob,mobRoot end
+        if attackDeltaFor(data,root).Magnitude>state.AutoRanges.Range("Skill",data,name)then return end
+        if not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)then target=mob;targetRoot=candidate end
     end
-    local primary=state.AutoFarm and state.FollowTarget or nil
-    if primary then consider(primary) end
-    for mob in pairs(trackedMobs) do if mob~=primary then consider(mob) end end
+    local primary=state.AutoFarm and state.FollowTarget
+    if primary then consider(primary)end
+    for mob in pairs(trackedMobs)do if mob~=primary then consider(mob)end end
     if not target then nextSkillCheck=now+(state.NetworkPressureLimited and .15 or .08);return end
-    local targetData=getMobData(target)
-    if state.ReadOwnDamage(targetData.Health)==nil then
-        state.SkillRegistrationTarget=target
-        state.SkillStatus="Registering enemy before skill activation"
-        return
+    if state.ReadOwnDamage(getMobData(target).Health)==nil then
+        state.SkillRegistrationTarget=target;state.SkillStatus="Registering enemy before skill activation";return
     end
-    if not Skills.HasStamina(definition.Cost.Value) then
-        state.ReserveGunStamina=true; state.SkillWantsWindow=true
-        state.SkillStatus="Recovering stamina for "..name
-        return
+    if not Skills.HasStamina(definition.Cost.Value)then
+        state.ReserveGunStamina=true;state.SkillWantsWindow=true;state.SkillStatus="Recovering stamina for "..name;return
     end
-    state.SkillWantsWindow=true
-    if state.AttackBurstActive then finishAttackBurst("Handing off to ready skill") end
-    state.SkillPreparing=true
+    state.SkillWantsWindow=true;state.SkillPreparing=true
+    if state.AttackBurstActive then finishAttackBurst("Handing off to ready skill")end
     if not normalScheduler.Ready(target,now)then return end
-    state.SkillPreparing=false; state.SkillCastRunning=true
-    skillCastSerial+=1
+    state.SkillPreparing=false;state.SkillCastRunning=true;skillCastSerial+=1
     local cast={Id=skillCastSerial,Name=name,Version=weapons.Version,Character=character,Cancelled=false,
         RecoveryDeadline=now+math.max(8,(state.SkillActivation.Window(name)or 4)+3)}
-    state.ActiveSkillCast=cast
-    state.AttackingTarget=target; trackHealth(target)
-    state.SkillExecution="Source window"
-    state.SkillStatus="Casting "..name
-    local direction=(targetRoot.Position-root.Position)*Vector3.new(1,0,1)
-    if direction.Magnitude>.5 then
-        root.CFrame=CFrame.lookAt(root.Position,root.Position+direction.Unit,Vector3.yAxis)
+    state.ActiveSkillCast=cast;state.AttackingTarget=target;trackHealth(target)
+    state.SkillExecution="Source window";state.SkillStatus="Casting "..name
+    local facing=(targetRoot.Position-root.Position)*Vector3.new(1,0,1)
+    if facing.Magnitude>.5 then
+        root.CFrame=CFrame.lookAt(root.Position,root.Position+facing.Unit,Vector3.yAxis)
         if orientationAlign then orientationAlign.CFrame=root.CFrame.Rotation end
     end
     local function current()
-        return not cast.Cancelled and not cast.CreditFinished and state.ActiveSkillCast==cast and state.Running and not state.StopEverything
-            and state.SkillAura and weapons.Version==cast.Version and weapons.Ready and state.SelectedSkill==name
-            and player.Character==character and root.Parent~=nil and health.Value>0
-            and not state.TravelBusy and not state.Dodging and os.clock()>=state.LagPauseUntil
-            and not state.SafeModePanic and not state.ModeratorBlocking and not state.AutoTradeBusy and not state.Recovering
+        if cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
+        if not(state.Running and state.SkillAura and weapons.Ready and weapons.Version==cast.Version and state.SelectedSkill==name)then return false end
+        if character~=player.Character or root.Parent==nil or health.Value<=0 or os.clock()<state.LagPauseUntil then return false end
+        return not(state.StopEverything or state.TravelBusy or state.Dodging or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy or state.Recovering)
     end
     skillThread=task.defer(function()
         local burst={Skill=name,Target=target.Name,Requested=0,HealthDrops=0,Before=0,Direct=true,Status="Activating equipped weapon skill"}
-        state.LastSkillBurst=burst; state.LastSkillBurstSize=0
+        state.LastSkillBurst=burst;state.LastSkillBurstSize=0
+        local observationComplete=false
         local function observe()
-            if not cast.Multi or burst.ObservationFinished then return end
-            cast.Multi.Finish()
-            if state.CreditController then for _,item in ipairs(burst.Targets)do
-                local entry=getMobData(item.Target);if entry then state.CreditController.Observe(item.Target,entry)end
-            end end
+            if observationComplete or not cast.Multi then return end
+            observationComplete=true;cast.Multi.Finish()
             state.SkillActivation.Result(name,burst.Damage,burst.TotalRequests)
-            if not cast.Cancelled then for _,item in ipairs(burst.Targets) do
-                local entry=getMobData(item.Target)
+            for _,item in ipairs(burst.Targets or {})do
+                local data=getMobData(item.Target)
+                if data and state.CreditController then state.CreditController.Observe(item.Target,data)end
                 local settled=not burst.ObservationReadyAt or os.clock()>=burst.ObservationReadyAt
-                if entry and state.ReadOwnDamage(item.Health,item.Counter)~=nil and (item.Damage>0 or (settled and entry.Health.Value>0)) then
+                if data and not cast.Cancelled and state.ReadOwnDamage(item.Health,item.Counter)~=nil
+                    and(item.Damage>0 or(settled and data.Health.Value>0))then
                     if item.Damage>0 and item.Requested>0 then
-                        if state.CreditDamagePlanner and not cast.CreditFinished then
-                            state.CreditDamagePlanner.Learn("Cast:"..name..":"..cast.Version..":"..item.TargetName,item.Damage)
-                        end
                         local key=name..":"..cast.Version
-                        state.SkillDamageBudget.Learn(key..":"..item.TargetName,item.Damage,item.Requested,item.MinimumHealthDrop)
+                        if state.CreditDamagePlanner and not cast.CreditFinished then state.CreditDamagePlanner.Learn("Cast:"..key..":"..item.TargetName,item.Damage)end
                         state.SkillDamageBudget.Learn(key,item.Damage,item.Requested,item.MinimumHealthDrop)
+                        state.SkillDamageBudget.Learn(key..":"..item.TargetName,item.Damage,item.Requested,item.MinimumHealthDrop)
                     end
-                    state.AutoRanges.Record("Skill",item.RangeDistance,item.Damage,entry,name)
+                    state.AutoRanges.Record("Skill",item.RangeDistance,item.Damage,data,name)
                 end
-            end end
+            end
             if state.FinishSkillObservation==observe then state.FinishSkillObservation=nil end
         end
-        local ok,message=pcall(function()
-            if state.FinishSkillObservation then state.FinishSkillObservation() end
-            local function startDamage(lease)
+        local function valid(mob)
+            if not current()or not validMob(mob,mobs)then return nil end
+            local data=getMobData(mob)
+            if not data or data.Health.Value<=0 or(data.HitLives and data.HitLives.Value<=0)or os.clock()<(data.SkipUntil or 0)
+                or data.Entity:FindFirstChild("Immortal")then return nil end
+            if attackDeltaFor(data,root).Magnitude<=state.AutoRanges.Range("Skill",data,name)then return data end
+        end
+        local function beginWindow(lease)
+            if cast.Multi then return end
             cast.Lease=lease
-            burst.DamageSkill=name
-            burst.Spacing=math.max(state.SkillBurstInterval,.3,lease.MinimumInterval or 0)
-            burst.ActivationAt=lease.Started; burst.FirstHitAt=lease.FirstHitAt; burst.AimDirection=lease.Direction
+            burst.DamageSkill=name;burst.Spacing=math.max(.3,state.SkillBurstInterval,lease.MinimumInterval or 0)
+            burst.ActivationAt=lease.Started;burst.FirstHitAt=lease.FirstHitAt;burst.AimDirection=lease.Direction
             cast.Multi=createSkillBurst({State=state,Record=burst,Spacing=burst.Spacing,Contribution=state.ReadOwnDamage,
-                SourceWindow=lease.SourceWindow,Pacing=normalScheduler,FirstHitAt=lease.FirstHitAt,
-                RefreshTargets=true,ExpiresAt=lease.ExpiresAt,FocusBudget=true,Budget=state.SkillDamageBudget,
+                SourceWindow=lease.SourceWindow,Pacing=normalScheduler,FirstHitAt=lease.FirstHitAt,RefreshTargets=true,
+                ExpiresAt=lease.ExpiresAt,FocusBudget=true,Budget=state.SkillDamageBudget,Valid=valid,
                 EstimateDamage=function(mob)
-                    local key=name..":"..cast.Version
-                    local specific=state.SkillDamageBudget.Estimate(key..":"..mob.Name)
-                    return specific>0 and specific or state.SkillDamageBudget.Estimate(key)
-                end,
-                Valid=function(mob)
-                    if not current() or not validMob(mob,mobs) then return end
-                    local entry=getMobData(mob)
-                    if not entry or entry.Health.Value<=0 or (entry.HitLives and entry.HitLives.Value<=0)
-                        or os.clock()<(entry.SkipUntil or 0) or entry.Entity:FindFirstChild("Immortal") then return end
-                    if attackDeltaFor(entry,root).Magnitude<=state.AutoRanges.Range("Skill",entry,name) then return entry end
+                    local key=name..":"..cast.Version;local amount=state.SkillDamageBudget.Estimate(key..":"..mob.Name)
+                    return amount>0 and amount or state.SkillDamageBudget.Estimate(key)
                 end,
                 Targets=function()
-                    local list={}
-                    for mob in pairs(trackedMobs) do
-                        local entry=validMob(mob,mobs)and getMobData(mob)
-                        if entry and attackDeltaFor(entry,root).Magnitude<=state.AutoRanges.Range("Skill",entry,name)then list[#list+1]=mob end
-                    end
-                    table.sort(list,function(a,b) return targetPriority.Less(a,b,root.Position,target) end)
-                    return list
+                    local result={}
+                    for mob in pairs(trackedMobs)do if valid(mob)then result[#result+1]=mob end end
+                    table.sort(result,function(a,b)return targetPriority.Less(a,b,root.Position,target)end)
+                    return result
                 end,
-                Distance=function(_,entry) return (entry.Root.Position-root.Position).Magnitude end,
-                RangeDistance=function(_,entry) return attackDeltaFor(entry,root).Magnitude end,
-                CanRun=function() return current() and os.clock()<lease.ExpiresAt end,
+                Distance=function(_,data)return(data.Root.Position-root.Position).Magnitude end,
+                RangeDistance=function(_,data)return attackDeltaFor(data,root).Magnitude end,
+                CanRun=function()return current()and os.clock()<lease.ExpiresAt end,
                 Send=function(mob,entry)
-                    if not current() then return false end
-                    if state.CreditController and not state.CreditController.AllowAction(mob,entry,"Skill")then
-                        -- End this scripted skill window when a small normal hit
-                        -- is preferred, or credit is reached; leave native damage alone.
-                        if mob==target and (state.CreditController.ActionReason=="Normal"or state.CreditController.ActionReason=="Qualified")then cast.CreditFinished=true end
+                    if not current()then return false end
+                    local credit=state.CreditController
+                    if credit and not credit.AllowAction(mob,entry,"Skill")then
+                        if mob==target and(credit.ActionReason=="Normal"or credit.ActionReason=="Qualified")then cast.CreditFinished=true end
                         return false
                     end
-                    if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
-                    if state.CreditController then state.CreditController.Sent(mob,entry,"Skill")end
+                    if state.MultiSpotEncounter and(not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
+                    if credit then credit.Sent(mob,entry,"Skill")end
                     Combat.DealDamage(mob,name)
-                    state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob
-                    state.LastEnemyAttackKind="Skill";state.LastEnemyAttackSkill=name
-                    healthHUD.Touch(mob)
-                    entry.OffsetRequests=(entry.OffsetRequests or 0)+1
+                    state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind="Skill";state.LastEnemyAttackSkill=name
+                    healthHUD.Touch(mob);entry.OffsetRequests=(entry.OffsetRequests or 0)+1
                 end,
             })
-            if not cast.Multi.Start(target,table.pack()) then burst.Status="Target changed before skill damage"; return end
+            if not cast.Multi.Start(target,table.pack())then burst.Status="Target changed before skill damage"end
+        end
+        local ok,reason=pcall(function()
+            if state.FinishSkillObservation then state.FinishSkillObservation()end
+            local ack,message,lease=state.SkillActivation.Begin(name,definition,entity,root,current,function(window)
+                if current()then beginWindow(window)end
+            end,state.SkillActivation.Profile(name)and targetRoot.Parent and(targetRoot.Position-root.Position)or nil)
+            burst.ActivationAcknowledged=ack
+            if not ack or not current()then
+                if cast.Multi then cast.Multi.Cancel(message or "Cast interrupted")end
+                burst.Status=message or "Equipment changed during activation";return
             end
-            local acknowledged,reason,lease=state.SkillActivation.Begin(name,definition,entity,root,current,function(window)
-                if current() then startDamage(window) end
-            end, state.SkillActivation.Profile(name) and targetRoot.Parent and (targetRoot.Position-root.Position) or nil)
-            burst.ActivationAcknowledged=acknowledged
-            if not acknowledged or not current() then
-                if cast.Multi then cast.Multi.Cancel(reason or "Cast interrupted") end
-                burst.Status=reason or "Equipment changed during activation"
-                return
-            end
-            if not cast.Multi then startDamage(lease) end
-            if cast.Multi and cast.Multi.Started then
-                while current() and not burst.FinishedAt and os.clock()<cast.Multi.Deadline do task.wait(.03) end
-                if not current() and not burst.FinishedAt then cast.Multi.Cancel(cast.CreditFinished and "Credit plan · ending skill hits"or "Equipment or game state changed") end
-            end
-            if lease.HoldWindow then
-                while current() and os.clock()<lease.ExpiresAt do task.wait(.03) end
-            end
+            beginWindow(lease)
+            while cast.Multi and cast.Multi.Started and current()and not burst.FinishedAt and os.clock()<cast.Multi.Deadline do task.wait(.03)end
+            if cast.Multi and not burst.FinishedAt and not current()then cast.Multi.Cancel(cast.CreditFinished and "Credit plan · ending skill hits"or "Equipment or game state changed")end
+            while lease.HoldWindow and current()and os.clock()<lease.ExpiresAt do task.wait(.03)end
             if not cast.Multi or not cast.Multi.Started then return end
-            state.FinishSkillObservation=observe
             local settle=math.clamp((state.PingMs or 150)/1000+.1,.25,.6)
-            burst.ObservationReadyAt=os.clock()+settle
-            task.delay(settle,observe)
-            state.SkillCasts+=1
+            state.FinishSkillObservation=observe;burst.ObservationReadyAt=os.clock()+settle
+            task.delay(settle,observe);state.SkillCasts+=1
         end)
         state.SkillActivation.Release(name)
         if not ok then
-            state.LastSkillError=tostring(message); state.SkillRetryAt=os.clock()+1
-            if cast.Multi then cast.Multi.Cancel("Skill cast error") end
+            state.LastSkillError=tostring(reason);state.SkillRetryAt=os.clock()+1;burst.Status=tostring(reason)
+            if cast.Multi then cast.Multi.Cancel("Skill cast error")end
         end
         if state.ActiveSkillCast==cast then
-            state.ActiveSkillCast=nil; state.SkillCastRunning=false; state.SkillWantsWindow=false; skillThread=nil
-            state.CombatReadyAt=os.clock()
+            state.ActiveSkillCast=nil;state.SkillCastRunning=false;state.SkillWantsWindow=false;skillThread=nil;state.CombatReadyAt=os.clock()
         end
-        if not ok then burst.Status=tostring(message) end
-        state.SkillBurstHistory[#state.SkillBurstHistory+1]=burst
-        if #state.SkillBurstHistory>8 then table.remove(state.SkillBurstHistory,1) end
+        local history=state.SkillBurstHistory;history[#history+1]=burst
+        while #history>8 do table.remove(history,1)end
         state.OffsetGraceUntil=os.clock()+.5
     end)
 end
+
 
 do
     local profile=ReplicatedStorage.Profiles:FindFirstChild(player.Name)
     local equip=profile and profile:FindFirstChild("Equip")
     local util=require(services.Util)
-    local fingerprint
-    local createWeaponSkills=(function()
+    local factory=(function()
 -- BEGIN BUNDLED WEAPON SKILLS
--- Re-resolve equipped item IDs/classes as the supplied source does, rather
--- than carrying a skill's old weapon reference across equipment changes.
+-- Equipment changes invalidate casts; a settled snapshot selects one usable skill.
 return function(ctx)
     local state=ctx.State
     local api={Ready=false,Version=0,Style="",Skills={}}
-    local allowed,dirty={},true
-    local lastKey,lastCharacter,settleUntil,nextPoll,nextRecheck=nil,nil,0,0,0
-    local preferred=type(state.SkillPerWeapon)=="table" and state.SkillPerWeapon or {}
-    if state.SkillPerWeaponVersion~=2 then preferred={} end
-    state.SkillPerWeapon=preferred
-    state.SkillPerWeaponVersion=2
     local defaults={SingleSword="Sweeping Strike",["2HSword"]="Downward Smash",DualWield="Whirlwind Spin",
         Rapier="Piercing Dash",Katana="Leaping Slash",Spear="Beam Rush",Scythe="Reaper Frenzy"}
-    function api.Class(value)
-        local key=string.lower((string.gsub(tostring(value or ""),"[^%w]","")))
-        if key=="1hsword" or key=="singlesword" then return "SingleSword" end
-        if key=="2hsword" then return "2HSword" end
-        for name in pairs(defaults) do if string.lower(name)==key then return name end end
-        return tostring(value or "")
+    local aliases={singlesword="SingleSword",["1hsword"]="SingleSword",["2hsword"]="2HSword",
+        dualwield="DualWield",rapier="Rapier",katana="Katana",spear="Spear",scythe="Scythe"}
+    local preferences=state.SkillPerWeaponVersion==2 and type(state.SkillPerWeapon)=="table"and state.SkillPerWeapon or {}
+    state.SkillPerWeapon=preferences;state.SkillPerWeaponVersion=2
+    local available={}
+    local observed={Key=nil,Character=nil}
+    local pending,settleAt,pollAt,refreshAt=true,0,0,0
+    function api.Class(style)
+        local label=tostring(style or "")
+        return aliases[label:lower():gsub("[^%w]","")]or label
     end
+    local function cancel(reason)if ctx.Cancel then ctx.Cancel(reason)end end
     function api.Notify(reason,now)
-        api.Version+=1; api.Ready=false; dirty=true
-        settleUntil=(now or os.clock())+.18
-        state.SkillWeaponVersion=api.Version
+        pending=true;settleAt=(now or os.clock())+.18
+        api.Ready=false;api.Version+=1;state.SkillWeaponVersion=api.Version
         state.SkillStatus=reason or "Updating equipped weapon skills"
-        if ctx.Cancel then ctx.Cancel(reason or "Equipment changed") end
+        cancel(reason or "Equipment changed")
     end
-    function api.Choices() return api.Skills end
-    function api.IsCompatible(name) return api.Ready and allowed[name]~=nil end
+    function api.Choices()return api.Skills end
+    function api.IsCompatible(name)return api.Ready and available[name]~=nil end
+    local function publish(name)
+        state.SelectedSkill=name or "";state.SkillWeaponStyle=api.Style
+        if ctx.Changed then ctx.Changed(state.SelectedSkill,api.Skills)end
+    end
     function api.Select(name)
-        if not api.IsCompatible(name) then return false end
-        if name~=state.SelectedSkill and ctx.Cancel then ctx.Cancel("Selected skill changed") end
-        state.SelectedSkill=name
-        preferred[api.Style]=name
-        if ctx.Changed then ctx.Changed(name,api.Skills) end
-        return true
+        if not api.IsCompatible(name)then return false end
+        if state.SelectedSkill~=name then cancel("Selected skill changed")end
+        preferences[api.Style]=name;publish(name);return true
+    end
+    local function resolve(snapshot)
+        local oldStyle=api.Style
+        api.Style=api.Class(snapshot.Style)
+        local list={};available={}
+        for _,entry in ipairs(snapshot.Skills)do
+            if entry.Allowed and not available[entry.Name]then available[entry.Name]=entry;list[#list+1]=entry.Name end
+        end
+        table.sort(list);api.Skills=list
+        local choice
+        if available["Summon Pistol"]then choice="Summon Pistol"
+        elseif available[preferences[api.Style]]then choice=preferences[api.Style]
+        elseif (oldStyle==""or oldStyle==api.Style)and available[state.SelectedSkill]then choice=state.SelectedSkill
+        elseif available[defaults[api.Style]]then choice=defaults[api.Style]
+        else choice=list[1]end
+        if (choice or "")~=state.SelectedSkill then cancel("Available skill changed")end
+        if oldStyle==""and choice and choice~="Summon Pistol"then preferences[api.Style]=choice end
+        api.Ready=true;publish(choice)
     end
     function api.Update(now)
         now=now or os.clock()
-        if now<nextPoll and not dirty then return end
-        nextPoll=now+.25
+        if not pending and now<pollAt then return end
+        pollAt=now+.25
         local key,character=ctx.Key()
-        if key~=lastKey or character~=lastCharacter then
-            lastKey,lastCharacter=key,character
-            api.Notify("Equipped weapon changed",now)
+        if key~=observed.Key or character~=observed.Character then
+            observed.Key,observed.Character=key,character;api.Notify("Equipped weapon changed",now)
         end
-        if not dirty and now>=nextRecheck then dirty=true; settleUntil=now end
-        if not dirty or now<settleUntil then return end
-        local snapshot=ctx.Read()
-        allowed={}; api.Skills={}
-        local previousStyle=api.Style
-        api.Style=api.Class(snapshot.Style)
-        for _,skill in ipairs(snapshot.Skills) do
-            if skill.Allowed then allowed[skill.Name]=skill; api.Skills[#api.Skills+1]=skill.Name end
-        end
-        table.sort(api.Skills)
-        local selected=allowed["Summon Pistol"]and "Summon Pistol"or preferred[api.Style]
-        if not allowed[selected] then
-            selected=(previousStyle=="" or previousStyle==api.Style) and allowed[state.SelectedSkill] and state.SelectedSkill or nil
-        end
-        if not selected then selected=allowed[defaults[api.Style]] and defaults[api.Style] or api.Skills[1] end
-        if selected~=(state.SelectedSkill~="" and state.SelectedSkill or nil) and ctx.Cancel then ctx.Cancel("Available skill changed") end
-        state.SelectedSkill=selected or ""
-        state.SkillWeaponStyle=api.Style
-        api.Ready=true; dirty=false; nextRecheck=now+2
-        if selected and previousStyle==""and not allowed["Summon Pistol"]then preferred[api.Style]=selected end
-        if ctx.Changed then ctx.Changed(state.SelectedSkill,api.Skills) end
+        if not pending and now>=refreshAt then pending=true;settleAt=now end
+        if not pending or now<settleAt then return end
+        resolve(ctx.Read());pending=false;refreshAt=now+2
     end
     return api
 end
 
 -- END BUNDLED WEAPON SKILLS
     end)()
+    local signature
     local function combatStyle()
         local ok,value=pcall(Combat.CalculateCombatStyle,false)
         return ok and value or ""
     end
-    local resolver=createWeaponSkills({State=state,
-        Key=function()
-            local right=equip and equip:FindFirstChild("Right")
-            local left=equip and equip:FindFirstChild("Left")
-            return tostring(right and right.Value or 0)..":"..tostring(left and left.Value or 0)..":"..tostring(combatStyle()),player.Character
-        end,
-        Read=function()
-            local skills={}
-            local exp=profile and profile:FindFirstChild("Stats") and profile.Stats:FindFirstChild("Exp")
-            local level=exp and util.LevelFromExp(exp.Value) or 0
-            for _,definition in ipairs(ReplicatedStorage.Database.Skills:GetChildren()) do
-                if AttackStats[definition.Name] and type(Skills.skillHandlers[definition.Name])=="function" and state.SkillActivation.Window(definition.Name) then
-                    local ok,valid=pcall(GameUI.IsSkillValid,definition)
-                    local minimum=definition:FindFirstChild("Level")
-                    skills[#skills+1]={Name=definition.Name,Allowed=ok and valid==true and (not minimum or minimum.Value<=level)}
-                end
+    local function key()
+        local right=equip and equip:FindFirstChild("Right")
+        local left=equip and equip:FindFirstChild("Left")
+        return table.concat({tostring(right and right.Value or 0),tostring(left and left.Value or 0),combatStyle()},":"),player.Character
+    end
+    local function skillsForWeapon()
+        local stats=profile and profile:FindFirstChild("Stats")
+        local experience=stats and stats:FindFirstChild("Exp")
+        local level=experience and util.LevelFromExp(experience.Value)or 0
+        local result={}
+        for _,definition in ipairs(ReplicatedStorage.Database.Skills:GetChildren())do
+            local name=definition.Name
+            if AttackStats[name]and type(Skills.skillHandlers[name])=="function"and state.SkillActivation.Window(name)then
+                local ok,valid=pcall(GameUI.IsSkillValid,definition)
+                local required=definition:FindFirstChild("Level")
+                result[#result+1]={Name=name,Allowed=ok and valid==true and(not required or required.Value<=level)}
             end
-            return {Style=combatStyle(),Skills=skills}
-        end,
-        Cancel=function(reason)
-            state.CancelSkillAura(reason)
-            state.SkillActivation.Reset()
-            stopSword(true)
-        end,
-        Changed=function(name,choices)
-            local nextFingerprint=name.."|"..table.concat(choices,",")
-            if fingerprint==nextFingerprint then return end
-            fingerprint=nextFingerprint
-            skillDropdown.Text=name~="" and name.."  v" or "Select skill"
-            refreshSkillChoices()
-            state.SkillRetryAt=0
-            requestSave()
-        end,
-    })
-    state.WeaponSkills=resolver
-    if equip then
-        for _,slot in ipairs({"Right","Left"}) do
-            local value=equip:FindFirstChild(slot)
-            if value then bind(value.Changed,function() resolver.Notify("Equipped "..slot.." weapon changed") end) end
         end
+        return {Style=combatStyle(),Skills=result}
     end
-    local owned=profile and profile:FindFirstChild("Skills")
-    if owned then
-        bind(owned.ChildAdded,function() resolver.Notify("Unlocked skills updated") end)
-        bind(owned.ChildRemoved,function() resolver.Notify("Unlocked skills updated") end)
+    local resolver=factory({State=state,Key=key,Read=skillsForWeapon,
+        Cancel=function(reason)state.CancelSkillAura(reason);state.SkillActivation.Reset();stopSword(true)end,
+        Changed=function(name,choices)
+            local nextSignature=name.."|"..table.concat(choices,",")
+            if nextSignature==signature then return end
+            signature=nextSignature;skillDropdown.Text=name~=""and name.."  v"or "Select skill"
+            refreshSkillChoices();state.SkillRetryAt=0;requestSave()
+        end})
+    state.WeaponSkills=resolver
+    local function invalidated()resolver.Notify("Equipment or unlocked skills changed")end
+    if equip then
+        for _,slot in ipairs({"Right","Left"})do local value=equip:FindFirstChild(slot);if value then bind(value.Changed,invalidated)end end
     end
-    bind(player.CharacterAdded,function() resolver.Notify("Character respawned") end)
-    state.WeaponSkillsDestroy=function() state.CancelSkillAura("Weapon controller closed") end
+    local unlocked=profile and profile:FindFirstChild("Skills")
+    if unlocked then bind(unlocked.ChildAdded,invalidated);bind(unlocked.ChildRemoved,invalidated)end
+    bind(player.CharacterAdded,invalidated)
+    state.WeaponSkillsDestroy=function()state.CancelSkillAura("Weapon controller closed")end
     resolver.Update()
 end
-
-function state.SetEnabled(enabled)
-    if state.StopEverything and enabled==true then return false end
-    if not state.Running then return end
-    state.Enabled = enabled == true
+function state.SetEnabled(requested)
+    if not state.Running or(requested and state.StopEverything)then return false end
+    state.Enabled=requested==true
     if state.AuraTouch then state.AuraTouch.Update()end
-    if state.Enabled then state.AutoSwing=true end
-    if not state.Enabled then
-        finishAttackBurst("Paused");stopSword()
-    end
-    state.LastError = nil
-    consecutiveErrors = 0
-    nextTargetRefresh = 0
-    state.Backoff = 1
-    table.clear(lastHit)
-    table.clear(pendingDamage)
-    toggle.Text = state.Enabled and "Kill aura · ON" or "Kill aura · OFF"
-    toggle.BackgroundColor3 = state.Enabled and Color3.fromRGB(114, 88, 229) or Color3.fromRGB(45, 48, 63)
-    requestSave()
+    if state.Enabled then state.AutoSwing=true else finishAttackBurst("Paused");stopSword(true)end
+    state.LastError=nil;consecutiveErrors=0;nextTargetRefresh=0;state.Backoff=1
+    table.clear(lastHit);table.clear(pendingDamage)
+    toggle.Text=state.Enabled and "Kill aura · ON"or "Kill aura · OFF"
+    toggle.BackgroundColor3=state.Enabled and Color3.fromRGB(114,88,229)or Color3.fromRGB(45,48,63)
+    requestSave();return true
 end
-function state.SetRadius(radius)
-    state.Radius = math.clamp(math.floor(radius), 20, 120)
-    nextTargetRefresh = 0
+function state.SetRadius(requested)
+    state.Radius=math.clamp(math.floor(tonumber(requested)or state.Radius),20,120);nextTargetRefresh=0
 end
-local guardHealth, guardConnection, guardLastValue
-local nextGuardRefresh = 0
+local guardHealth,guardConnection,guardLastValue
+local nextGuardRefresh=0
 local function updateHealthGuard(now)
     now=now or os.clock()
-    if now < nextGuardRefresh then return end
-    nextGuardRefresh = now + 0.5
-    local character = player.Character
-    local entity = character and character:FindFirstChild("Entity")
-    local health = entity and entity:FindFirstChild("Health")
-    if health == guardHealth then return end
-    if guardConnection then guardConnection:Disconnect(); guardConnection = nil end
-    guardHealth = health
-    guardLastValue = health and health.Value
-    if health then
-        guardConnection = health:GetPropertyChangedSignal("Value"):Connect(function()
-            local value, before = health.Value, guardLastValue
-            guardLastValue = value
-            local active = state.AutoFarm or state.SkillCastRunning or os.clock() < (state.ProtectionUntil or 0)
-                or ((state.Enabled or state.SkillAura) and state.AttackingTarget and state.AttackingTarget.Parent)
-            if state.Running and not state.StopEverything and active and before and value < before then
-                local event={At=os.clock(),Before=before,After=value,Target=state.FollowTarget and state.FollowTarget.Name or state.AttackingTarget and state.AttackingTarget.Name,Offset=state.TeleportOffset,Mode=state.OffsetMode or "Below",Dodging=state.Dodging}
-                local root=character and character:FindFirstChild("HumanoidRootPart")
-                event.Position=root and root.Position
-                local dodge=state.AtheonDodgeController
-                event.DodgeReason=dodge and dodge.LastReason
-                event.Anchor=dodge and dodge.Anchor
-                event.Planned=waveDodge.LastPosition
-                state.LastDamageEvent=event
-                state.DamageHistory=state.DamageHistory or {}
-                state.DamageHistory[#state.DamageHistory+1]=event
-                if #state.DamageHistory>8 then table.remove(state.DamageHistory,1) end
-                state.LastIncomingDamageAt=event.At
-            end
-        end)
-    end
+    if now<nextGuardRefresh then return end
+    nextGuardRefresh=now+.5
+    local character=player.Character
+    local entity=character and character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
+    if health==guardHealth then return end
+    if guardConnection then guardConnection:Disconnect();guardConnection=nil end
+    guardHealth=health;guardLastValue=health and health.Value
+    if not health then return end
+    guardConnection=health:GetPropertyChangedSignal("Value"):Connect(function()
+        local before=guardLastValue;guardLastValue=health.Value
+        if not before or guardLastValue>=before or not state.Running or state.StopEverything then return end
+        local active=state.AutoFarm or state.SkillCastRunning or os.clock()<(state.ProtectionUntil or 0)
+            or((state.Enabled or state.SkillAura)and state.AttackingTarget and state.AttackingTarget.Parent)
+        if not active then return end
+        local root=character:FindFirstChild("HumanoidRootPart")
+        local target=state.FollowTarget or state.AttackingTarget
+        local dodge=state.AtheonDodgeController
+        local observation={At=os.clock(),Before=before,After=guardLastValue,Target=target and target.Name,
+            Position=root and root.Position,Offset=state.TeleportOffset,Mode=state.OffsetMode or "Below",Dodging=state.Dodging,
+            DodgeReason=dodge and dodge.LastReason,Anchor=dodge and dodge.Anchor,Planned=waveDodge.LastPosition}
+        local history=state.DamageHistory or {};state.DamageHistory=history
+        history[#history+1]=observation;while #history>8 do table.remove(history,1)end
+        state.LastDamageEvent=observation;state.LastIncomingDamageAt=observation.At
+    end)
 end
-function state.Destroy(replacing, teleportCleanup)
-    if not state.Running or state.Destroying then return end
+function state.Destroy(replacing,teleportCleanup)
+    if state.Destroying or not state.Running then return end
     state.Destroying=true
-    local preserveSearch=teleportCleanup==true and (state.AutomationTeleporting
-        or ((state.SafeMode or state.MultiSpot or state.AccountProgression)and state.ServerTeleportStarted)
-        or (state.SoloServerSearch and state.SoloServerSearch.Active and state.SoloServerSearch.Phase=="Teleporting"))
+    local search=state.SoloServerSearch
+    local preserveSearch=teleportCleanup==true and(state.AutomationTeleporting
+        or((state.SafeMode or state.MultiSpot or state.AccountProgression)and state.ServerTeleportStarted)
+        or(search and search.Active and search.Phase=="Teleporting"))
     local scope=(function()
 -- BEGIN BUNDLED RUNTIME SCOPE
--- Every registered cleanup runs exactly once, even after another cleanup fails.
+-- Detach callbacks before invoking them so nested shutdown cannot run twice.
 return function()
-    local api={Errors={}}
-    local entries,disposed={},false
-    function api.Add(name,fn)
-        assert(not disposed,"Runtime scope already closed")
-        entries[#entries+1]={Name=name,Run=fn}
+    local scope={Errors={}}
+    local callbacks,labels={},{}
+    local open=true
+    function scope.Add(label,callback)
+        assert(open,"Runtime scope already closed")
+        assert(type(callback)=="function","Cleanup must be callable")
+        callbacks[#callbacks+1]=callback;labels[#labels+1]=label
     end
-    function api.Close()
-        if disposed then return api.Errors end
-        disposed=true
-        for _,entry in ipairs(entries)do
-            local ok,reason=pcall(entry.Run)
-            if not ok then api.Errors[#api.Errors+1]={Name=entry.Name,Error=tostring(reason)}end
-            entry.Run=nil
+    function scope.Close()
+        if open then
+            open=false
+            local pending=callbacks;callbacks={}
+            for index=1,#pending do
+                local callback=pending[index];pending[index]=nil
+                local ok,reason=pcall(callback)
+                if not ok then scope.Errors[#scope.Errors+1]={Name=labels[index],Error=tostring(reason)}end
+                labels[index]=nil
+            end
         end
-        table.clear(entries)
-        return api.Errors
+        return scope.Errors
     end
-    return api
+    return scope
 end
 
 -- END BUNDLED RUNTIME SCOPE
     end)()()
-    local function cleanup(name,fn)scope.Add(name,fn)end
-    local function retire(name,object,method,...)
-        if not object then return end
-        local args=table.pack(...)
-        cleanup(name,function()if object[method]then object[method](table.unpack(args,1,args.n))end end)
+    local function add(name,callback)scope.Add(name,callback)end
+    local function method(name,object,member,...)
+        if object and type(object[member])=="function"then
+            local arguments=table.pack(...)
+            add(name,function()object[member](table.unpack(arguments,1,arguments.n))end)
+        end
     end
-    cleanup("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
-    cleanup("Stop",function()state.Enabled=false;state.AutoFarm=false;state.SkillAura=false;state.Running=false end)
-    retire("UI",state.WindUI,"Destroy")
-    retire("AntiAFK",state.AntiAfk,"Destroy")
-    retire("Ownership",runtimeOwner,"Release")
-    retire("Search",state.SoloServerSearch,"Destroy",preserveSearch)
-    if not preserveSearch then retire("Safe",state.SafeController,"Destroy")end
-    retire("MultiSpot",state.MultiSpotController,"Destroy")
-    cleanup("Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end)
-    retire("Performance",state.PerformanceBoost,"Destroy")
-    cleanup("Skill",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end)
-    cleanup("Weapons",function()if state.WeaponSkillsDestroy then state.WeaponSkillsDestroy()end end)
-    cleanup("Sword",function()stopSword(true)end)
-    cleanup("Support",function()if state.CancelMiscSkill then state.CancelMiscSkill()end end)
-    retire("Players",state.PlayerTools,"Destroy")
-    retire("Moderator",state.ModeratorWatch,"Destroy")
-    retire("Upright",state.UprightController,"Destroy")
-    retire("Dodge",waveDodge,"Destroy")
-    retire("Visuals",state.SkillVisuals,"Destroy")
-    cleanup("World",function()if state.RestoreWorldVisuals then state.RestoreWorldVisuals()end end)
-    cleanup("DamageHook",function()if state.RestoreSkillDamageHook then state.RestoreSkillDamageHook()end end)
-    retire("Activation",state.SkillActivation,"Release")
-    cleanup("Observation",function()if state.FinishSkillObservation then state.FinishSkillObservation()end end)
-    retire("Attacks",normalScheduler,"Destroy")
-    cleanup("HealthObserver",function()if guardConnection then guardConnection:Disconnect();guardConnection=nil end end)
-    cleanup("Movement",function()stopMovement(nil,replacing==true)end)
-    retire("Collision",state.FarmNoclip,"Destroy")
-    retire("Recovery",state.RuntimeRecovery,"Destroy")
-    retire("Touch",state.AuraTouch,"Destroy")
-    retire("SpotHUD",state.MultiSpotHUD,"Destroy")
-    retire("HealthHUD",healthHUD,"Destroy")
-    retire("Scheduler",state.WorkScheduler,"Destroy")
-    retire("Enemies",state.EnemyRegistry,"Destroy")
-    cleanup("Connections",function()
-        for _,connection in ipairs(connections)do pcall(function()connection:Disconnect()end)end
-        table.clear(connections)
+    local function owned(name,object)method(name,object,"Destroy")end
+    add("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
+    add("Stop",function()state.Running=false;state.Enabled=false;state.AutoFarm=false;state.SkillAura=false end)
+    method("Ownership",runtimeOwner,"Release")
+    owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk)
+    method("Search",search,"Destroy",preserveSearch)
+    if not preserveSearch then owned("Safe",state.SafeController)end
+    owned("MultiSpot",state.MultiSpotController)
+    local callbacks={
+        {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},
+        {"Skills",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end},
+        {"Weapons",function()if state.WeaponSkillsDestroy then state.WeaponSkillsDestroy()end end},
+        {"Sword",function()stopSword(true)end},
+        {"Support",function()if state.CancelMiscSkill then state.CancelMiscSkill()end end},
+        {"World",function()if state.RestoreWorldVisuals then state.RestoreWorldVisuals()end end},
+        {"DamageHook",function()if state.RestoreSkillDamageHook then state.RestoreSkillDamageHook()end end},
+        {"Observation",function()if state.FinishSkillObservation then state.FinishSkillObservation()end end},
+        {"HealthObserver",function()if guardConnection then guardConnection:Disconnect();guardConnection=nil end end},
+        {"Movement",function()stopMovement(nil,replacing==true)end},
+    }
+    for _,entry in ipairs(callbacks)do add(entry[1],entry[2])end
+    for _,entry in ipairs({{"Performance",state.PerformanceBoost},{"Players",state.PlayerTools},{"Moderator",state.ModeratorWatch},
+        {"Upright",state.UprightController},{"Dodge",waveDodge},{"Visuals",state.SkillVisuals},{"Attacks",normalScheduler},
+        {"Collision",state.FarmNoclip},{"Recovery",state.RuntimeRecovery},{"Touch",state.AuraTouch},
+        {"SpotHUD",state.MultiSpotHUD},{"HealthHUD",healthHUD},{"Scheduler",state.WorkScheduler},{"Enemies",state.EnemyRegistry}})do owned(entry[1],entry[2])end
+    method("Activation",state.SkillActivation,"Release")
+    add("Connections",function()
+        for index=#connections,1,-1 do local connection=connections[index];connections[index]=nil;pcall(connection.Disconnect,connection)end
     end)
-    cleanup("Root",function()if gui then gui:Destroy()end end)
-    cleanup("Singleton",function()if env.SB2KillAura==state then env.SB2KillAura=nil end end)
+    add("Root",function()if gui then gui:Destroy()end end)
+    add("Singleton",function()if env.SB2KillAura==state then env.SB2KillAura=nil end end)
     state.CleanupErrors=scope.Close()
 end
-bind(toggle.Activated, function() state.SetEnabled(not state.Enabled) end)
-bind(gui.Destroying, function() state.Destroy(false, true) end)
-
-bind(UserInputService.InputBegan, function(input, processed)
-    if state.TravelHold and not (state.AutoFarm and state.Enabled) and not processed and not UserInputService:GetFocusedTextBox() then
-        if input.KeyCode==Enum.KeyCode.W or input.KeyCode==Enum.KeyCode.A or input.KeyCode==Enum.KeyCode.S or input.KeyCode==Enum.KeyCode.D or input.KeyCode==Enum.KeyCode.Space then stopMovement("Travel hold released") end
-    end
-    if not processed and input.KeyCode == Enum.KeyCode.RightShift and not UserInputService:GetFocusedTextBox() then
-        state.SetUIVisible(state.UIHidden)
-    end
+bind(toggle.Activated,function()state.SetEnabled(not state.Enabled)end)
+bind(gui.Destroying,function()state.Destroy(false,true)end)
+local walkKeys={[Enum.KeyCode.W]=true,[Enum.KeyCode.A]=true,[Enum.KeyCode.S]=true,[Enum.KeyCode.D]=true,[Enum.KeyCode.Space]=true}
+bind(UserInputService.InputBegan,function(input,processed)
+    if processed or UserInputService:GetFocusedTextBox()then return end
+    if state.TravelHold and not(state.AutoFarm and state.Enabled)and walkKeys[input.KeyCode]then stopMovement("Travel hold released")end
+    if input.KeyCode==Enum.KeyCode.RightShift then state.SetUIVisible(state.UIHidden)end
 end)
-bind(RunService.Stepped, function()
-    if state.Moving then
-        for part in pairs(collisionParts) do if part.Parent and part.CanCollide then part.CanCollide = false end end
-    end
+bind(RunService.Stepped,function()
+    if not state.Moving then return end
+    for part in pairs(collisionParts)do if part.Parent and part.CanCollide then part.CanCollide=false end end
 end)
-
 do
-    local create=(function()
+    local rangeFactory=(function()
 -- BEGIN BUNDLED AUTO RANGE
+-- Range learning is isolated by enemy data, attack mode, skill, and farming side.
 return function(ctx)
+    local api={Cap=120,Profiles=setmetatable({}, {__mode="k"})}
     local state=ctx.State
     local clock=ctx.Clock or os.clock
-    local api={Cap=120,Profiles=setmetatable({}, {__mode="k"})}
-    local nextUpdate=0
+    local due=0
     state.AutoRangeCap=api.Cap
-    function api.BodyRange(data)
-        local size=data.Root.Size
-        return math.min(api.Cap,math.max(size.X,size.Z)*.5+20)
-    end
+    function api.BodyRange(data)return math.min(api.Cap,math.max(data.Root.Size.X,data.Root.Size.Z)*.5+20)end
     function api.Delta(data,root)
-        local height=(root.Size.Y-data.Root.Size.Y)*.5
-        local point=data.Root.Position+Vector3.new(0,height,0)
-        local motion=data.Motion
-        if motion and motion.Parent==data.Root then
-            local velocity=motion:IsA("LinearVelocity") and motion.VectorVelocity
-                or motion:IsA("BodyVelocity") and motion.Velocity
-            if velocity and velocity.Magnitude>1 then point+=velocity.Unit end
+        local center=data.Root.Position+Vector3.new(0,(root.Size.Y-data.Root.Size.Y)*.5,0)
+        local mover=data.Motion
+        if mover and mover.Parent==data.Root then
+            local velocity=mover:IsA("LinearVelocity")and mover.VectorVelocity or mover:IsA("BodyVelocity")and mover.Velocity
+            if velocity and velocity.Magnitude>1 then center+=velocity.Unit end
         end
-        return point-root.Position
+        return center-root.Position
     end
-    local function profile(kind,data,skill)
-        local entries=api.Profiles[data]
-        if not entries then entries={}; api.Profiles[data]=entries end
-        local key=kind=="Skill" and "Skill:"..tostring(skill or state.SelectedSkill) or "Kill"
+    local function entry(kind,data,skill)
+        local group=api.Profiles[data]
+        if not group then group={};api.Profiles[data]=group end
+        local key=kind=="Skill"and "Skill:"..tostring(skill or state.SelectedSkill)or "Kill"
         if state.AutoFarm and state.FarmAbove then key="Above:"..key end
-        local value=entries[key]
+        local value=group[key]
         if not value or value.Size~=data.Root.Size then
-            value={Size=data.Root.Size,Limit=api.BodyRange(data),Samples={},NextProbe=0}
-            entries[key]=value
+            value={Size=data.Root.Size,Limit=api.BodyRange(data),Samples={},NextProbe=0};group[key]=value
         end
         return value
     end
     function api.Range(kind,data,skill)
-        local value=profile(kind,data,skill)
-        local now,body=clock(),api.BodyRange(data)
-        if value.Limit<body and now>=value.NextProbe then
-            if now-(value.LastSample or 0)>12 then value.Limit=body
-            elseif value.LastHit and now-value.LastHit<6 then value.Limit=math.min(body,value.Limit+1) end
-            value.NextProbe=now+6
+        local profile=entry(kind,data,skill)
+        local time=clock();local maximum=api.BodyRange(data)
+        if profile.Limit<maximum and time>=profile.NextProbe then
+            if time-(profile.LastSample or 0)>12 then profile.Limit=maximum
+            elseif profile.LastHit and time-profile.LastHit<6 then profile.Limit=math.min(maximum,profile.Limit+1)end
+            profile.NextProbe=time+6
         end
-        return math.min(body,value.Limit)
+        return math.min(maximum,profile.Limit)
     end
-    function api.Record(kind,distance,damage,data,skill)
-        if not data or (kind~="Kill" and kind~="Skill") or type(distance)~="number"
-            or distance~=distance or distance>api.Cap or distance<0 then return end
-        local value=profile(kind,data,skill)
-        local now=clock()
-        value.LastSample=now
-        if type(damage)=="number" and damage>0 then value.LastHit=now end
-        local samples=value.Samples
-        samples[#samples+1]={At=now,Distance=distance,Damage=damage or 0}
-        if #samples>12 then table.remove(samples,1) end
-        local hits,misses,maxHit,nearestMiss=0,0,0,math.huge
+    local function statistics(samples,time)
+        local hits,misses,farthest,nearest=0,0,0,math.huge
         for i=#samples,1,-1 do
             local sample=samples[i]
-            if now-sample.At>12 then table.remove(samples,i)
-            elseif sample.Damage>0 then hits+=1; maxHit=math.max(maxHit,sample.Distance)
-            else misses+=1; nearestMiss=math.min(nearestMiss,sample.Distance) end
+            if time-sample.At>12 then table.remove(samples,i)
+            elseif sample.Damage>0 then hits+=1;farthest=math.max(farthest,sample.Distance)
+            else misses+=1;nearest=math.min(nearest,sample.Distance)end
         end
+        return hits,misses,farthest,nearest
+    end
+    function api.Record(kind,distance,damage,data,skill)
+        if not data or (kind~="Kill"and kind~="Skill")or type(distance)~="number"or distance~=distance or distance<0 or distance>api.Cap then return end
+        local profile=entry(kind,data,skill);local time=clock()
+        profile.LastSample=time
+        if type(damage)=="number"and damage>0 then profile.LastHit=time end
+        local samples=profile.Samples
+        if #samples==12 then table.remove(samples,1)end
+        samples[#samples+1]={At=time,Distance=distance,Damage=damage or 0}
+        local hits,misses,farthest,nearest=statistics(samples,time)
         local limit=api.Range(kind,data,skill)
-        if hits>0 then limit=math.min(api.BodyRange(data),math.max(limit,maxHit+1)) end
-        -- Close misses can mean cooldown, stamina, or invulnerability. Only
-        -- learn a shorter reach from repeated misses at the outer boundary.
-        if misses>=2 and hits>0 and nearestMiss>maxHit+2 and nearestMiss>=limit-3 then
-            limit=math.min(limit,math.max(20,math.ceil(maxHit+2)))
-        elseif hits==0 and misses>=3 and nearestMiss>=limit-3 then
-            limit=math.max(20,limit-2)
+        if hits>0 then limit=math.min(api.BodyRange(data),math.max(limit,farthest+1))end
+        if nearest>=limit-3 then
+            if hits>0 and misses>=2 and nearest>farthest+2 then limit=math.min(limit,math.max(20,math.ceil(farthest+2)))
+            elseif hits==0 and misses>=3 then limit=math.max(20,limit-2)end
         end
-        if limit~=value.Limit then value.Limit=limit; value.NextProbe=now+6 end
+        if profile.Limit~=limit then profile.Limit=limit;profile.NextProbe=time+6 end
+    end
+    local function present(kind,data)
+        local current=kind=="Kill"and state.Radius or state.SkillRange
+        local effective=data and api.Range(kind,data,state.SelectedSkill)or math.clamp(current,20,api.Cap)
+        local value=math.ceil(effective)
+        if value~=current then if kind=="Kill"then ctx.SetKill(value)else ctx.SetSkill(value)end end
+        state[kind=="Kill"and "KillRangeStatus"or "SkillRangeStatus"]=string.format("Auto · %.1f / %d studs",effective,api.Cap)
     end
     function api.Update(now)
         now=now or clock()
-        if now<nextUpdate then return end
-        nextUpdate=now+.5
+        if now<due then return end
+        due=now+.5
         local data=ctx.PrimaryData and ctx.PrimaryData()
-        for _,kind in ipairs({"Kill","Skill"}) do
-            local current=kind=="Kill" and state.Radius or state.SkillRange
-            local effective=data and api.Range(kind,data,state.SelectedSkill) or math.clamp(current,20,api.Cap)
-            local desired=math.ceil(effective)
-            if desired~=current then
-                if kind=="Kill" then ctx.SetKill(desired) else ctx.SetSkill(desired) end
-            end
-            local text=string.format("Auto · %.1f / %d studs",effective,api.Cap)
-            if kind=="Kill" then state.KillRangeStatus=text else state.SkillRangeStatus=text end
-        end
+        present("Kill",data);present("Skill",data)
     end
     return api
 end
 
 -- END BUNDLED AUTO RANGE
     end)()
-    state.AutoRanges=create({State=state,SetKill=state.SetRadius,SetSkill=state.SetSkillRange,
+    state.AutoRanges=rangeFactory({State=state,SetKill=state.SetRadius,SetSkill=state.SetSkillRange,
         PrimaryData=function()
-            local mob=state.AutoFarm and state.FollowTarget or state.AttackingTarget
-            local data=mob and getMobData(mob)
-            return data and data.Health.Value>0 and data or nil
-        end,
-    })
+            local target=state.AutoFarm and state.FollowTarget or state.AttackingTarget
+            local data=target and getMobData(target)
+            if data and data.Health.Value>0 then return data end
+        end})
 end
-normalScheduler.Bind({
-    GetData=function(mob)
-        if not validMob(mob,indexedMobFolder) then return end
+local function noteAttack(mob,kind,skill)
+    state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind=kind
+    state.LastEnemyAttackSkill=skill
+end
+normalScheduler.Bind({GetData=function(mob)
+        if not validMob(mob,indexedMobFolder)then return nil end
         local data=getMobData(mob)
-        if data and os.clock()>=(data.SkipUntil or 0) then return data end
-    end,
-    Contribution=state.ReadOwnDamage,
-    Radius=attackRadiusFor,
-    Delta=attackDeltaFor,
+        if data and os.clock()>=(data.SkipUntil or 0)then return data end
+    end,Contribution=state.ReadOwnDamage,Radius=attackRadiusFor,Delta=attackDeltaFor,
     Damage=function(mob)
-        local creditData=getMobData(mob)
-        if state.CreditController and not state.CreditController.AllowAction(mob,creditData,"Normal")then return false end
-        if state.FinishSkillObservation then state.FinishSkillObservation() end
-        if not pendingDamage[mob] then
-            local data=getMobData(mob)
-            local contribution,counter=state.ReadOwnDamage(data.Health)
-            pendingDamage[mob]={Health=data.Health,Before=data.Health.Value,Time=os.clock(),Requests=0,
-                Distance=attackDeltaFor(data,player.Character.HumanoidRootPart).Magnitude,
-                Contribution=contribution,Counter=counter,SkillRequests=state.SkillHitRequests}
-        end
-        if state.MultiSpotEncounter and (not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
-        if state.CreditController then state.CreditController.Sent(mob,creditData,"Normal")end
-        Combat.DealDamage(mob,nil)
-        state.LastEnemyAttackAt=os.clock();state.LastEnemyAttackTarget=mob;state.LastEnemyAttackKind="Normal"
-    end,
-    Visual=playBurstSwing,
-    Sent=function(mob,data,now)
+        local data=getMobData(mob)
+        if state.CreditController and not state.CreditController.AllowAction(mob,data,"Normal")then return false end
+        if state.FinishSkillObservation then state.FinishSkillObservation()end
         local sample=pendingDamage[mob]
-        if sample then sample.Requests+=1 end
-        data.OffsetRequests=(data.OffsetRequests or 0)+1
-        state.LastPulseAt=now
-        state.HitsSent+=1
-        state.LastTarget=mob.Name
-        state.AttackingTarget=mob
-        lastHit[mob]=now
-        healthHUD.Touch(mob)
-        trackHealth(state.AutoFarm and state.FollowTarget or mob)
-    end,
-})
-
-local function scan()
-    if state.Dodging or os.clock()<(state.FarmPauseUntil or 0) then finishAttackBurst("Dodging or repositioning"); stopSword(); return "Special-wave dodge / repositioning" end
-    if state.TravelBusy or state.MultiSpotOwnsTravel then finishAttackBurst("Travelling"); stopSword(); return "Travelling to a floor destination" end
-    if not state.Enabled and not (state.SkillAura and state.SkillRegistrationTarget)then stopSword(); return "Paused" end
-    local now = os.clock()
-    local character = player.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local entity = character and character:FindFirstChild("Entity")
-    local health = entity and entity:FindFirstChild("Health")
-    if not root or not humanoid or humanoid.Health <= 0 or (health and health.Value <= 0) then finishAttackBurst("Character unavailable"); stopSword(); return "Waiting for your character" end
-    local mobs = refreshMobIndex()
-    if not mobs then stopSword(); return "Waiting for mobs" end
-    if now >= nextPingCheck then
-        nextPingCheck = now + 2
-        local ok, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
-        state.PingMs = ok and type(ping) == "number" and ping or nil
-    end
-    if now < state.LagPauseUntil or (state.PingMs and state.PingMs > 500) then stopSword(); return "Paused · waiting for lag to clear" end
-    if state.Recovering then stopSword(); return "Returning to ground…" end
-    if state.SkillPreparing or state.SkillCastRunning or now<(state.CombatReadyAt or 0) then stopSword(); return "Skill aura · skill hit window" end
-    if character:GetAttribute("Disabled") then stopSword(); return "Paused · character disabled" end
-    stopSword()
-    if swingThread or Actions.IsSwinging() then return "Finishing sword swing" end
-    if now >= nextTargetRefresh then
-        nextTargetRefresh = now + 0.22
-        table.clear(candidates)
-        state.NearestKillExcluded=nil
-        local function consider(mob)
-            if not mob or mob.Parent ~= mobs then return end
-            local data = getMobData(mob)
-            if data and data.Health.Value > 0 and not data.Entity:FindFirstChild("Immortal") then
-                local delta = attackDeltaFor(data,root)
-                local radius = attackRadiusFor(mob)
-                local distance=delta.Magnitude
-                if distance<=radius then candidates[#candidates+1]=mob
-                end
-            end
+        if not sample then
+            local amount,tag=state.ReadOwnDamage(data.Health)
+            sample={Health=data.Health,Before=data.Health.Value,Time=os.clock(),Requests=0,
+                Distance=attackDeltaFor(data,player.Character.HumanoidRootPart).Magnitude,Contribution=amount,Counter=tag,SkillRequests=state.SkillHitRequests}
+            pendingDamage[mob]=sample
         end
-        local primary = state.AutoFarm and state.FollowTarget or nil
-        if primary then consider(primary) end
-        for mob in pairs(trackedMobs) do if mob ~= primary then consider(mob) end end
-        table.sort(candidates,function(a,b)
-            return targetPriority.Less(a,b,root.Position,primary)
-        end)
-        if candidatePrimary ~= primary then candidatePrimary = primary end
-    end
-    state.Nearby = #candidates
-    for mob, sample in pairs(pendingDamage) do
-        if now - sample.Time >= 0.7 then
-            pendingDamage[mob] = nil
+        if state.MultiSpotEncounter and(not state.MultiSpotPriorityActive or state.MultiSpotEncounter[mob])then state.MultiSpotEncounter[mob]=true end
+        if state.CreditController then state.CreditController.Sent(mob,data,"Normal")end
+        Combat.DealDamage(mob,nil);noteAttack(mob,"Normal")
+    end,Visual=playBurstSwing,
+    Sent=function(mob,data,now)
+        local sample=pendingDamage[mob];if sample then sample.Requests+=1 end
+        data.OffsetRequests=(data.OffsetRequests or 0)+1
+        state.LastPulseAt=now;state.HitsSent+=1;state.LastTarget=mob.Name;state.AttackingTarget=mob;lastHit[mob]=now
+        healthHUD.Touch(mob);trackHealth(state.AutoFarm and state.FollowTarget or mob)
+    end})
+local function processNormalObservations(now,mobs,root)
+    for mob,sample in pairs(pendingDamage)do
+        if now>=sample.Time+.7 then
+            pendingDamage[mob]=nil
             local credited=state.ReadOwnDamage(sample.Health,sample.Counter)
-            local damage=credited~=nil and math.max(0,credited-(sample.Contribution or 0)) or math.max(0,sample.Before-sample.Health.Value)
-            local observedData=sample.Health.Parent and mob.Parent==mobs and getMobData(mob)
-            local pureNormal=sample.SkillRequests==state.SkillHitRequests
-            if state.AutoRanges and observedData and pureNormal and credited~=nil
-                and (damage>0 or (sample.Health.Value>0 and math.abs(attackDeltaFor(observedData,root).Magnitude-sample.Distance)<4)) then
-                state.AutoRanges.Record("Kill",sample.Distance,damage,observedData)
-                if damage>0 and sample.Requests>0 then
-                    local perHit=damage/sample.Requests
-                    observedData.NormalDamagePerHit=observedData.NormalDamagePerHit and observedData.NormalDamagePerHit*.5+perHit*.5 or perHit
-                end
-            end
-            if sample.Health.Parent and mob.Parent == mobs then
-                if damage>0 then
-                    local data=getMobData(mob)
-                    if data then data.RegisteredDamage=true; data.AttackMisses=0; data.AttackBackoff=math.max(1,(data.AttackBackoff or 1)/2) end
-                else
-                    local data=getMobData(mob)
-                    if data then
-                        data.AttackMisses=(data.AttackMisses or 0)+1
-                        if data.AttackMisses>=2 then data.AttackBackoff=math.min(4,(data.AttackBackoff or 1)*2); data.AttackMisses=0 end
+            local amount=credited~=nil and math.max(0,credited-(sample.Contribution or 0))or math.max(0,sample.Before-sample.Health.Value)
+            local data=sample.Health.Parent and mob.Parent==mobs and getMobData(mob)
+            if data then
+                local pure=sample.SkillRequests==state.SkillHitRequests
+                local comparable=amount>0 or(sample.Health.Value>0 and math.abs(attackDeltaFor(data,root).Magnitude-sample.Distance)<4)
+                if pure and credited~=nil and comparable and state.AutoRanges then
+                    state.AutoRanges.Record("Kill",sample.Distance,amount,data)
+                    if amount>0 and sample.Requests>0 then
+                        local perHit=amount/sample.Requests;data.NormalDamagePerHit=data.NormalDamagePerHit and(data.NormalDamagePerHit+perHit)*.5 or perHit
                     end
                 end
+                if amount>0 then
+                    data.RegisteredDamage=true;data.AttackMisses=0;data.AttackBackoff=math.max(1,(data.AttackBackoff or 1)*.5)
+                else
+                    data.AttackMisses=(data.AttackMisses or 0)+1
+                    if data.AttackMisses>=2 then data.AttackMisses=0;data.AttackBackoff=math.min(4,(data.AttackBackoff or 1)*2)end
+                end
             end
         end
     end
+end
+
+local function scan()
+    local now=os.clock()
+    if state.Dodging or now<(state.FarmPauseUntil or 0)then finishAttackBurst("Dodging or repositioning");return end
+    local character=player.Character
+    local root=character and character:FindFirstChild("HumanoidRootPart")
+    local entity=character and character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
+    local mobs=refreshMobIndex()
+    if not(root and health and health.Value>0 and mobs)then stopSword();return "Waiting for character"end
+    if not state.Enabled and not state.SkillRegistrationTarget then stopSword();return "Paused"end
+    if now<state.LagPauseUntil or(state.PingMs and state.PingMs>500)then stopSword();return "Paused · waiting for lag to clear"end
+    if state.Recovering then stopSword();return "Returning to ground…"end
+    if state.SkillPreparing or state.SkillCastRunning or now<(state.CombatReadyAt or 0)then stopSword();return "Skill aura · skill hit window"end
+    if character:GetAttribute("Disabled")then stopSword();return "Paused · character disabled"end
+    stopSword()
+    if swingThread or Actions.IsSwinging()then return "Finishing sword swing"end
+    local primary=state.AutoFarm and state.FollowTarget or nil
+    local revision=state.EnemyRegistry and state.EnemyRegistry.Revision
+    if now>=nextTargetRefresh or candidatePrimary~=primary or state.CombatCandidateRevision~=revision then
+        candidatePrimary=primary;state.CombatCandidateRevision=revision;nextTargetRefresh=now+.22
+        table.clear(candidates);state.NearestKillExcluded=nil
+        for mob in pairs(trackedMobs)do
+            local data=mob.Parent==mobs and getMobData(mob)
+            if data and data.Health.Value>0 and not data.Entity:FindFirstChild("Immortal")then
+                local delta=attackDeltaFor(data,root);local radius=attackRadiusFor(mob)
+                if delta:Dot(delta)<=radius*radius then candidates[#candidates+1]=mob end
+            end
+        end
+        table.sort(candidates,function(a,b)return targetPriority.Less(a,b,root.Position,primary)end)
+    end
+    state.Nearby=#candidates
+    processNormalObservations(now,mobs,root)
     return normalScheduler.Update(now,candidates,root,mobs)
 end
+-- Runtime work is declared once; each job owns its pace and failure history.
 local frameTiming=(function()
 -- BEGIN BUNDLED FRAME TIMING
--- All deadlines remain wall-clock based. Steady 10 FPS is not a freeze.
+-- Exponential timing baseline with a separate, bounded hitch hold.
 return function(state)
-    local api={}
-    function api.Sample(delta,now)
-        if type(delta)~="number" or delta~=delta or delta<=0 or delta==math.huge then return end
-        local previous=state.AverageFrameTime or 1/60
-        local stalled=delta>math.max(.35,previous*4)
-        -- Ignore a single long hitch in the baseline so it cannot poison pacing.
-        state.AverageFrameTime=previous+(math.min(delta,.2)-previous)*.08
-        if stalled and (state.Enabled or state.SkillAura) then
-            state.LagPauseUntil=math.max(state.LagPauseUntil or 0,now+.5)
-        end
-        return stalled
+    local smoothing, ceiling = .08, .2
+    local function finitePositive(value)
+        return type(value)=="number" and value>0 and value<math.huge and value==value
     end
-    return api
+    return {Sample=function(elapsed,stamp)
+        if not finitePositive(elapsed)then return nil end
+        local baseline=state.AverageFrameTime or 1/60
+        local hitch=elapsed>math.max(.35,baseline*4)
+        state.AverageFrameTime=baseline*(1-smoothing)+math.min(ceiling,elapsed)*smoothing
+        if hitch and (state.Enabled or state.SkillAura)then
+            local hold=stamp+.5
+            if hold>(state.LagPauseUntil or 0)then state.LagPauseUntil=hold end
+        end
+        return hitch
+    end}
 end
 
 -- END BUNDLED FRAME TIMING
 end)()(state)
-
 state.PerformanceBudget=(function()
 -- BEGIN BUNDLED PERFORMANCE BUDGET
+-- Pressure tiers have independent release times to prevent budget oscillation.
 return function(state)
-    local nextUpdate,pressureUntil,severeUntil=0,0,0
+    local deadline={Poll=0,Limited=0,Severe=0}
+    local budgets={{4,48},{2,24},{1,12}}
     local api={}
-    function api.Update(now)
-        now=now or os.clock()
-        if now<nextUpdate then return end
-        nextUpdate=now+1
-        local pressure=(state.AverageFrameTime or 1/60)>1/45 or (state.PingMs or 0)>300
-            or (state.AverageLoopCost or 0)>.002
-        if pressure then pressureUntil=now+3 end
-        if (state.PingMs or 0)>500 or (state.AverageLoopCost or 0)>.006 then severeUntil=now+3 end
-        local limited=now<pressureUntil
-        local severe=now<severeUntil
-        state.FrameRequestCap=severe and 1 or (limited and 2 or 4)
-        state.MaxRequestsPerSecond=severe and 12 or (limited and 24 or 48)
-        state.NetworkPressureLimited=limited
+    function api.Update(stamp)
+        stamp=stamp or os.clock()
+        if stamp<deadline.Poll then return end
+        deadline.Poll=stamp+1
+        local loop=state.AverageLoopCost or 0
+        local ping=state.PingMs or 0
+        local tier=((state.AverageFrameTime or 1/60)>1/45 or ping>300 or loop>.002)and 2 or 1
+        if ping>500 or loop>.006 then tier=3 end
+        if tier>=2 then deadline.Limited=stamp+3 end
+        if tier==3 then deadline.Severe=stamp+3 end
+        local active=stamp<deadline.Severe and 3 or (stamp<deadline.Limited and 2 or 1)
+        state.FrameRequestCap=budgets[active][1]
+        state.MaxRequestsPerSecond=budgets[active][2]
+        state.NetworkPressureLimited=active>1
     end
     api.Update()
     return api
@@ -6291,276 +5568,275 @@ end
 
 -- END BUNDLED PERFORMANCE BUDGET
 end)()(state)
-
 do
-    local make=(function()
+    local attach=(function()
 -- BEGIN BUNDLED TRADE HOLD
 return function(ctx)
     local api={}
-    local root,anchor,owned
+    local lease
     function api.Update()
-        if ctx.Blocked()then root,anchor,owned=nil,nil,false;return end
-        if not ctx.Active()then
-            if owned then ctx.Release()end
-            root,anchor,owned=nil,nil,false;return
+        if ctx.Blocked() then lease=nil;return end
+        if not ctx.Active() then
+            local release=lease~=nil
+            lease=nil
+            if release then ctx.Release()end
+            return
         end
-        local current=ctx.Root()
-        if current~=root or not owned then
-            root=current;anchor=nil;owned=true
-            if root then anchor=ctx.Anchor(root)end
+        local root=ctx.Root()
+        if not lease or lease.root~=root then
+            lease={root=root,point=root and ctx.Anchor(root)}
             ctx.Pause()
         end
-        if root and anchor then ctx.Hold(anchor)end
+        if lease.root and lease.point then ctx.Hold(lease.point)end
     end
     return api
 end
 
 -- END BUNDLED TRADE HOLD
     end)()
-    state.TradeHold=make({
-        Active=function()return state.AutoTradeBusy==true end,
+    state.TradeHold=attach({Active=function()return state.AutoTradeBusy==true end,
         Blocked=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutoJoinFriendHolding or state.AutomationTeleporting end,
         Root=function()
-            local c=player.Character;local h=c and c:FindFirstChildOfClass("Humanoid")
-            return h and h.Health>0 and c:FindFirstChild("HumanoidRootPart")or nil
+            local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            return humanoid and humanoid.Health>0 and character:FindFirstChild("HumanoidRootPart")or nil
         end,
-        Anchor=function(root)
-            local p=root.Position
-            return Vector3.new(p.X,waveDodge.FloorY(p),p.Z)
-        end,
+        Anchor=function(root)local point=root.Position;return Vector3.new(point.X,waveDodge.FloorY(point),point.Z)end,
+        Hold=function(anchor)waveDodge.Idle(anchor)end,
         Pause=function()
-            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
+            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false;state.FollowTarget=nil
             finishAttackBurst("Trading");stopSword(true)
             if state.CancelSkillAura then state.CancelSkillAura("Trading")end
             if state.CancelMiscSkill then state.CancelMiscSkill()end
             if state.MultiSpotController then state.MultiSpotController.Reset()end
             if state.ProgressionController then state.ProgressionController.Reset()end
-            state.FollowTarget=nil
             stopMovement("Trading · holding 20 studs below ground",true)
         end,
-        Hold=function(anchor)waveDodge.Idle(anchor)end,
-        Release=function()stopMovement("Trade ended · resuming farming",true);nextMovementUpdate=0;nextAcquisition=0 end})
+        Release=function()nextMovementUpdate=0;nextAcquisition=0;stopMovement("Trade ended · resuming farming",true)end})
 end
-
-local workScheduler=(function()
+local scheduleFactory=(function()
 -- BEGIN BUNDLED WORK SCHEDULER
--- Independent wall-clock tasks: no catch-up bursts or shared failure latch.
-return function(ctx)
+-- Jobs own independent deadlines, diagnostics and retry state.
+return function(context)
     local api={Tasks={},Failures=0}
-    local disposed=false
-    function api.Add(name,interval,run,options)
-        assert(not disposed,"Scheduler already closed")
-        assert(not api.Tasks[name],"Duplicate task: "..name)
-        local task={Name=name,Interval=interval,Run=run,Options=options or {},Due=0,Calls=0,Failures=0}
-        api.Tasks[name]=task
-        return task
+    local open=true
+    local function period(job)
+        local value=job.Interval
+        if type(value)=="function"then value=value()end
+        assert(type(value)=="number"and value>=0 and value<math.huge,"Invalid task interval")
+        return value
     end
-    function api.Step(name,now,...)
-        if disposed then return end
-        local task=assert(api.Tasks[name],"Unknown task: "..name)
-        now=now or ctx.Now()
-        if now<task.Due then return end
-        task.Due=now+(type(task.Interval)=="function"and task.Interval()or task.Interval)
-        if task.Options.Enabled and not task.Options.Enabled()then return end
-        task.Calls+=1
-        local started=ctx.Now()
-        local ok,result=pcall(task.Run,now,...)
-        task.Cost=ctx.Now()-started
-        if ok then task.LastError=nil;task.ConsecutiveFailures=0
+    function api.Add(name,interval,callback,options)
+        assert(open,"Scheduler already closed")
+        assert(type(callback)=="function"and not api.Tasks[name],"Invalid or duplicate task")
+        local job={Name=name,Interval=interval,Run=callback,Options=options or {},Due=0,Calls=0,Failures=0,ConsecutiveFailures=0}
+        period(job);api.Tasks[name]=job;return job
+    end
+    function api.Wake(name)
+        local job=open and api.Tasks[name]
+        if job then job.Due=0 end
+    end
+    function api.Step(name,timestamp,...)
+        if not open then return end
+        local job=assert(api.Tasks[name],"Unknown task: "..tostring(name))
+        local at=timestamp or context.Now()
+        if at<job.Due then return end
+        job.Due=at+period(job)
+        if job.Options.Enabled and not job.Options.Enabled()then return end
+        local started=context.Now();job.Calls+=1;job.LastRun=at
+        local ok,result=pcall(job.Run,at,...)
+        job.Cost=math.max(0,context.Now()-started)
+        if ok then job.LastError=nil;job.ConsecutiveFailures=0
         else
-            task.LastError=tostring(result);task.Failures+=1;api.Failures+=1
-            task.ConsecutiveFailures=(task.ConsecutiveFailures or 0)+1
-            task.Due=now+math.min(2,.1*2^math.min(4,task.ConsecutiveFailures-1))
-            if ctx.Error then ctx.Error(name,task.LastError,task)end
+            local attempt=job.ConsecutiveFailures+1
+            job.Failures+=1;job.ConsecutiveFailures=attempt;api.Failures+=1
+            job.LastError=tostring(result);job.Due=at+math.min(2,.1*2^math.min(4,attempt-1))
+            if context.Error then
+                local handled,reason=pcall(context.Error,name,job.LastError,job)
+                if not handled then job.RecoveryError=tostring(reason)end
+            end
         end
         return ok,result
     end
-    function api.Wake(name)
-        local task=api.Tasks[name]
-        if task then task.Due=0 end
-    end
     function api.Destroy()
-        if disposed then return end
-        disposed=true
-        for _,task in pairs(api.Tasks)do task.Run=nil;task.Options={}end
+        if not open then return end
+        open=false
+        for _,job in pairs(api.Tasks)do job.Run=nil;job.Options=nil end
         table.clear(api.Tasks)
     end
     return api
 end
 
 -- END BUNDLED WORK SCHEDULER
-end)()({Now=os.clock,Error=function(name,reason)
+end)()
+local function taskFailure(name,reason)
     state["Last"..name.."Error"]=reason
-    if name=="Movement"then
-        state.FarmPauseUntil=os.clock()+1;state.FollowTarget=nil
-        movementStatus("Recovering movement · retrying")
-    elseif name=="Skill"then
-        state.SkillRetryAt=os.clock()+1.5
-        state.SkillStatus="Skill retry · waiting for game state"
-    elseif name=="MiscSkill"then
-        state.MiscReserveStamina=false
-    end
-end})
-state.WorkScheduler=workScheduler
-local function taskController(name,interval,fn)
-    workScheduler.Add(name,interval,fn)
+    if name=="Movement"then state.FarmPauseUntil=os.clock()+1;state.FollowTarget=nil;movementStatus("Recovering movement · retrying")end
+    if name=="Skill"then state.SkillRetryAt=os.clock()+1.5;state.SkillStatus="Skill retry · waiting for game state"end
+    if name=="MiscSkill"then state.MiscReserveStamina=false end
 end
-taskController("TradeHold",.05,function()if state.TradeHold then state.TradeHold.Update()end end)
-taskController("AuraTouch",.1,function()if state.AuraTouch then state.AuraTouch.Update()end end)
-taskController("Float",.1,function(now)if state.ArenaFloat then state.ArenaFloat.Update(now)end end)
-taskController("Performance",1,function(now)state.PerformanceBudget.Update(now)end)
-taskController("Gear",.5,function(now)if state.UpdateBestSword then state.UpdateBestSword(now)end end)
-taskController("Weapon",.25,function(now)if state.WeaponSkills then state.WeaponSkills.Update(now)end end)
-taskController("Swing",.05,function()updateAutoSwing()end)
-taskController("Dodge",.03,function()waveDodge.Update()end)
-taskController("HealthGuard",.5,function(now)updateHealthGuard(now)end)
-taskController("HealthHUD",.12,function(now)healthHUD.Update(now)end)
-taskController("Ranges",.5,function(now)if state.AutoRanges then state.AutoRanges.Update(now)end end)
-taskController("Visual",.08,function()if state.SkillVisuals then state.SkillVisuals.Update()end end)
-taskController("Discovery",5,function()discoverDestinations(true)end)
-taskController("Movement",.08,function(now)updateMovement(now)end)
-taskController("Upright",.08,function()state.UprightController.Update()end)
-taskController("MiscSkill",.1,function(now)if state.MiscController then state.MiscController.Update(now)end end)
-taskController("Skill",0,function()updateSkillAura()end)
-taskController("Combat",.03,function()return scan()end)
-local frameOrder={"Float","Performance","Gear","Weapon","Swing","Dodge","HealthGuard","HealthHUD",
-    "Ranges","Visual","Discovery","Movement","Upright","MiscSkill","Skill"}
-local function runFrame()
-    local now=os.clock()
-    workScheduler.Step("TradeHold",now)
-    workScheduler.Step("AuraTouch",now)
-    if state.StopEverything then return end
+local workScheduler=scheduleFactory({Now=os.clock,Error=taskFailure})
+state.WorkScheduler=workScheduler
+local function optional(key,method)
+    return function(now)local controller=state[key];if controller then return controller[method](now)end end
+end
+local jobs={
+    {"TradeHold",.05,optional("TradeHold","Update")},
+    {"AuraTouch",.1,optional("AuraTouch","Update")},
+    {"Float",.1,optional("ArenaFloat","Update")},
+    {"Performance",1,optional("PerformanceBudget","Update")},
+    {"Gear",.5,function(now)if state.UpdateBestSword then state.UpdateBestSword(now)end end},
+    {"Weapon",.25,optional("WeaponSkills","Update")},
+    {"Swing",.05,function()updateAutoSwing()end},
+    {"Dodge",.03,function()waveDodge.Update()end},
+    {"HealthGuard",.5,updateHealthGuard},
+    {"HealthHUD",.12,function(now)healthHUD.Update(now)end},
+    {"Ranges",.5,optional("AutoRanges","Update")},
+    {"Visual",.08,optional("SkillVisuals","Update")},
+    {"Discovery",5,function()discoverDestinations(true)end},
+    {"Movement",.08,updateMovement},
+    {"Upright",.08,optional("UprightController","Update")},
+    {"MiscSkill",.1,optional("MiscController","Update")},
+    {"Skill",0,function()updateSkillAura()end},
+    {"Combat",.03,function()return scan()end},
+}
+for _,job in ipairs(jobs)do workScheduler.Add(job[1],job[2],job[3])end
+local function priorityOnly()
     if state.ModeratorBlocking or state.AutoJoinFriendHolding then
         if state.PanicToSpawn then state.PanicToSpawn()end
-        return
+        return true
     end
     if state.SafeModePanic then
         if state.SafePanicHoldHere then state.PanicInPlace()else state.PanicToSpawn()end
-        return
+        return true
     end
-    if state.AutoTradeBusy then return end
-    for _,name in ipairs(frameOrder)do
-        if not state.Running then return end
-        workScheduler.Step(name,now)
-    end
-    local ok,message=workScheduler.Step("Combat",now)
-    if ok==true then
-        consecutiveErrors=0;state.LastError=nil;combatStatus=message
-    elseif ok==false then
-        consecutiveErrors+=1;state.LastError=tostring(message)
-        state.Backoff=math.min(8,state.Backoff*2)
-        if consecutiveErrors>=3 then
-            state.FarmPauseUntil=now+1;consecutiveErrors=0
-            combatStatus="Recovering combat · auto farm stays enabled"
-            stopSword()
-        end
-    end
-    state.AverageLoopCost+=((os.clock()-now)-state.AverageLoopCost)*.08
+    return state.AutoTradeBusy==true
 end
-
-do
-    local makeRecovery=(function()
--- BEGIN BUNDLED RUNTIME RECOVERY
--- A yielded engine call must not hold the single-frame lease forever.
-return function(ctx)
-    local api={}
-    local state=ctx.State
-    local active,disposed=nil,false
-    local function protected()
-        return state.StopEverything or state.SafeModePanic or state.ModeratorBlocking
-            or state.AutomationTeleporting or state.AutoTradeBusy
-    end
-    function api.CheckTravel(now)
-        if disposed or protected()or not state.TravelBusy or not state.TravelStartedAt then return end
-        if now-state.TravelStartedAt<20 then return end
-        local serial=state.TravelSerial
-        ctx.RecoverTravel(serial)
-        state.TravelRecoveries=(state.TravelRecoveries or 0)+1
-        state.LastTravelRecoveryAt=now
-    end
-    function api.CheckPending(now)
-        api.CheckTravel(now)
-        if disposed or protected()then return end
-        local cast=state.ActiveSkillCast
-        if cast and state.SkillCastRunning and cast.RecoveryDeadline and now>=cast.RecoveryDeadline then
-            ctx.RecoverSkill()
-            state.SkillRecoveries=(state.SkillRecoveries or 0)+1
-            state.LastSkillRecoveryAt=now
-        end
-    end
-    function api.Run(fn)
-        if disposed then return end
-        local now=ctx.Now()
-        if active then
-            if protected()or now-active.At<8 or now<(active.RetryAt or 0)then return end
-            active.RetryAt=now+5
-            local ok,cancelled=pcall(ctx.Cancel,active.Thread)
-            if not ok or cancelled==false then
-                state.LastCoordinatorError="Stalled frame cancellation failed; waiting for its engine call"
-                return -- Never overlap a worker whose cancellation was not confirmed.
+local function runFrame()
+    local at=os.clock()
+    workScheduler.Step("TradeHold",at);workScheduler.Step("AuraTouch",at)
+    if state.StopEverything or priorityOnly()then return end
+    for index=3,#jobs do
+        if not state.Running then return end
+        local name=jobs[index][1]
+        local ok,result=workScheduler.Step(name,at)
+        if name=="Combat"and ok~=nil then
+            if ok then consecutiveErrors=0;state.LastError=nil;combatStatus=result
+            else
+                consecutiveErrors+=1;state.LastError=tostring(result);state.Backoff=math.min(8,state.Backoff*2)
+                if consecutiveErrors>=3 then consecutiveErrors=0;state.FarmPauseUntil=at+1;combatStatus="Recovering combat · auto farm stays enabled";stopSword()end
             end
-            active=nil
-            state.CoordinatorRecoveries=(state.CoordinatorRecoveries or 0)+1
-            state.LastCoordinatorRecoveryAt=now
-            local recovered,reason=pcall(ctx.RecoverFrame)
-            if not recovered then state.LastCoordinatorError=tostring(reason)end
         end
-        local lease={Thread=ctx.Thread(),At=now}
-        active=lease;state.FrameStartedAt=now
-        local ok,result=pcall(fn)
-        if active==lease then active=nil;state.FrameCompletedAt=ctx.Now()end
+    end
+    local elapsed=os.clock()-at
+    state.AverageLoopCost=state.AverageLoopCost+(elapsed-state.AverageLoopCost)*.08
+end
+do
+    local attach=(function()
+-- BEGIN BUNDLED RUNTIME RECOVERY
+-- Expired work is cancelled before a replacement is allowed to execute.
+return function(context)
+    local state=context.State
+    local recovery={}
+    local current,closed
+    local function priorityWait()
+        for _,name in ipairs({"StopEverything","SafeModePanic","ModeratorBlocking","AutomationTeleporting","AutoTradeBusy"})do
+            if state[name]then return true end
+        end
+        return false
+    end
+    local function record(kind,now)
+        local count=kind.."Recoveries"
+        state[count]=(state[count]or 0)+1
+        state["Last"..kind.."RecoveryAt"]=now
+    end
+    function recovery.CheckTravel(now)
+        if closed or priorityWait()then return end
+        if state.TravelBusy and state.TravelStartedAt and now>=state.TravelStartedAt+20 then
+            context.RecoverTravel(state.TravelSerial);record("Travel",now)
+        end
+    end
+    function recovery.CheckPending(now)
+        recovery.CheckTravel(now)
+        if closed or priorityWait()then return end
+        local cast=state.ActiveSkillCast
+        if not(state.SkillCastRunning and cast and cast.RecoveryDeadline)then return end
+        if now>=cast.RecoveryDeadline then context.RecoverSkill();record("Skill",now)end
+    end
+    local function expire(now)
+        if current==nil then return true end
+        if priorityWait()or now<current.Expires or now<current.Retry then return false end
+        current.Retry=now+5
+        local ok,answer=pcall(context.Cancel,current.Thread)
+        if not ok or answer==false then
+            state.LastCoordinatorError="Stalled frame cancellation failed; waiting for its engine call"
+            return false
+        end
+        current=nil;record("Coordinator",now)
+        local restored,reason=pcall(context.RecoverFrame)
+        if not restored then state.LastCoordinatorError=tostring(reason)end
+        return true
+    end
+    function recovery.Run(callback)
+        if closed then return end
+        local at=context.Now()
+        if not expire(at)then return end
+        local token={Thread=context.Thread(),Expires=at+8,Retry=0}
+        current=token;state.FrameStartedAt=at
+        local ok,result=pcall(callback)
+        if current==token then current=nil;state.FrameCompletedAt=context.Now()end
         return ok,result
     end
-    function api.Destroy()
-        if disposed then return end
-        disposed=true
-        if active and active.Thread~=ctx.Thread()then pcall(ctx.Cancel,active.Thread)end
-        if state.TravelWorker and state.TravelWorker~=ctx.Thread()then pcall(ctx.Cancel,state.TravelWorker)end
-        state.TravelWorker=nil;state.TravelStartedAt=nil
-        active=nil
+    function recovery.Destroy()
+        if closed then return end
+        closed=true
+        local caller=context.Thread()
+        local workers={current and current.Thread,state.TravelWorker}
+        current=nil;state.TravelWorker=nil;state.TravelStartedAt=nil
+        for _,worker in pairs(workers)do if worker~=caller then pcall(context.Cancel,worker)end end
     end
-    return api
+    return recovery
 end
 
 -- END BUNDLED RUNTIME RECOVERY
     end)()
-    state.RuntimeRecovery=makeRecovery({State=state,Now=os.clock,Thread=coroutine.running,
-        Cancel=function(thread)task.cancel(thread);return true end,
+    local function recoverFrame()
+        state.CancelSkillAura("Recovering stalled update");stopMovement("Recovering stalled update",true)
+        state.FollowTarget=nil;state.FarmTargetLock=nil
+        nextTargetRefresh=0;nextMovementUpdate=0;nextAcquisition=0;state.FarmPauseUntil=os.clock()+.5
+    end
+    local function recoverTravel(serial)
+        if serial~=state.TravelSerial then return end
+        state.TravelSerial=serial+1
+        local worker=state.TravelWorker
+        state.TravelWorker=nil;state.TravelStartedAt=nil;state.TravelBusy=false;state.MultiSpotTravelPending=false
+        state.LastTravelDestination=nil;state.LastTravelPosition=nil
+        if worker then pcall(task.cancel,worker)end
+        state.TravelError="Arena travel timed out · retrying without restarting"
+        stopMovement(state.TravelError,true);setTravelStatus(state.TravelError)
+    end
+    state.RuntimeRecovery=attach({State=state,Now=os.clock,Thread=coroutine.running,
+        Cancel=function(worker)task.cancel(worker);return true end,RecoverFrame=recoverFrame,RecoverTravel=recoverTravel,
         RecoverSkill=function()
             state.CancelSkillAura("Recovering stalled skill activation")
-            state.SkillRetryAt=os.clock()+1
-            state.SkillStatus="Skill timed out · retrying automatically"
-        end,
-        RecoverFrame=function()
-            state.CancelSkillAura("Recovering stalled update")
-            stopMovement("Recovering stalled update",true)
-            state.FollowTarget=nil;state.FarmTargetLock=nil
-            nextTargetRefresh,nextMovementUpdate,nextAcquisition=0,0,0
-            state.FarmPauseUntil=os.clock()+.5
-        end,
-        RecoverTravel=function(serial)
-            if state.TravelSerial~=serial then return end
-            state.TravelSerial=serial+1
-            if state.TravelWorker then pcall(task.cancel,state.TravelWorker)end
-            state.TravelWorker=nil;state.TravelStartedAt=nil;state.TravelBusy=false
-            state.MultiSpotTravelPending=false;state.LastTravelDestination=nil;state.LastTravelPosition=nil
-            state.TravelError="Arena travel timed out · retrying without restarting"
-            stopMovement(state.TravelError,true);setTravelStatus(state.TravelError)
+            state.SkillRetryAt=os.clock()+1;state.SkillStatus="Skill timed out · retrying automatically"
         end})
-    local accumulator,lastErrorAt=0,0
+    local credit,lastWarning=0,0
     bind(RunService.Heartbeat,function(delta)
-        frameTiming.Sample(delta,os.clock())
+        local now=os.clock();frameTiming.Sample(delta,now)
         if not state.Running or state.StopEverything or not gui.Parent then return end
-        state.RuntimeRecovery.CheckPending(os.clock())
-        accumulator+=delta
-        local period=state.SafeModePanic and .1 or (state.Enabled or state.SkillAura) and 1/60 or (state.AutoDodge and workspace:FindFirstChild("WaveDefenseStuff") and .04 or .1)
-        if accumulator+.0005<period then return end
-        accumulator=math.min(period,math.max(0,accumulator-period))
-        local ok,message=state.RuntimeRecovery.Run(runFrame)
+        state.RuntimeRecovery.CheckPending(now)
+        credit+=delta
+        local period
+        if state.SafeModePanic then period=.1
+        elseif state.Enabled or state.SkillAura then period=1/60
+        elseif state.AutoDodge and workspace:FindFirstChild("WaveDefenseStuff")then period=.04
+        else period=.1 end
+        if credit+.0005<period then return end
+        credit=math.min(period,math.max(0,credit-period))
+        local ok,reason=state.RuntimeRecovery.Run(runFrame)
         if ok==false then
-            state.LastCoordinatorError=tostring(message)
-            state.FarmPauseUntil=os.clock()+.5
-            if os.clock()-lastErrorAt>5 then lastErrorAt=os.clock();warn("[SB2 Coordinator] "..tostring(message)) end
+            state.LastCoordinatorError=tostring(reason);state.FarmPauseUntil=now+.5
+            if now-lastWarning>5 then lastWarning=now;warn("[SB2 Coordinator] "..tostring(reason))end
         end
     end)
 end
@@ -6691,46 +5967,51 @@ return function(ctx)
         [1560324163]=true,
     }
     local api={Enabled=true,Count=113}
-    local stopped,fired=false,false
-    local function status(message)
-        api.Status=message;ctx.State.ModeratorStatus=message
+    local lifecycle={closed=false,claimed=false}
+    local function publish(message)
+        api.Status=message
+        ctx.State.ModeratorStatus=message
         if ctx.Notify then pcall(ctx.Notify,message)end
     end
-    local function active()
-        return not stopped and ctx.State.Running~=false and not ctx.State.StopEverything
+    local function current()
+        return not lifecycle.closed and ctx.State.Running~=false and not ctx.State.StopEverything
     end
-    local function check(player)
-        if ctx.State.StopEverything or stopped or fired or player.UserId==ctx.Players.LocalPlayer.UserId or not ids[player.UserId] then return end
-        fired=true
-        ctx.State.ModeratorDetected={Name=player.Name,UserId=player.UserId,At=os.time()}
-        ctx.State.ModeratorBlocking=true
-        status("Moderator detected · blocking @"..player.Name.." before disconnect")
-        if ctx.Pause then pcall(ctx.Pause,player)end
-        if ctx.Save then pcall(ctx.Save) end
-        task.defer(function()
-            if not active()then return end
-            local ok,confirmed=pcall(function()
-                assert(type(ctx.Block)=="function","Native block handler is unavailable")
-                return ctx.Block(player,active)
-            end)
-            if not active()then return end
-            if not ok or confirmed~=true then
-                api.Failed=true
-                ctx.State.ModeratorBlockError=not ok and tostring(confirmed)or"Roblox did not confirm the moderator block"
-                status("Moderator block failed · automation paused · "..ctx.State.ModeratorBlockError)
-                return
-            end
-            ctx.State.ModeratorBlockConfirmed=true;ctx.State.ModeratorBlockError=nil
-            status("Moderator blocked · disconnecting")
-            if ctx.Save then pcall(ctx.Save)end
-            if active()then
-                ctx.Kick("Blocked moderator "..player.Name.." ("..player.UserId.."). Disconnected automatically.")
-            end
+    local function confirmedExit(person)
+        if not current()then return end
+        local ok,receipt=pcall(function()
+            assert(type(ctx.Block)=="function","Native block handler is unavailable")
+            return ctx.Block(person,current)
         end)
+        if not current()then return end
+        if not ok or receipt~=true then
+            api.Failed=true
+            ctx.State.ModeratorBlockError=ok and "Roblox did not confirm the moderator block"or tostring(receipt)
+            publish("Moderator block failed · automation paused · "..ctx.State.ModeratorBlockError)
+            return
+        end
+        ctx.State.ModeratorBlockConfirmed=true
+        ctx.State.ModeratorBlockError=nil
+        publish("Moderator blocked · disconnecting")
+        if ctx.Save then pcall(ctx.Save)end
+        if current()then ctx.Kick("Blocked moderator "..person.Name.." ("..person.UserId.."). Disconnected automatically.")end
     end
-    local connection=ctx.Players.PlayerAdded:Connect(check)
-    for _,player in ipairs(ctx.Players:GetPlayers()) do task.defer(check,player) end
-    function api.Destroy() stopped=true; api.Enabled=false; connection:Disconnect() end
+    local function observe(person)
+        if not current()or lifecycle.claimed or person.UserId==ctx.Players.LocalPlayer.UserId or not ids[person.UserId]then return end
+        lifecycle.claimed=true
+        ctx.State.ModeratorDetected={Name=person.Name,UserId=person.UserId,At=os.time()}
+        ctx.State.ModeratorBlocking=true
+        publish("Moderator detected · blocking @"..person.Name.." before disconnect")
+        if ctx.Pause then pcall(ctx.Pause,person)end
+        if ctx.Save then pcall(ctx.Save)end
+        task.defer(confirmedExit,person)
+    end
+    local subscription=ctx.Players.PlayerAdded:Connect(observe)
+    local population=ctx.Players:GetPlayers()
+    for index=1,#population do task.defer(observe,population[index])end
+    function api.Destroy()
+        if lifecycle.closed then return end
+        lifecycle.closed=true;api.Enabled=false;subscription:Disconnect()
+    end
     return api
 end
 
@@ -6738,33 +6019,34 @@ end
     end)()
     local makeRejoin=(function()
 -- BEGIN BUNDLED MODERATOR REJOIN
--- Armed only by the confirmed moderator-block path, never by arbitrary kicks.
+-- Rejoin scheduling is armed before the confirmed-block kick can disconnect Lua.
 return function(ctx)
-    local api={Armed=false,Attempts=0}
+    local api={Armed=false,Attempts=0,Started=false}
+    local function available()
+        return ctx.State.Running~=false and not ctx.State.StopEverything and not api.Started
+    end
+    local function worker()
+        ctx.Sleep(1)
+        local attempt=1
+        while attempt<=3 and available()do
+            api.Attempts=attempt
+            ctx.State.ModeratorRejoinStatus="Rejoining current floor · attempt "..attempt
+            local ok,reason=pcall(ctx.Teleport)
+            if not ok then ctx.State.ModeratorRejoinError=tostring(reason)end
+            ctx.Sleep(8)
+            attempt=attempt+1
+        end
+        if available()then ctx.State.ModeratorRejoinStatus="Automatic rejoin did not start · rejoin manually"end
+    end
+    function api.MarkStarted()api.Started=true end
     function api.Kick(message)
         if api.Armed then return end
         api.Armed=true
-        local active=function()return ctx.State.Running~=false and not ctx.State.StopEverything end
-        local ok,err=pcall(ctx.Queue)
-        if not ok then ctx.State.ModeratorRejoinError="Resume queue: "..tostring(err)end
-        -- Start the worker before Kick: some executors throw when Kick returns.
-        ctx.Spawn(function()
-            ctx.Sleep(1)
-            for attempt=1,3 do
-                if not active()or api.Started then return end
-                api.Attempts=attempt
-                ctx.State.ModeratorRejoinStatus="Rejoining current floor · attempt "..attempt
-                local sent,reason=pcall(ctx.Teleport)
-                if not sent then ctx.State.ModeratorRejoinError=tostring(reason)end
-                ctx.Sleep(8)
-            end
-            if active()and not api.Started then
-                ctx.State.ModeratorRejoinStatus="Automatic rejoin did not start · rejoin manually"
-            end
-        end)
+        local queued,reason=pcall(ctx.Queue)
+        if not queued then ctx.State.ModeratorRejoinError="Resume queue: "..tostring(reason)end
+        ctx.Spawn(worker)
         ctx.Kick(message)
     end
-    function api.MarkStarted()api.Started=true end
     return api
 end
 
@@ -6860,170 +6142,140 @@ do
     end
     local makePlayerTools=(function()
 -- BEGIN BUNDLED PLAYER TOOLS
--- Player/character/profile data paths adapted from the supplied source.
+-- Selection owns camera and inventory subscriptions as separate replaceable scopes.
 return function(ctx)
-    local state,players,localPlayer=ctx.State,ctx.Players,ctx.LocalPlayer
+    local state,players=ctx.State,ctx.Players
     local api={Viewing=false,InventoryVisible=false}
-    local connections,inventoryConnections,targetConnection={},{},nil
-    local selected,priorSubject,priorType
-    local disposed,inventoryQueued=false,false
-    local function connect(signal,callback,list)
-        local value=signal:Connect(callback)
-        table.insert(list or connections,value)
-        return value
+    local selected,selectedConnection=nil,nil
+    local closed,inventoryQueued=false,false
+    local inventoryConnections,subscriptions={},{}
+    local cameraLease
+    local function unsubscribe(list)
+        for _,connection in ipairs(list)do connection:Disconnect()end
+        table.clear(list)
     end
-    local function clearInventoryConnections()
-        for _,connection in ipairs(inventoryConnections) do connection:Disconnect() end
-        table.clear(inventoryConnections)
-    end
-    function api.GetSelected() return selected and selected.Parent==players and selected or nil end
+    local function listen(list,event,fn)list[#list+1]=event:Connect(fn)end
+    local function notify()if ctx.Changed then ctx.Changed()end end
+    function api.GetSelected()if selected and selected.Parent==players then return selected end end
     function api.Choices()
-        local result={}
-        for _,p in ipairs(players:GetPlayers()) do
-            if p~=localPlayer then result[#result+1]={UserId=p.UserId,Name=p.Name,DisplayName=p.DisplayName} end
-        end
-        table.sort(result,function(a,b) return string.lower(a.Name)<string.lower(b.Name) end)
-        return result
+        local rows={}
+        for _,person in ipairs(players:GetPlayers())do if person~=ctx.LocalPlayer then
+            rows[#rows+1]={UserId=person.UserId,Name=person.Name,DisplayName=person.DisplayName}
+        end end
+        table.sort(rows,function(a,b)return a.Name:lower()<b.Name:lower()end)
+        return rows
     end
-    local function attachCamera()
-        local target=api.GetSelected()
-        local character=target and target.Character
+    local function follow()
+        local person=api.GetSelected()
+        local character=person and person.Character
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
         local camera=ctx.Workspace.CurrentCamera
-        if api.Viewing and not disposed and not state.StopEverything and humanoid and humanoid.Health>0 and camera then
-            camera.CameraType=Enum.CameraType.Custom
-            camera.CameraSubject=humanoid
+        if not closed and api.Viewing and not state.StopEverything and humanoid and humanoid.Health>0 and camera then
+            camera.CameraSubject=humanoid;camera.CameraType=Enum.CameraType.Custom
         end
     end
-    function api.SetViewing(enabled)
-        if enabled and state.StopEverything then return false,"Stop Everything is on" end
-        if enabled and not api.GetSelected() then return false,"Select a player first" end
+    function api.SetViewing(value)
+        value=value==true
+        if value and state.StopEverything then return false,"Stop Everything is on"end
+        if value and not api.GetSelected()then return false,"Select a player first"end
         local camera=ctx.Workspace.CurrentCamera
-        local wasViewing=api.Viewing
-        if enabled and not api.Viewing and camera then priorSubject,priorType=camera.CameraSubject,camera.CameraType end
-        api.Viewing=enabled==true
-        state.ViewingPlayer=api.Viewing
-        if api.Viewing then attachCamera()
-        elseif camera and wasViewing then
-            local character=localPlayer.Character
-            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            local subject=humanoid or (priorSubject and priorSubject.Parent and priorSubject)
+        if value and not api.Viewing and camera then cameraLease={Subject=camera.CameraSubject,Type=camera.CameraType}end
+        local was=api.Viewing;api.Viewing=value;state.ViewingPlayer=value
+        if value then follow()
+        elseif was and camera then
+            local own=ctx.LocalPlayer.Character
+            local humanoid=own and own:FindFirstChildOfClass("Humanoid")
+            local subject=humanoid or (cameraLease and cameraLease.Subject and cameraLease.Subject.Parent and cameraLease.Subject)
             if subject then camera.CameraSubject=subject end
-            camera.CameraType=priorType or Enum.CameraType.Custom
-            priorSubject,priorType=nil,nil
+            camera.CameraType=cameraLease and cameraLease.Type or Enum.CameraType.Custom
+            cameraLease=nil
         end
-        if ctx.Changed then ctx.Changed() end
-        return true
+        notify();return true
     end
     function api.InventoryRows()
-        local target=api.GetSelected()
-        local profile=target and ctx.Profiles and ctx.Profiles:FindFirstChild(target.Name)
+        local person=api.GetSelected()
+        local profile=person and ctx.Profiles and ctx.Profiles:FindFirstChild(person.Name)
         local inventory=profile and profile:FindFirstChild("Inventory")
-        if not inventory then return {},"Inventory is not loaded for this player" end
-        local grouped={}
-        for _,item in ipairs(inventory:GetChildren()) do
-            local upgrade=item:FindFirstChild("Upgrade")
-            local level=upgrade and upgrade:IsA("ValueBase") and tonumber(upgrade.Value) or 0
-            local key=item.Name..":"..tostring(level)
-            local row=grouped[key]
-            if not row then row={Name=item.Name,Upgrade=level,Count=0}; grouped[key]=row end
-            row.Count+=1
+        if not inventory then return {},"Inventory is not loaded for this player"end
+        local groups={}
+        for _,item in ipairs(inventory:GetChildren())do
+            local value=item:FindFirstChild("Upgrade")
+            local upgrade=value and value:IsA("ValueBase")and tonumber(value.Value)or 0
+            local key=item.Name..":"..upgrade
+            if not groups[key]then groups[key]={Name=item.Name,Upgrade=upgrade,Count=0}end
+            groups[key].Count+=1
         end
-        local rows={}
-        for _,row in pairs(grouped) do rows[#rows+1]=row end
-        table.sort(rows,function(a,b) if a.Name~=b.Name then return a.Name<b.Name end; return a.Upgrade<b.Upgrade end)
+        local rows={};for _,row in pairs(groups)do rows[#rows+1]=row end
+        table.sort(rows,function(a,b)return a.Name==b.Name and a.Upgrade<b.Upgrade or a.Name<b.Name end)
         return rows,nil,inventory
     end
     function api.RefreshInventory()
-        if not api.InventoryVisible or disposed or state.StopEverything then return end
-        local rows,message=api.InventoryRows()
-        ctx.Inventory(rows,message,api.GetSelected())
+        if closed or not api.InventoryVisible or state.StopEverything then return end
+        local rows,message=api.InventoryRows();ctx.Inventory(rows,message,api.GetSelected())
     end
-    local function queueInventory()
-        if inventoryQueued or not api.InventoryVisible or disposed then return end
+    local function invalidateInventory()
+        if closed or not api.InventoryVisible or inventoryQueued then return end
         inventoryQueued=true
-        task.defer(function()
-            inventoryQueued=false
-            if not disposed then api.RefreshInventory() end
-        end)
+        task.defer(function()inventoryQueued=false;if not closed then api.RefreshInventory()end end)
     end
-    local function watchInventory()
-        clearInventoryConnections()
+    local function observeInventory()
+        unsubscribe(inventoryConnections)
         if not api.InventoryVisible then return end
         local _,_,inventory=api.InventoryRows()
         if inventory then
-            connect(inventory.ChildAdded,queueInventory,inventoryConnections)
-            connect(inventory.ChildRemoved,queueInventory,inventoryConnections)
-            connect(inventory.DescendantAdded,queueInventory,inventoryConnections)
-            connect(inventory.DescendantRemoving,queueInventory,inventoryConnections)
-            for _,item in ipairs(inventory:GetChildren()) do
-                connect(item:GetPropertyChangedSignal("Name"),queueInventory,inventoryConnections)
+            for _,event in ipairs({inventory.ChildAdded,inventory.ChildRemoved,inventory.DescendantAdded,inventory.DescendantRemoving})do listen(inventoryConnections,event,invalidateInventory)end
+            for _,item in ipairs(inventory:GetChildren())do
+                listen(inventoryConnections,item:GetPropertyChangedSignal("Name"),invalidateInventory)
                 local upgrade=item:FindFirstChild("Upgrade")
-                if upgrade and upgrade:IsA("ValueBase") then connect(upgrade.Changed,queueInventory,inventoryConnections) end
+                if upgrade and upgrade:IsA("ValueBase")then listen(inventoryConnections,upgrade.Changed,invalidateInventory)end
             end
         end
         api.RefreshInventory()
     end
-    function api.SetInventoryVisible(enabled)
-        if enabled and state.StopEverything then return false,"Stop Everything is on" end
-        if enabled and not api.GetSelected() then return false,"Select a player first" end
-        if ctx.NativeInventory then
-            local ok,reason=ctx.NativeInventory(enabled and api.GetSelected()or nil)
-            if not ok then return false,reason end
-        end
-        api.InventoryVisible=enabled==true
-        state.ViewingPlayerInventory=api.InventoryVisible
-        watchInventory()
-        if ctx.Changed then ctx.Changed() end
-        return true
+    function api.SetInventoryVisible(value)
+        value=value==true
+        if value and state.StopEverything then return false,"Stop Everything is on"end
+        if value and not api.GetSelected()then return false,"Select a player first"end
+        if ctx.NativeInventory then local ok,reason=ctx.NativeInventory(value and api.GetSelected()or nil);if not ok then return false,reason end end
+        api.InventoryVisible=value;state.ViewingPlayerInventory=value
+        observeInventory();notify();return true
     end
-    function api.Select(userId)
-        local target=players:GetPlayerByUserId(tonumber(userId) or 0)
-        if not target or target==localPlayer then return false,"Player is no longer in this server" end
-        if api.InventoryVisible and ctx.NativeInventory then
-            local ok,reason=ctx.NativeInventory(target)
-            if not ok then return false,reason end
-        end
-        if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
-        selected=target
-        state.SelectedPlayerId=target.UserId
-        targetConnection=target.CharacterAdded:Connect(function(character)
+    function api.Select(id)
+        local person=players:GetPlayerByUserId(tonumber(id)or 0)
+        if not person or person==ctx.LocalPlayer then return false,"Player is no longer in this server"end
+        if api.InventoryVisible and ctx.NativeInventory then local ok,reason=ctx.NativeInventory(person);if not ok then return false,reason end end
+        if selectedConnection then selectedConnection:Disconnect()end
+        selected=person;state.SelectedPlayerId=person.UserId
+        selectedConnection=person.CharacterAdded:Connect(function(character)
             task.defer(function()
-                local humanoid=character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid",3)
-                if humanoid and selected==target and not disposed then attachCamera() end
+                local humanoid=character:FindFirstChildOfClass("Humanoid")or character:WaitForChild("Humanoid",3)
+                if humanoid and selected==person and not closed then follow()end
             end)
         end)
-        attachCamera(); watchInventory()
-        if ctx.Changed then ctx.Changed() end
-        return true
+        follow();observeInventory();notify();return true
     end
     function api.Teleport()
-        if state.StopEverything then return false,"Stop Everything is on" end
-        local target=api.GetSelected()
-        if not target then return false,"Select a player first" end
-        return ctx.Teleport(target)
+        if state.StopEverything then return false,"Stop Everything is on"end
+        local person=api.GetSelected()
+        if not person then return false,"Select a player first"end
+        return ctx.Teleport(person)
     end
-    connect(players.PlayerAdded,function() if ctx.RosterChanged then ctx.RosterChanged() end end)
-    connect(players.PlayerRemoving,function(target)
-        if selected and target.UserId==selected.UserId then
-            api.SetViewing(false); api.SetInventoryVisible(false)
-            if targetConnection then targetConnection:Disconnect(); targetConnection=nil end
-            selected=nil; state.SelectedPlayerId=nil
-            if ctx.Changed then ctx.Changed() end
+    listen(subscriptions,players.PlayerAdded,function()if ctx.RosterChanged then ctx.RosterChanged()end end)
+    listen(subscriptions,players.PlayerRemoving,function(person)
+        if selected==person then
+            api.SetViewing(false);api.SetInventoryVisible(false)
+            if selectedConnection then selectedConnection:Disconnect();selectedConnection=nil end
+            selected=nil;state.SelectedPlayerId=nil;notify()
         end
-        if ctx.RosterChanged then task.defer(function() if not disposed then ctx.RosterChanged() end end) end
+        if ctx.RosterChanged then task.defer(function()if not closed then ctx.RosterChanged()end end)end
     end)
-    connect(ctx.Workspace:GetPropertyChangedSignal("CurrentCamera"),attachCamera)
-    connect(localPlayer.CharacterAdded,function()
-        if api.Viewing then task.defer(attachCamera) end
-    end)
+    listen(subscriptions,ctx.Workspace:GetPropertyChangedSignal("CurrentCamera"),follow)
+    listen(subscriptions,ctx.LocalPlayer.CharacterAdded,function()if api.Viewing then task.defer(follow)end end)
     function api.Destroy()
-        if disposed then return end
-        api.SetViewing(false); api.SetInventoryVisible(false)
-        disposed=true
-        if targetConnection then targetConnection:Disconnect() end
-        clearInventoryConnections()
-        for _,connection in ipairs(connections) do connection:Disconnect() end
+        if closed then return end
+        api.SetViewing(false);api.SetInventoryVisible(false);closed=true
+        if selectedConnection then selectedConnection:Disconnect();selectedConnection=nil end
+        unsubscribe(inventoryConnections);unsubscribe(subscriptions);selected=nil;cameraLease=nil
     end
     return api
 end
@@ -7032,34 +6284,37 @@ end
     end)()
     local makeInventoryView=(function()
 -- BEGIN BUNDLED INVENTORY VIEW
--- Supplied source uses profile upvalue #2 of Inventory.GetInventoryData.
--- Verify its identity first; never change replicated inventory instances.
+-- Borrow the native inventory profile slot only while its identity is ours.
 return function(ctx)
-    local fn,original,owned
+    local slot=nil
+    local function resolve()
+        if slot then return slot end
+        local renderer=ctx.Function()
+        assert(type(renderer)=="function","Native inventory renderer unavailable")
+        local original=ctx.Read(renderer,2)
+        assert(original==ctx.OwnProfile,"Inventory renderer profile layout differs from the supplied source")
+        slot={Renderer=renderer,Original=original}
+        return slot
+    end
     local api={}
     function api.Set(profile)
-        local ok,reason=pcall(function()
-            if not profile then
-                if owned then
-                    if ctx.Read(fn,2)==owned then ctx.Write(fn,2,original)end
-                    owned=nil
+        local success,reason=pcall(function()
+            if profile==nil then
+                if slot and slot.Borrowed then
+                    if ctx.Read(slot.Renderer,2)==slot.Borrowed then ctx.Write(slot.Renderer,2,slot.Original)end
+                    slot.Borrowed=nil
                 end
                 return
             end
-            if not fn then
-                local candidate=ctx.Function()
-                assert(type(candidate)=="function","Native inventory renderer unavailable")
-                local profile=ctx.Read(candidate,2)
-                assert(profile==ctx.OwnProfile,"Inventory renderer profile layout differs from the supplied source")
-                fn,original=candidate,profile
-            end
-            local current=ctx.Read(fn,2)
-            assert(current==original or current==owned,"Inventory renderer is controlled by another script")
-            ctx.Write(fn,2,profile)
-            assert(ctx.Read(fn,2)==profile,"Executor did not switch inventory profile")
-            owned=profile
+            local current=resolve()
+            local actual=ctx.Read(current.Renderer,2)
+            assert(actual==current.Original or actual==current.Borrowed,"Inventory renderer is controlled by another script")
+            ctx.Write(current.Renderer,2,profile)
+            assert(ctx.Read(current.Renderer,2)==profile,"Executor did not switch inventory profile")
+            current.Borrowed=profile
         end)
-        return ok,not ok and tostring(reason)or nil
+        if success then return true,nil end
+        return false,tostring(reason)
     end
     return api
 end
@@ -7211,31 +6466,34 @@ do
     end
     local makeMisc=(function()
 -- BEGIN BUNDLED MISC SKILL
-return function(ctx)
-    local state=ctx.State
+-- Support intent is separate from casting: only requested effects reserve stamina.
+return function(context)
+    local state=context.State
     local api={Names={"Cursed Enhancement","Heal","Mending Spirit","Summon Tree"}}
-    local nextCheck,nextAttempt=0,0
+    local sampledAt,castAfter=0,0
+    local predicates={
+        ["Cursed Enhancement"]=function(s)return s.Attacking==true and not s.BuffActive end,
+        Heal=function(s)return s.MaxHealth>0 and s.Health<=s.MaxHealth*.66 end,
+        ["Mending Spirit"]=function(s)return s.MaxHealth>0 and s.Health<=s.MaxHealth*.66 end,
+        ["Summon Tree"]=function(s)return s.Stamina<=66 end,
+    }
     function api.Needed(name,snapshot)
-        if name=="Heal" or name=="Mending Spirit" then return snapshot.Health/snapshot.MaxHealth<=.66 end
-        if name=="Summon Tree" then return snapshot.Stamina<=66 end
-        if name=="Cursed Enhancement" then return snapshot.Attacking==true and not snapshot.BuffActive end
-        return false
+        local predicate=predicates[name]
+        return predicate~=nil and predicate(snapshot)or false
     end
     function api.Update(now)
         now=now or os.clock()
-        if not state.MiscSkillEnabled or state.StopEverything then state.MiscReserveStamina=false; return end
-        if state.MiscCastRunning then state.MiscReserveStamina=true; return end
-        if now<nextCheck then return end
-        nextCheck=now+.2
-        local snapshot=ctx.Read(state.SelectedMiscSkill)
-        if not snapshot or not snapshot.Usable or snapshot.Health<=0 or snapshot.MaxHealth<=0
-            or snapshot.Cooldown<0 or not api.Needed(state.SelectedMiscSkill,snapshot) then
-            state.MiscReserveStamina=false; return
-        end
-        state.MiscReserveStamina=true
-        if snapshot.Blocked or snapshot.Busy or snapshot.Stamina<snapshot.Cost or now<nextAttempt then return end
-        nextAttempt=now+1
-        ctx.Cast(state.SelectedMiscSkill,snapshot)
+        if not state.MiscSkillEnabled or state.StopEverything then state.MiscReserveStamina=false;return end
+        if state.MiscCastRunning then state.MiscReserveStamina=true;return end
+        if now<sampledAt then return end
+        sampledAt=now+.2
+        local snapshot=context.Read(state.SelectedMiscSkill)
+        local wanted=snapshot and snapshot.Usable and snapshot.Health>0 and snapshot.MaxHealth>0
+            and snapshot.Cooldown>=0 and api.Needed(state.SelectedMiscSkill,snapshot)
+        state.MiscReserveStamina=wanted==true
+        if not wanted or snapshot.Blocked or snapshot.Busy or snapshot.Stamina<snapshot.Cost or now<castAfter then return end
+        castAfter=now+1
+        context.Cast(state.SelectedMiscSkill,snapshot)
     end
     return api
 end
@@ -7384,252 +6642,227 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED SERVER ISOLATION
--- Best-effort public matchmaking. Being alone does not prove a server is new/private.
--- All yielding/account/teleport operations are injected so cancellation can be tested.
+-- Confirmed native blocks plus bounded public matchmaking; no private-server claim.
 return function(ctx)
-    local api = {Active=false, Phase="Idle", Status="Ready", JobId=ctx.JobId}
-    local generation, soloSince, settleUntil, hopDeadline = 0, nil, 0, nil
-    local ticket, blocked, pendingPlayer, busy, retryBlockId
-    local sameServerReturn=false
-    local function announce(message)
-        api.Status = message
-        if ctx.Notify then ctx.Notify(api) end
+    local api={Active=false,Phase="Idle",Status="Ready",JobId=ctx.JobId}
+    local run={epoch=0,solo=nil,settle=0,deadline=nil,busy=false,sameReturn=false}
+    local ticket
+    local retriedUser
+    local pending
+    local function publish(message)
+        api.Status=message
+        if ctx.Notify then ctx.Notify(api)end
     end
-    local function live(token) return api.Active and generation == token end
-    local function readable(message)
-        local value = tostring(message)
-        return string.match(value, ":%d+: (.*)") or value
+    local function current(epoch)return api.Active and run.epoch==epoch end
+    local function message(reason)
+        local text=tostring(reason)
+        return text:match(":%d+: (.*)")or text
     end
-    local function persist()
-        local ok, result = pcall(ctx.Save, ticket)
-        if not ok or result ~= true then error("Could not save the search; stopped before rejoining") end
+    local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
+        "getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
+    local function retryable(reason)
+        local text=tostring(reason or ""):lower()
+        for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end
+        return false
     end
-    local function recoverable(message)
-        local text=tostring(message or ""):lower()
-        return text:find("block dialog did not open",1,true)~=nil
-            or text:find("did not confirm the block",1,true)~=nil
-            or text:find("block was not confirmed",1,true)~=nil
-            or text:find("getblockeduserids",1,true)~=nil
-            or text:find("blocked-user list",1,true)~=nil
-            or text:find("another native block confirmation",1,true)~=nil
-            or text:find("has not been registered",1,true)~=nil
+    local function save()
+        local ok,saved=pcall(ctx.Save,ticket)
+        assert(ok and saved==true,"Could not save the search; stopped before rejoining")
     end
-    function api.Stop(message,outcome)
-        api.RetryWasTeleporting=api.Phase=="Teleporting"
-        api.Retryable=outcome~="Safe"and (api.RetryWasTeleporting or recoverable(message))
-        generation = generation + 1
-        api.Active, api.Phase = false, "Idle"
-        api.Outcome=outcome or "Stopped"
-        soloSince, pendingPlayer, hopDeadline = nil, nil, nil
-        if ticket then
-            ticket.Active = false
-            local ok, result = pcall(ctx.Save, ticket)
-            if not ok or result ~= true then message = (message or "Stopped") .. " (could not clear resume file)" end
+    local function outsiders()
+        local result={}
+        for _,person in ipairs(ctx.GetPlayers())do
+            if not ctx.IsAllowed or not ctx.IsAllowed(person)then result[#result+1]=person end
         end
-        announce(message or "Stopped; added blocks remain in your Roblox account")
+        return result
     end
-    local function valid(t)
-        return type(t) == "table" and t.Version == 1 and t.Active == true
-            and t.UserId == ctx.UserId and t.PlaceId == ctx.PlaceId
-            and type(t.RunId) == "string" and #t.RunId <= 80
-            and type(t.StartedAt) == "number" and t.StartedAt <= ctx.Now()
-            and ctx.Now() - t.StartedAt < 900
-            and type(t.Hops) == "number" and t.Hops >= 0 and t.Hops <= 12 and t.Hops % 1 == 0
-            and type(t.Visited) == "table" and type(t.Added) == "table"
-            and type(t.SourceJob) == "string"
-            and (t.SameServerReturns==nil or (type(t.SameServerReturns)=="number"and t.SameServerReturns>=0
-                and t.SameServerReturns<=3 and t.SameServerReturns%1==0))
+    function api.Stop(reason,outcome)
+        api.RetryWasTeleporting=api.Phase=="Teleporting"
+        api.Retryable=outcome~="Safe"and (api.RetryWasTeleporting or retryable(reason))
+        run.epoch=run.epoch+1;run.solo=nil;run.deadline=nil;pending=nil
+        api.Active=false;api.Phase="Idle";api.Outcome=outcome or "Stopped"
+        if ticket then
+            ticket.Active=false
+            local ok,saved=pcall(ctx.Save,ticket)
+            if not ok or saved~=true then reason=(reason or "Stopped").." (could not clear resume file)"end
+        end
+        publish(reason or "Stopped; added blocks remain in your Roblox account")
+    end
+    local function valid(resume)
+        if type(resume)~="table"then return false end
+        local age=type(resume.StartedAt)=="number"and ctx.Now()-resume.StartedAt
+        local hops=resume.Hops
+        local returns=resume.SameServerReturns
+        return resume.Version==1 and resume.Active==true and resume.UserId==ctx.UserId and resume.PlaceId==ctx.PlaceId
+            and type(resume.RunId)=="string"and #resume.RunId<=80
+            and age and age>=0 and age<900
+            and type(hops)=="number"and hops>=0 and hops<=12 and hops%1==0
+            and type(resume.Visited)=="table"and type(resume.Added)=="table"and type(resume.SourceJob)=="string"
+            and (returns==nil or type(returns)=="number"and returns>=0 and returns<=3 and returns%1==0)
+    end
+    local function guard(epoch,fn)
+        local ok,result=pcall(fn)
+        if not ok and current(epoch)then api.Stop(message(result))end
+        return ok and current(epoch)
+    end
+    local function blocked(epoch)
+        local result=ctx.GetBlocked()
+        assert(type(result)=="table","Could not read the blocked-user list")
+        if not current(epoch)then return nil end
+        return result
+    end
+    local function hop(epoch)
+        if not current(epoch)then return end
+        ticket.Hops=ticket.Hops+1;ticket.SourceJob=ctx.JobId;ticket.Visited[ctx.JobId]=true
+        if ctx.SnapshotSettings then ticket.Features=ctx.SnapshotSettings()end
+        save()
+        if not current(epoch)then return end
+        ctx.Queue(ticket.RunId)
+        if not current(epoch)then return end
+        api.Phase="Teleporting";run.deadline=ctx.Clock()+35
+        publish("Rejoining this floor ("..ticket.Hops.."/12)...")
+        ctx.Hop()
     end
     function api.Start(resume)
-        if api.Active or busy then return false end
-        if resume and not valid(resume) then
-            ticket = type(resume) == "table" and resume or nil
+        if api.Active or run.busy then return false end
+        if resume and not valid(resume)then
+            ticket=type(resume)=="table"and resume or nil
             api.Stop("Resume expired, changed floor/account, or did not change server")
             return false
         end
-        generation = generation + 1
-        retryBlockId=nil;sameServerReturn=false
-        local token = generation
-        api.Active, api.Phase = true, "Preparing"
-        api.Outcome="Searching"
-        announce("Checking block access and rejoin support...")
-        local ok, message = pcall(function()
-            if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features) end
+        run.epoch=run.epoch+1;run.sameReturn=false;retriedUser=nil
+        local epoch=run.epoch
+        api.Active=true;api.Phase="Preparing";api.Outcome="Searching"
+        publish("Checking block access and rejoin support...")
+        return guard(epoch,function()
+            if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features)end
             if resume and (resume.SourceJob==ctx.JobId or resume.Visited[ctx.JobId])then
                 ticket=resume;api.Ticket=ticket
                 ticket.SameServerReturns=(ticket.SameServerReturns or 0)+1
                 assert(ticket.SameServerReturns<=3,"Same-server retry limit reached · matchmaking did not move you")
-                sameServerReturn=true
+                run.sameReturn=true
             end
             ctx.Preflight()
-            if not live(token) then return end
-            blocked = ctx.GetBlocked()
-            if type(blocked) ~= "table" then error("Could not read the blocked-user list") end
-            if not live(token) then return end
-            ticket = resume or {Version=1, Active=true, UserId=ctx.UserId, PlaceId=ctx.PlaceId,
-                RunId=ctx.NewId(), StartedAt=ctx.Now(), Hops=0, SourceJob=ctx.JobId, Visited={}, Added={}}
-            if not resume and ctx.SnapshotSettings then ticket.Features = ctx.SnapshotSettings() end
-            -- GetBlockedUserIds contains only users present in this server.
-            -- An absent player disappearing from it is expected after a hop.
-            if ticket.Visited[ctx.JobId]and not sameServerReturn then error("Matchmaking returned a visited server; search stopped") end
-            api.Ticket = ticket
-            persist()
-            if not live(token) then return end
-            settleUntil, soloSince = ctx.Clock() + (sameServerReturn and math.min(1,.25*(ticket.SameServerReturns-1))or (ctx.SettleSeconds or 8)), nil
-            api.Phase = "Waiting"
-            announce(sameServerReturn and ("Returned to the same server · retry "..ticket.SameServerReturns.."/3 pending")or "Checking this floor's population...")
+            if not current(epoch)or not blocked(epoch)then return end
+            ticket=resume or {Version=1,Active=true,UserId=ctx.UserId,PlaceId=ctx.PlaceId,
+                RunId=ctx.NewId(),StartedAt=ctx.Now(),Hops=0,SourceJob=ctx.JobId,Visited={},Added={}}
+            if not resume and ctx.SnapshotSettings then ticket.Features=ctx.SnapshotSettings()end
+            assert(not ticket.Visited[ctx.JobId]or run.sameReturn,"Matchmaking returned a visited server; search stopped")
+            api.Ticket=ticket;save()
+            if not current(epoch)then return end
+            local settling=run.sameReturn and math.min(1,.25*(ticket.SameServerReturns-1))or (ctx.SettleSeconds or 8)
+            run.settle=ctx.Clock()+settling;run.solo=nil;api.Phase="Waiting"
+            publish(run.sameReturn and ("Returned to the same server · retry "..ticket.SameServerReturns.."/3 pending")or "Checking this floor's population...")
         end)
-        if not ok and live(token) then api.Stop(readable(message)) end
-        return ok and live(token)
     end
-    local function hop(token)
-        if not live(token) then return end
-        -- Queue is guarded by the persisted run ID; stopping makes queued work inert.
-        ticket.Hops = ticket.Hops + 1
-        ticket.SourceJob = ctx.JobId
-        ticket.Visited[ctx.JobId] = true
-        if ctx.SnapshotSettings then ticket.Features = ctx.SnapshotSettings() end
-        persist()
-        if not live(token) then return end
-        ctx.Queue(ticket.RunId)
-        if not live(token) then return end
-        api.Phase, hopDeadline = "Teleporting", ctx.Clock() + 35
-        announce("Rejoining this floor (" .. ticket.Hops .. "/12)...")
-        ctx.Hop()
+    local function sameServer(epoch,people)
+        if not run.sameReturn then return false end
+        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return true end
+        local confirmed=blocked(epoch)
+        if not confirmed then return true end
+        for _,person in ipairs(people)do
+            if confirmed[person.UserId]then ticket.LastBlockedUserId=person.UserId;hop(epoch);return true end
+        end
+        for _,person in ipairs(people)do
+            assert(person.UserId~=ticket.LastBlockedUserId,"Block was not confirmed after same-server return; no rejoin attempted")
+        end
+        run.sameReturn=false
+        return false
     end
-    local function step(token)
-        if api.Phase == "Preparing" then return end
-        if ctx.Now() - ticket.StartedAt >= 900 then api.Stop("15-minute search limit reached"); return end
-        if api.Phase == "Teleporting" then
-            if ctx.Clock() >= hopDeadline then api.Stop("Rejoin timed out; no further blocks added") end
-            return
+    local function confirmPending(epoch)
+        if api.Phase~="Block settling"then return false end
+        if ctx.IsPresent(pending)then
+            local confirmed=blocked(epoch)
+            if not confirmed then return true end
+            assert(confirmed[pending.UserId],"Block was not confirmed; no rejoin attempted")
         end
-        local others = {}
-        for _,person in ipairs(ctx.GetPlayers()) do
-            if not ctx.IsAllowed or not ctx.IsAllowed(person) then others[#others+1]=person end
-        end
-        if #others == 0 then
-            soloSince = soloSince or ctx.Clock()
-            if ctx.Clock() - soloSince >= (ctx.SoloSeconds or 8) then
-                api.Stop("Protected · only you and whitelisted players", "Safe")
-            end
-            return
-        end
-        soloSince = nil
-        if ctx.Clock() < settleUntil then return end
-        if sameServerReturn then
-            if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return end
-            local confirmed=ctx.GetBlocked()
-            if not live(token)then return end
-            for _,person in ipairs(others)do
-                if confirmed[person.UserId]then
-                    ticket.LastBlockedUserId=person.UserId;hop(token);return
-                end
-            end
-            for _,person in ipairs(others)do
-                if person.UserId==ticket.LastBlockedUserId then
-                    error("Block was not confirmed after same-server return; no rejoin attempted")
-                end
-            end
-            -- The earlier target left. Any new block still follows the normal
-            -- native confirmation path; never add a block merely because we returned.
-            sameServerReturn=false
-        end
-        if api.Phase == "Block settling" then
-            if ctx.IsPresent(pendingPlayer) then
-                local confirmed = ctx.GetBlocked()
-                if not live(token) then return end
-                if not confirmed[pendingPlayer.UserId] then error("Block was not confirmed; no rejoin attempted") end
-            end
-            hop(token)
-            return
-        end
-        if ticket.Hops >= 12 then api.Stop("12-hop search limit reached"); return end
-        blocked = ctx.GetBlocked()
-        if not live(token) then return end
-        local candidates = {}
-        for _, target in ipairs(others) do
-            if blocked[target.UserId] then
-                if ticket.Hops == 0 or retryBlockId==target.UserId then ticket.LastBlockedUserId = target.UserId; hop(token); return end
+        hop(epoch);return true
+    end
+    local function chooseAndBlock(epoch,people)
+        local list=blocked(epoch)
+        if not list then return end
+        local eligible={}
+        for _,person in ipairs(people)do
+            if list[person.UserId]then
+                if ticket.Hops==0 or retriedUser==person.UserId then ticket.LastBlockedUserId=person.UserId;hop(epoch);return end
                 error("A blocked player is in the joined server; matchmaking exclusion is not reliable here")
             end
-            local friend = ctx.IsFriend(target)
-            if not live(token) then return end
-            if friend == false then candidates[#candidates + 1] = target end
+            local friend=ctx.IsFriend(person)
+            if not current(epoch)then return end
+            if friend==false then eligible[#eligible+1]=person end
         end
-        if #candidates == 0 then api.Stop("No eligible players to block (friends are skipped)"); return end
-        local target = ctx.ChooseTarget and ctx.ChooseTarget(candidates) or candidates[ctx.Random(#candidates)]
-        if not ctx.IsPresent(target) then settleUntil = ctx.Clock() + 2; return end
-        announce("Blocking @" .. target.Name .. "...")
-        retryBlockId=target.UserId
-        local success = ctx.Block(target, function() return live(token) end)
-        if not live(token) then return end
-        if success ~= true then error("Roblox rejected the block; no rejoin attempted") end
-        ticket.LastBlockedUserId = target.UserId
-        ticket.Added[#ticket.Added + 1] = target.UserId
-        persist()
-        if not live(token) then return end
-        pendingPlayer, api.Phase = target, "Block settling"
-        settleUntil = ctx.Clock() + (ctx.BlockSettleSeconds or 3)
-        announce("Waiting for the block to register...")
-        if ctx.BlockSettleSeconds==0 then
-            if ctx.IsPresent(target)then
-                local confirmed=ctx.GetBlocked()
-                if not live(token)then return end
-                assert(confirmed[target.UserId],"Block was not confirmed; no rejoin attempted")
-            end
-            hop(token)
+        if #eligible==0 then api.Stop("No eligible players to block (friends are skipped)");return end
+        local person=ctx.ChooseTarget and ctx.ChooseTarget(eligible)or eligible[ctx.Random(#eligible)]
+        if not ctx.IsPresent(person)then run.settle=ctx.Clock()+2;return end
+        publish("Blocking @"..person.Name.."...");retriedUser=person.UserId
+        local receipt=ctx.Block(person,function()return current(epoch)end)
+        if not current(epoch)then return end
+        assert(receipt==true,"Roblox rejected the block; no rejoin attempted")
+        ticket.LastBlockedUserId=person.UserId;ticket.Added[#ticket.Added+1]=person.UserId
+        save()
+        if not current(epoch)then return end
+        pending=person;api.Phase="Block settling";run.settle=ctx.Clock()+(ctx.BlockSettleSeconds or 3)
+        publish("Waiting for the block to register...")
+        if ctx.BlockSettleSeconds==0 then confirmPending(epoch)end
+    end
+    local function update(epoch)
+        if api.Phase=="Preparing"then return end
+        if ctx.Now()-ticket.StartedAt>=900 then api.Stop("15-minute search limit reached");return end
+        if api.Phase=="Teleporting"then
+            if ctx.Clock()>=run.deadline then api.Stop("Rejoin timed out; no further blocks added")end
+            return
         end
+        local people=outsiders()
+        if #people==0 then
+            run.solo=run.solo or ctx.Clock()
+            if ctx.Clock()-run.solo>=(ctx.SoloSeconds or 8)then api.Stop("Protected · only you and whitelisted players","Safe")end
+            return
+        end
+        run.solo=nil
+        if ctx.Clock()<run.settle then return end
+        if sameServer(epoch,people)or confirmPending(epoch)then return end
+        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return end
+        chooseAndBlock(epoch,people)
     end
     function api.Update()
-        if not api.Active or busy then return end
-        busy = true
-        local token = generation
-        local ok, message = pcall(step, token)
-        busy = false
-        if not ok and live(token) then api.Stop(readable(message)) end
+        if not api.Active or run.busy then return end
+        run.busy=true
+        guard(run.epoch,function()update(run.epoch)end)
+        run.busy=false
     end
-    function api.TeleportFailed(message)
-        if api.Active and api.Phase == "Teleporting" then api.Stop("Rejoin failed: " .. tostring(message)) end
+    function api.TeleportFailed(reason)
+        if api.Active and api.Phase=="Teleporting"then api.Stop("Rejoin failed: "..tostring(reason))end
     end
     function api.Retry()
-        if api.Active or busy or not api.Retryable then return false end
-        if not ticket then return api.Start()end -- Preflight failed before any block/hop.
+        if api.Active or run.busy or not api.Retryable then return false end
+        if not ticket then return api.Start()end
         if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then
-            api.Retryable=false;announce("Search limit reached · toggle Safe Mode OFF/ON to begin a new search");return false
+            api.Retryable=false;publish("Search limit reached · toggle Safe Mode OFF/ON to begin a new search");return false
         end
-        local wasTeleporting=api.RetryWasTeleporting
-        generation=generation+1;local token=generation
-        api.Active=true;api.Phase="Preparing";api.Outcome="Searching";busy=true
-        local ok,message=pcall(function()
+        local retryHop=api.RetryWasTeleporting
+        run.epoch=run.epoch+1
+        local epoch=run.epoch
+        api.Active=true;api.Phase="Preparing";api.Outcome="Searching";run.busy=true
+        local ok=guard(epoch,function()
             ctx.Preflight()
-            if not live(token)then return end
-            blocked=ctx.GetBlocked();assert(type(blocked)=="table","Could not read the blocked-user list")
-            if not live(token)then return end
-            ticket.Active=true;persist()
-            if not live(token)then return end
-            if wasTeleporting then
-                local outsiders=0
-                for _,person in ipairs(ctx.GetPlayers())do
-                    if not ctx.IsAllowed or not ctx.IsAllowed(person)then outsiders=outsiders+1 end
-                end
-                if outsiders>0 then
-                    assert(ticket.LastBlockedUserId and blocked[ticket.LastBlockedUserId],"Cannot verify previous block · no rejoin attempted")
-                    hop(token);return
-                end
+            if not current(epoch)then return end
+            local confirmed=blocked(epoch)
+            if not confirmed then return end
+            ticket.Active=true;save()
+            if not current(epoch)then return end
+            if retryHop and #outsiders()>0 then
+                assert(ticket.LastBlockedUserId and confirmed[ticket.LastBlockedUserId],"Cannot verify previous block · no rejoin attempted")
+                hop(epoch);return
             end
-            settleUntil=ctx.Clock();soloSince=nil;api.Phase="Waiting"
-            announce("Retrying Safe Mode · checking this server")
+            run.settle=ctx.Clock();run.solo=nil;api.Phase="Waiting"
+            publish("Retrying Safe Mode · checking this server")
         end)
-        busy=false
-        if not ok and live(token)then api.Stop(readable(message))end
-        return ok and live(token)
+        run.busy=false
+        return ok
     end
     function api.Destroy(preserveResume)
-        if preserveResume then
-            generation = generation + 1
-            api.Active = false
-        else api.Stop("Search stopped") end
+        if preserveResume then run.epoch=run.epoch+1;api.Active=false
+        else api.Stop("Search stopped")end
     end
     return api
 end
@@ -7638,103 +6871,102 @@ end
     end)()
     local makeSafe=(function()
 -- BEGIN BUNDLED SAFE MODE
+-- Safe-floor protection and retry ownership are independent from the search worker.
 return function(ctx)
     local state,search=ctx.State,ctx.Search
     local api={Seeking=false}
-    local started=false
-    local retries,retryAt=0,nil
+    local session={adopted=false,retries=0,retryAt=nil,protectedAt=nil}
     local clock=ctx.Clock or os.clock
-    local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
-    local protectedSince
-    function api.AdoptSearch()started=true end
-    function api.ObserveProtected()
-        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
-            or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
-        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
-        protectedSince=protectedSince or clock()
-        if clock()-protectedSince<.6 then return end
-        if search.Active then search.Stop("Protected · only you and whitelisted players","Safe")end
-        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+    local protectedMessage="Protected · only you and whitelisted players"
+    local function destination()
+        return ctx.TargetFloor and ctx.TargetFloor()or state.SafeFloorId
+    end
+    local function populationSafe()
+        if ctx.CurrentFloor()~=destination()then return false end
+        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then return false end end
+        return true
+    end
+    local function panic()
+        api.Seeking=true
+        if ctx.Panic then ctx.Panic()end
+    end
+    local function protected()
+        session.adopted=false;session.retries=0;session.retryAt=nil;session.protectedAt=nil
+        api.Seeking=false;api.Paused=false;api.PauseReason=nil
         if ctx.ReleasePanic then ctx.ReleasePanic()end
-        ctx.Status("Protected · only you and whitelisted players")
+        ctx.Status(protectedMessage)
+    end
+    function api.AdoptSearch()session.adopted=true end
+    function api.Pause(reason)
+        api.Paused=true;api.PauseReason=reason;session.retryAt=nil
+        panic();ctx.Status("Holding position · "..tostring(reason))
+    end
+    function api.ObserveProtected()
+        local canObserve=state.SafeMode and state.Running and not state.StopEverything and not state.ModeratorBlocking
+            and not state.SafeWhitelistResolving and not ctx.Travelling()
+        if not canObserve or not populationSafe()then session.protectedAt=nil;return end
+        local now=clock()
+        session.protectedAt=session.protectedAt or now
+        if now-session.protectedAt<.6 then return end
+        if search.Active then search.Stop(protectedMessage,"Safe")end
+        protected()
+    end
+    local function recover()
+        if populationSafe()then protected();return false end
+        panic()
+        if not(search.Retryable and type(search.Retry)=="function"and session.retries<3)then
+            ctx.Status("Holding position · "..tostring(api.PauseReason)..(session.retries>=3 and " · retries exhausted"or ""))
+            return true
+        end
+        local now=clock()
+        session.retryAt=session.retryAt or now+math.min(2,.5*2^session.retries)
+        if now<session.retryAt then
+            ctx.Status("Safe Mode retry "..(session.retries+1).."/3 in "..math.max(0,math.ceil(session.retryAt-now)).."s · "..tostring(api.PauseReason))
+            return true
+        end
+        session.retries=session.retries+1;session.retryAt=nil;api.Paused=false
+        session.adopted=search.Retry()==true
+        if not session.adopted then api.Pause(search.Status)end
+        return true
     end
     function api.Update()
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
-        if api.Paused then
-            local protected=ctx.CurrentFloor()==targetFloor()
-            for _,person in ipairs(ctx.Players()) do if not ctx.Allowed(person) then protected=false;break end end
-            if protected then api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
-            else
-                api.Seeking=true;if ctx.Panic then ctx.Panic() end
-                if search.Retryable and type(search.Retry)=="function"and retries<3 then
-                    retryAt=retryAt or clock()+math.min(2,.5*2^retries)
-                    if clock()>=retryAt then
-                        retries=retries+1;retryAt=nil
-                        api.Paused=false;started=search.Retry()==true
-                        if not started then api.Pause(search.Status)end
-                        return
-                    end
-                    ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
-                else ctx.Status("Holding position · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
-                return
-            end
-        end
+        if api.Paused and recover()then return end
         if state.SafeWhitelistResolving then
             api.Seeking=true
-            for _,person in ipairs(ctx.Players()) do
-                if not ctx.Allowed(person) then if ctx.Panic then ctx.Panic() end;break end
-            end
-            ctx.Status("Checking whitelist entries...");return
+            for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then panic();break end end
+            ctx.Status("Checking whitelist entries...")
+            return
         end
-        if ctx.CurrentFloor()~=targetFloor() then
-            api.Seeking=true
-            if ctx.Panic then ctx.Panic() end
-            if not ctx.Travelling() then ctx.ChangeFloor(targetFloor()) end
+        local floor=destination()
+        if ctx.CurrentFloor()~=floor then
+            panic()
+            if not ctx.Travelling()then ctx.ChangeFloor(floor)end
             return
         end
         if search.Active then
-            started=true;api.Seeking=true
-            if ctx.Panic then ctx.Panic() end
-            search.Update();return
+            session.adopted=true;panic();search.Update();return
         end
-        if started and search.Outcome~="Safe" then
-            started=false;api.Pause(search.Status);ctx.Save();return
+        if session.adopted and search.Outcome~="Safe"then
+            session.adopted=false;api.Pause(search.Status);ctx.Save();return
         end
-        started=false
-        local outsiders={}
-        for _,person in ipairs(ctx.Players()) do
-            if not ctx.Allowed(person) then outsiders[#outsiders+1]=person end
-        end
-        if #outsiders==0 then
-            api.Seeking=false
-            if ctx.ReleasePanic then ctx.ReleasePanic() end
-            ctx.Status("Protected · only you and whitelisted players")
-            return
-        end
-        api.Seeking=true
-        if ctx.Panic then ctx.Panic() end
-        started=search.Start()==true
-        if not started then api.Pause(search.Status);ctx.Save()
-        else search.Update()end
-    end
-    function api.Pause(reason)
-        api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
-        if ctx.Panic then ctx.Panic() end
-        ctx.Status("Holding position · "..tostring(reason))
+        session.adopted=false
+        if populationSafe()then protected();return end
+        panic()
+        session.adopted=search.Start()==true
+        if session.adopted then search.Update()else api.Pause(search.Status);ctx.Save()end
     end
     function api.Joined(person)
-        if state.SafeMode and not ctx.Allowed(person) then
-            state.SafePendingUserId=person.UserId
-            if ctx.Panic then ctx.Panic() end
-        end
+        if state.SafeMode and not ctx.Allowed(person)then state.SafePendingUserId=person.UserId;panic()end
     end
     function api.Reset()
-        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
-        if search.Active then search.Stop("Safe Mode settings changed") end
-        if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
+        session={adopted=false,retries=0}
+        api.Seeking=false;api.Paused=false;api.PauseReason=nil
+        if search.Active then search.Stop("Safe Mode settings changed")end
+        if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic()end
     end
-    function api.Destroy() api.Reset() end
+    function api.Destroy()api.Reset()end
     return api
 end
 
@@ -7742,217 +6974,193 @@ end
     end)()
     local makeMulti=(function()
 -- BEGIN BUNDLED MULTI SPOT
+-- Arena rotation has explicit interruption, travel, clear-confirmation and cooldown stages.
 return function(ctx)
     local state=ctx.State
-    local api={Phase="Idle",Current=nil,Visits=0,LastVisits={}}
-    local clearedSince
-    local retryAt,retries=0,0
-    local function travelFailed(now,message)
-        ctx.Release()
-        retries=retries+1
-        api.LastError=message
-        api.Phase="Retrying travel"
-        local delay=retries<3 and 2*retries or math.min(60,5*2^math.min(4,retries-3))
-        retryAt=now+delay;api.RetryAt=retryAt
-        ctx.Status("Retrying arena in "..delay.."s · "..message)
-        -- Runtime failures must never overwrite the user's saved ON preference.
-        ctx.Save()
-    end
-    local function choices()
+    local api={Phase="Idle",Visits=0,LastVisits={}}
+    local clearingAt
+    local retry={count=0,due=0}
+    local function selected()
+        local priority={}
+        for index,id in ipairs(state.MultiSpotOrder or {})do priority[id]=index end
         local result={}
-        for _,spot in ipairs(ctx.Spots()) do
-            if spot.PlaceId==ctx.CurrentFloor() and state.MultiSpotSelected[spot.Id]
-                and (not state.SafeMode or spot.PlaceId==state.SafeFloorId) then
-                result[#result+1]=spot
-            end
+        for _,spot in ipairs(ctx.Spots())do
+            if spot.PlaceId==ctx.CurrentFloor()and state.MultiSpotSelected[spot.Id]
+                and (not state.SafeMode or spot.PlaceId==state.SafeFloorId)then result[#result+1]=spot end
         end
-        local order={};for i,id in ipairs(state.MultiSpotOrder or {})do order[id]=i end
         table.sort(result,function(a,b)
-            local ar,br=order[a.Id]or math.huge,order[b.Id]or math.huge
-            if ar~=br then return ar<br end
-            return a.Id<b.Id
+            local x,y=priority[a.Id]or math.huge,priority[b.Id]or math.huge
+            return x==y and a.Id<b.Id or x<y
         end)
         return result
     end
-    local function timedChoice(selected,now,exclude)
-        local unknown,nextSpot,nextAt
-        for _,spot in ipairs(selected)do
+    local function fail(now,reason)
+        ctx.Release();retry.count=retry.count+1
+        local delay=retry.count<3 and retry.count*2 or math.min(60,5*2^math.min(4,retry.count-3))
+        retry.due=now+delay;api.RetryAt=retry.due;api.LastError=reason;api.Phase="Retrying travel"
+        ctx.Status("Retrying arena in "..delay.."s · "..reason);ctx.Save()
+    end
+    local function departureReady()
+        return not ctx.DepartureReady or ctx.DepartureReady()
+    end
+    local function go(spot,now,resume)
+        if not resume then
+            ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
+            api.LastVisits[spot.Id]=now;state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
+        end
+        api.Phase="Moving";api.MoveDeadline=now+15
+        if not resume then ctx.Save()end
+        local sent,reason=ctx.Go(spot,resume)
+        if not sent then fail(now,reason or "Arena is unavailable");return false end
+        return true
+    end
+    local function observe()
+        local alive,seen=ctx.Encounter(api.Current)
+        api.Remaining=alive
+        api.EncounterSeen=api.EncounterSeen or seen or alive>0
+        return alive
+    end
+    local function holdLiving()
+        clearingAt=nil;api.WaitingSince=nil;api.CurrentCleared=false;api.Phase="Clearing arena"
+        ctx.Status(api.Current.Name.." · "..api.Remaining.." mobs remaining")
+    end
+    local function finishRound(now)
+        clearingAt=clearingAt or now
+        if now-clearingAt<.6 then return false end
+        api.ClearedRounds=(api.ClearedRounds or 0)+1;state.MultiSpotPending=nil
+        return true
+    end
+    local function pickTimed(options,now,exclude)
+        local unknown,nextSpot,nextTime
+        for _,spot in ipairs(options)do
             local record=ctx.Respawns.Get(spot)
             if spot~=exclude then
-                if record and (record.HasLive or (record.DueAt and record.DueAt<=now))then return spot end
+                if record and (record.HasLive or record.DueAt and record.DueAt<=now)then return spot end
                 if not record or not record.DueAt then
                     if not unknown or (api.LastVisits[spot.Id]or -math.huge)<(api.LastVisits[unknown.Id]or -math.huge)then unknown=spot end
                 end
             end
-            if record and record.DueAt and record.DueAt>now and (not nextAt or record.DueAt<nextAt)then nextSpot,nextAt=spot,record.DueAt end
-        end
-        return unknown,nextSpot,nextAt
-    end
-    function api.UpdateTimed(now,selected)
-        if api.Current then
-            local alive,seen=ctx.Encounter(api.Current)
-            api.Remaining=alive
-            if seen or alive>0 then api.EncounterSeen=true end
-            if alive>0 then
-                api.CurrentCleared=false;api.WaitingSince=nil;clearedSince=nil;api.Phase="Clearing arena"
-                ctx.Status(api.Current.Name.." · "..alive.." mobs remaining");return
+            if record and record.DueAt and record.DueAt>now and (not nextTime or record.DueAt<nextTime)then
+                nextSpot,nextTime=spot,record.DueAt
             end
+        end
+        return unknown,nextSpot,nextTime
+    end
+    function api.UpdateTimed(now,options)
+        if api.Current then
+            if observe()>0 then holdLiving();return end
             if api.EncounterSeen and not api.CurrentCleared then
-                clearedSince=clearedSince or now
-                if now-clearedSince<.6 then return end
-                api.CurrentCleared=true;api.ClearedRounds=(api.ClearedRounds or 0)+1
-                state.MultiSpotPending=nil;api.EncounterSeen=false;clearedSince=nil
+                if not finishRound(now)then return end
+                api.CurrentCleared=true;api.EncounterSeen=false;clearingAt=nil
                 if ctx.ClearEncounter then ctx.ClearEncounter()end
             end
         end
-        local spot,nextSpot,nextAt=timedChoice(selected,now)
-        if spot and spot==api.Current then
+        local spot,nextSpot,nextTime=pickTimed(options,now)
+        if spot==api.Current and spot then
             api.WaitingSince=api.WaitingSince or now
-            if now-api.WaitingSince>=5 then
-                local alternative=timedChoice(selected,now,api.Current)
-                if alternative then spot=alternative end
-            end
+            if now-api.WaitingSince>=5 then spot=pickTimed(options,now,api.Current)or spot end
         end
         if not spot then
             api.Phase="Waiting for respawn"
-            ctx.Status(nextSpot and ("Next spawn · "..nextSpot.Name.." · "..math.max(0,math.ceil(nextAt-now)).."s")or "Waiting for selected arena spawns")
+            ctx.Status(nextSpot and ("Next spawn · "..nextSpot.Name.." · "..math.max(0,math.ceil(nextTime-now)).."s")or "Waiting for selected arena spawns")
             return
         end
         if spot==api.Current then
-            api.Phase="Waiting for spawn"
             local record=ctx.Respawns.Get(spot)
+            api.Phase="Waiting for spawn"
             ctx.Status((record and record.DueAt and "Spawn due · waiting for "or "Waiting for arena mobs to spawn · ")..spot.Name)
             return
         end
-        if ctx.DepartureReady and not ctx.DepartureReady()then return end
-        ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
-        api.LastVisits[spot.Id]=now
-        state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
-        api.Phase="Moving";api.MoveDeadline=now+15;ctx.Save()
-        local ok,message=ctx.Go(spot)
-        if not ok then travelFailed(now,message or "Arena is unavailable")end
+        if departureReady()then go(spot,now,false)end
     end
-    function api.Reset()
-        api.Phase="Idle";api.Current=nil;clearedSince=nil;api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.LastVisits={}
-        retryAt,retries=0,0;api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil;ctx.Release()
+    local function completeTravel(now)
+        if api.Phase~="Moving"then return true end
+        if ctx.Moving()then
+            if now>(api.MoveDeadline or math.huge)then fail(now,"Travel timed out")end
+            return false
+        end
+        if not ctx.Arrived(api.Current)then fail(now,"Arrival was not confirmed");return false end
+        api.MoveDeadline=nil;api.LastError=nil;api.RetryAt=nil;retry.count=0
+        observe();api.Phase="Waiting for spawn";clearingAt=nil;api.Visits=api.Visits+1
+        ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name)
+        return true
+    end
+    local function priority(now)
+        local target=ctx.PriorityTarget and ctx.PriorityTarget(now)
+        if target then
+            if not api.PrioritySuspended then
+                if api.Current then observe()end
+                if ctx.Suspend then ctx.Suspend()end
+                api.PrioritySuspended=true;clearingAt=nil
+            end
+            ctx.Status("Priority enemy · "..target.Name.." · selected arenas will resume")
+            return true
+        end
+        if not api.PrioritySuspended then return false end
+        if not ctx.CanMove()or not departureReady()then return true end
+        api.PrioritySuspended=false
+        if ctx.Resume then ctx.Resume()end
+        local resume
+        for _,spot in ipairs(selected())do if api.Current and spot.Id==api.Current.Id then resume=spot;break end end
+        if resume and ctx.Respawns then
+            local record=ctx.Respawns.Get(resume)
+            if record and record.DueAt and record.DueAt>now and ctx.Encounter(resume)==0 then resume=nil end
+        end
+        if resume then
+            if go(resume,now,true)then ctx.Status("Returning to selected arena · "..resume.Name)end
+            return true
+        end
+        api.Current=nil;api.Phase="Idle"
+        return false
+    end
+    local function nextUntimed(options,now)
+        if api.Current then
+            if observe()>0 then holdLiving();return end
+            if not api.EncounterSeen then api.Phase="Waiting for spawn";ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name);return end
+            if not finishRound(now)then return end
+            api.Phase="Cleared";ctx.Status("Arena cleared · moving to next spot")
+            if #options==1 and options[1].Id==api.Current.Id then
+                state.MultiSpotPending=api.Current.Id;api.EncounterSeen=false;clearingAt=nil;api.Phase="Waiting for spawn"
+                if ctx.ClearEncounter then ctx.ClearEncounter()end
+                ctx.Status("Arena cleared · waiting for the next spawn");return
+            end
+        end
+        local nextSpot
+        local cursor=0
+        for index,spot in ipairs(options)do
+            if spot.Id==state.MultiSpotPending then nextSpot=spot end
+            if spot.Id==state.MultiSpotCursor then cursor=index end
+        end
+        nextSpot=nextSpot or options[cursor%#options+1]
+        if ctx.CurrentFloor()~=nextSpot.PlaceId then
+            state.MultiSpotPending=nextSpot.Id;ctx.Status("Travelling to "..nextSpot.Floor.Name);ctx.ChangeFloor(nextSpot.PlaceId);return
+        end
+        if departureReady()then go(nextSpot,now,false)end
     end
     function api.Update(now)
-        if not state.MultiSpot or not state.Running then return end
-        if api.Phase=="Paused" then return end
+        if not state.MultiSpot or not state.Running or api.Phase=="Paused"then return end
         if ctx.Respawns then ctx.Respawns.Update(now,ctx.Spots())end
-        local priority=ctx.PriorityTarget and ctx.PriorityTarget(now)
-        if priority then
-            if not api.PrioritySuspended then
-                if api.Current then
-                    local alive,seen=ctx.Encounter(api.Current)
-                    api.EncounterSeen=api.EncounterSeen or seen or alive>0
-                end
-                if ctx.Suspend then ctx.Suspend()end
-                api.PrioritySuspended=true;clearedSince=nil
-            end
-            ctx.Status("Priority enemy · "..priority.Name.." · selected arenas will resume")
-            return
-        end
-        if api.PrioritySuspended then
-            if not ctx.CanMove()or (ctx.DepartureReady and not ctx.DepartureReady())then return end
-            api.PrioritySuspended=false
-            if ctx.Resume then ctx.Resume()end
-            local selected=choices()
-            local resume
-            for _,spot in ipairs(selected)do if api.Current and spot.Id==api.Current.Id then resume=spot;break end end
-            if resume and ctx.Respawns then
-                local record=ctx.Respawns.Get(resume)
-                if record and record.DueAt and record.DueAt>now and ctx.Encounter(resume)==0 then resume=nil end
-            end
-            if resume then
-                api.Phase="Moving";api.MoveDeadline=now+15
-                local ok,message=ctx.Go(resume,true)
-                if not ok then travelFailed(now,message or "Arena is unavailable");return end
-                ctx.Status("Returning to selected arena · "..resume.Name)
-                return
-            end
-            api.Phase="Idle";api.Current=nil
-        end
-        if api.Phase=="Retrying travel" then
-            if now<retryAt then
-                ctx.Status("Retrying arena in "..math.max(1,math.ceil(retryAt-now)).."s · "..tostring(api.LastError))
-                return
-            end
+        if priority(now)then return end
+        if api.Phase=="Retrying travel"then
+            if now<retry.due then ctx.Status("Retrying arena in "..math.max(1,math.ceil(retry.due-now)).."s · "..tostring(api.LastError));return end
             if not ctx.CanMove()then return end
-            api.Phase="Idle";api.Current=nil
+            api.Current=nil;api.Phase="Idle"
         end
-        -- Observe an in-progress trip even if casting or TravelBusy prevents a new one.
-        if api.Phase=="Moving" then
-            if ctx.Moving() then
-                if now>(api.MoveDeadline or math.huge) then travelFailed(now,"Travel timed out") end
-                return
-            end
-            if not ctx.Arrived(api.Current) then travelFailed(now,"Arrival was not confirmed");return end
-            api.MoveDeadline=nil;retries=0;api.LastError=nil;api.RetryAt=nil
-            local alive,seen=ctx.Encounter(api.Current)
-            api.Phase="Waiting for spawn";api.EncounterSeen=api.EncounterSeen or seen or alive>0;clearedSince=nil;api.Visits=api.Visits+1
-            ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name)
-        end
-        if not ctx.CanMove() then return end
-        local selected=choices()
-        if #selected==0 then ctx.Status(state.SafeMode and "Select arenas on the Safe Mode floor" or "Select at least one arena");return end
-        if ctx.Respawns then api.UpdateTimed(now,selected);return end
-        if api.Current then
-            local alive,seen=ctx.Encounter(api.Current)
-            api.Remaining=alive
-            if seen or alive>0 then api.EncounterSeen=true end
-            if alive>0 then
-                clearedSince=nil;api.Phase="Clearing arena"
-                ctx.Status(api.Current.Name.." · "..alive.." mobs remaining")
-                return
-            end
-            if not api.EncounterSeen then
-                api.Phase="Waiting for spawn"
-                ctx.Status("Waiting for arena mobs to spawn · "..api.Current.Name)
-                return
-            end
-            clearedSince=clearedSince or now
-            if now-clearedSince<.6 then return end
-            api.Phase="Cleared";ctx.Status("Arena cleared · moving to next spot")
-            api.ClearedRounds=(api.ClearedRounds or 0)+1
-            state.MultiSpotPending=nil
-            if #selected==1 and selected[1].Id==api.Current.Id then
-                state.MultiSpotPending=api.Current.Id
-                api.EncounterSeen=false;clearedSince=nil;api.Phase="Waiting for spawn"
-                if ctx.ClearEncounter then ctx.ClearEncounter() end
-                ctx.Status("Arena cleared · waiting for the next spawn")
-                return
-            end
-        end
-        local spot
-        if state.MultiSpotPending then
-            for _,item in ipairs(selected) do if item.Id==state.MultiSpotPending then spot=item;break end end
-        end
-        if not spot then
-            local index=0
-            for i,item in ipairs(selected) do if item.Id==state.MultiSpotCursor then index=i;break end end
-            spot=selected[index%#selected+1]
-        end
-        if ctx.CurrentFloor()~=spot.PlaceId then
-            state.MultiSpotPending=spot.Id
-            ctx.Status("Travelling to "..spot.Floor.Name)
-            ctx.ChangeFloor(spot.PlaceId);return
-        end
-        if ctx.DepartureReady and not ctx.DepartureReady()then return end
-        ctx.Release()
-        api.Current=spot
-        api.EncounterSeen=false
-        state.MultiSpotCursor=spot.Id;state.MultiSpotPending=spot.Id
-        -- Keep the same destination across stream/retry failures.
-        api.Phase="Moving";api.MoveDeadline=now+15;ctx.Save()
-        local ok,message=ctx.Go(spot)
-        if not ok then travelFailed(now,message or "Arena is unavailable") end
+        if not completeTravel(now)or not ctx.CanMove()then return end
+        local options=selected()
+        if #options==0 then ctx.Status(state.SafeMode and "Select arenas on the Safe Mode floor"or "Select at least one arena");return end
+        if ctx.Respawns then api.UpdateTimed(now,options)else nextUntimed(options,now)end
     end
-    function api.Pause(message)
-        ctx.Release();api.Phase="Paused";api.LastError=tostring(message)
+    function api.Reset()
+        api.Current=nil;api.Phase="Idle";api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil
+        api.LastVisits={};api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil
+        retry={count=0,due=0};clearingAt=nil;ctx.Release()
+    end
+    function api.Pause(reason)
+        ctx.Release();api.Phase="Paused";api.LastError=tostring(reason)
         ctx.Status("Multi Spot paused · "..api.LastError.." · toggle off/on to retry")
     end
-    function api.Destroy() api.Reset() end
+    function api.Destroy()api.Reset()end
     return api
 end
 
@@ -8059,125 +7267,140 @@ return function(ctx)
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
         [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14}
     local catalog={Floors={},FloorById={},Spots={},SpotById={},Aliases={}}
-    -- Identities and positions verified in the new-account live progression test.
-    local mainBossNames={
-        [542351431]={["Rahjin the Thief King"]=true},
-        [548231754]={["Borik the BeeKeeper"]=true},
-    }
+    local function clean(name)return tostring(name or ""):lower():gsub("[^%w]","")end
     local function accepts(spot,name)
         if not spot.EncounterNames then return true end
-        local cleaned=tostring(name or ""):lower():gsub("[^%w]","")
-        for expected in pairs(spot.EncounterNames)do
-            if expected:lower():gsub("[^%w]","")==cleaned then return true end
-        end
+        local identity=clean(name)
+        for expected in pairs(spot.EncounterNames)do if clean(expected)==identity then return true end end
         return false
     end
-    for _,floor in ipairs(ctx.Floors) do
-        local n=numbers[floor.PlaceId]
-        if n then
-            local item={Id=floor.PlaceId,Number=n,Name=floor.Name,Label=floor.PlaceId==134019705603409 and floor.Name or ("F"..n.." · "..floor.Name),Unlocked=ctx.Unlocked(floor)}
-            catalog.Floors[#catalog.Floors+1]=item;catalog.FloorById[item.Id]=item
+    local function register(spot)
+        catalog.Spots[#catalog.Spots+1]=spot
+        catalog.SpotById[spot.Id]=spot
+        return spot
+    end
+    local function alias(key,spot)
+        catalog.Aliases[key]=spot.Id
+        catalog.SpotById[key]=spot
+    end
+    local function label(floor,name)return floor.Label.." · "..name end
+    for _,definition in ipairs(ctx.Floors)do
+        local number=numbers[definition.PlaceId]
+        if number then
+            local floor={Id=definition.PlaceId,Number=number,Name=definition.Name,Unlocked=ctx.Unlocked(definition)}
+            floor.Label=floor.Id==134019705603409 and floor.Name or "F"..number.." · "..floor.Name
+            catalog.Floors[#catalog.Floors+1]=floor;catalog.FloorById[floor.Id]=floor
         end
     end
     table.sort(catalog.Floors,function(a,b)return a.Number<b.Number end)
-    local extraKinds={Leviathan='Boss',['Suspended Unborn']='Arena',['Limor the Devourer']='Arena',['Radioactive Experiment']='Arena',
-        ['Za, the Eldest']='Mini boss',['Wa, the Curious']='Arena',['Duality Reaper']='Mini boss',['Atheon arena']='Arena'}
-    for placeId,areas in pairs(source) do
-        local floor=catalog.FloorById[placeId]
-        if floor then for original,point in pairs(areas) do
-            local key=original:match('^%s*(.-)%s*$')
-            local info=supplied[placeId]and supplied[placeId][key]
-            local kind=info and info.Kind or key=='Boss' and 'Boss' or (key=='Miniboss' or key=='Second miniboss') and 'Mini boss' or extraKinds[key]
-            if kind then
-                local name=info and info.Name or key=='Boss' and 'Boss arena' or key=='Miniboss' and 'Mini-boss arena' or key
-                local spot={Id=tostring(placeId)..'/'..key,PlaceId=placeId,Name=name,Kind=kind,Position=point,
-                    DestinationId='source:'..key,Floor=floor,Label=floor.Label..' · '..name,
-                    RespawnSeconds=info and info.RespawnSeconds,MainBoss=key=='Boss',PositionLocked=info~=nil or placeId==13965775911,
-                    EncounterNames=info and info.EncounterNames or placeId==13965775911 and {Atheon=true,['Corrupted Atheon']=true}
-                        or (placeId==134019705603409 and key=='Leviathan' and {Leviathan=true})
-                        or (key=='Boss' and mainBossNames[placeId]) or nil}
-                catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[spot.Id]=spot
-            end
-        end end
-    end
-    function catalog.AddCurrent(areas,placeId)
-        local floor=catalog.FloorById[placeId];if not floor then return end
-        for id,area in pairs(areas or {})do
-            if id:sub(1,16)=="saved:multispot:" then
-                local key=tostring(placeId).."/"..id
-                local spot=catalog.SpotById[key]
-                if not spot then
-                    spot={Id=key,PlaceId=placeId,Name=area.Name,Kind="Arena",Position=area.Position,
-                        DestinationId=id,Floor=floor,Label=floor.Label.." · "..area.Name,PositionLocked=true}
-                    catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
-                else spot.Position=area.Position end
-            end
-        end
-        for _,kind in ipairs({'Boss','Mini boss'}) do
-            local generic=catalog.SpotById[tostring(placeId)..'/'..(kind=='Boss' and 'Boss' or 'Miniboss')]
-            -- Keep the user's explicit F9 first-arena location even if only the second mini-boss is loaded.
-            if generic and not generic.PositionLocked then
-                local closest,distance
-                for id,area in pairs(areas or {}) do
-                    if id:sub(1,4)=='mob:' and area.Kind==kind and accepts(generic,id:sub(5)) then
-                        local d=(area.Position-generic.Position).Magnitude
-                        if not distance or d<distance then closest,distance=area,d end
-                    end
-                end
-                if closest then generic.Position=closest.Position;generic.DestinationId=closest.Id;generic.SourceRefined=true end
-            end
-        end
-        for id,area in pairs(areas or {}) do
-            if area.Kind=='Boss' or area.Kind=='Mini boss' then
-                local key=tostring(placeId)..'/'..id
-                if id:sub(1,7)~='source:' then
-                    local name=id:sub(1,4)=='mob:' and id:sub(5) or area.Name
-                    local primary
-                    if placeId==13965775911 and (name=='Atheon' or name=='Corrupted Atheon') then
-                        primary=catalog.SpotById[tostring(placeId)..'/Atheon arena']
-                    end
-                    for _,spot in ipairs(catalog.Spots) do
-                        if not primary and spot.PlaceId==placeId and (spot.Name:lower()==name:lower() or (spot.EncounterNames and spot.EncounterNames[name])) then primary=spot;break end
-                    end
-                    if primary then
-                        if not primary.PositionLocked then
-                            primary.Position=area.Position;primary.DestinationId=id;primary.Kind=area.Kind;primary.SourceRefined=true
-                        end
-                    else
-                        local nearest
-                        for _,spot in ipairs(catalog.Spots) do
-                            if spot.PlaceId==placeId and accepts(spot,name)
-                                and (spot.Kind==area.Kind or (spot.PositionLocked and spot.Kind=='Arena')) then
-                                local distance=(spot.Position-area.Position).Magnitude
-                                if distance<=220 and (not nearest or distance<nearest) then primary,nearest=spot,distance end
-                            end
-                        end
-                    end
-                    if primary then
-                        catalog.Aliases[key]=primary.Id;catalog.SpotById[key]=primary
-                    elseif not supplied[placeId] then
-                        local spot={Id=key,PlaceId=placeId,Name=name,Kind=area.Kind,Position=area.Position,
-                            DestinationId=id,Floor=floor,Label=floor.Label..' · '..name}
-                        catalog.Spots[#catalog.Spots+1]=spot;catalog.SpotById[key]=spot
-                    end
+    local specialKinds={Leviathan="Boss",["Suspended Unborn"]="Arena",["Limor the Devourer"]="Arena",
+        ["Radioactive Experiment"]="Arena",["Za, the Eldest"]="Mini boss",["Wa, the Curious"]="Arena",
+        ["Duality Reaper"]="Mini boss",["Atheon arena"]="Arena"}
+    for place,points in pairs(source)do
+        local floor=catalog.FloorById[place]
+        if floor then
+            for raw,position in pairs(points)do
+                local key=raw:match("^%s*(.-)%s*$")
+                local info=supplied[place]and supplied[place][key]
+                local kind=info and info.Kind or (key=="Boss"and "Boss")
+                    or ((key=="Miniboss"or key=="Second miniboss")and "Mini boss")or specialKinds[key]
+                if kind then
+                    local name=info and info.Name or (key=="Boss"and "Boss arena")or (key=="Miniboss"and "Mini-boss arena")or key
+                    local encounters=info and info.EncounterNames
+                    if not encounters and place==13965775911 then encounters={Atheon=true,["Corrupted Atheon"]=true}end
+                    if not encounters and place==134019705603409 and key=="Leviathan"then encounters={Leviathan=true}end
+                    register({Id=tostring(place).."/"..key,PlaceId=place,Name=name,Kind=kind,Position=position,
+                        DestinationId="source:"..key,Floor=floor,Label=label(floor,name),
+                        RespawnSeconds=info and info.RespawnSeconds,MainBoss=key=="Boss",
+                        PositionLocked=info~=nil or place==13965775911,EncounterNames=encounters})
                 end
             end
         end
     end
-    function catalog.NormalizeSelection(selected)
-        local result={}
-        for id,on in pairs(selected or {}) do
-            if on then result[catalog.Aliases[id] or id]=true end
+    local function customAreas(areas,place,floor)
+        for id,area in pairs(areas)do
+            if id:sub(1,16)=="saved:multispot:"then
+                local key=tostring(place).."/"..id
+                local existing=catalog.SpotById[key]
+                if existing then existing.Position=area.Position
+                else register({Id=key,PlaceId=place,Name=area.Name,Kind="Arena",Position=area.Position,
+                    DestinationId=id,Floor=floor,Label=label(floor,area.Name),PositionLocked=true})end
+            end
         end
-        return result
     end
+    local function refineGeneric(areas,place)
+        for _,kind in ipairs({"Boss","Mini boss"})do
+            local key=kind=="Boss"and "Boss"or "Miniboss"
+            local spot=catalog.SpotById[tostring(place).."/"..key]
+            if spot and not spot.PositionLocked then
+                local nearest,distance
+                for id,area in pairs(areas)do
+                    if id:sub(1,4)=="mob:"and area.Kind==kind and accepts(spot,id:sub(5))then
+                        local current=(area.Position-spot.Position).Magnitude
+                        if not distance or current<distance then nearest,distance=area,current end
+                    end
+                end
+                if nearest then spot.Position=nearest.Position;spot.DestinationId=nearest.Id;spot.SourceRefined=true end
+            end
+        end
+    end
+    local function matchArea(area,id,place)
+        local name=id:sub(1,4)=="mob:"and id:sub(5)or area.Name
+        local primary
+        if place==13965775911 and (name=="Atheon"or name=="Corrupted Atheon")then
+            primary=catalog.SpotById[tostring(place).."/Atheon arena"]
+        end
+        if not primary then
+            for _,spot in ipairs(catalog.Spots)do
+                if spot.PlaceId==place and (spot.Name:lower()==name:lower()or spot.EncounterNames and spot.EncounterNames[name])then
+                    primary=spot;break
+                end
+            end
+        end
+        if primary then
+            if not primary.PositionLocked then
+                primary.Position=area.Position;primary.DestinationId=id;primary.Kind=area.Kind;primary.SourceRefined=true
+            end
+            return primary,name
+        end
+        local closest
+        for _,spot in ipairs(catalog.Spots)do
+            if spot.PlaceId==place and accepts(spot,name)
+                and (spot.Kind==area.Kind or spot.PositionLocked and spot.Kind=="Arena")then
+                local distance=(spot.Position-area.Position).Magnitude
+                if distance<=220 and (not closest or distance<closest)then primary,closest=spot,distance end
+            end
+        end
+        return primary,name
+    end
+    function catalog.AddCurrent(areas,place)
+        local floor=catalog.FloorById[place]
+        if not floor then return end
+        areas=areas or {}
+        customAreas(areas,place,floor)
+        refineGeneric(areas,place)
+        for id,area in pairs(areas)do
+            if (area.Kind=="Boss"or area.Kind=="Mini boss")and id:sub(1,7)~="source:"then
+                local key=tostring(place).."/"..id
+                local spot,name=matchArea(area,id,place)
+                if spot then alias(key,spot)
+                elseif not supplied[place]then
+                    register({Id=key,PlaceId=place,Name=name,Kind=area.Kind,Position=area.Position,
+                        DestinationId=id,Floor=floor,Label=label(floor,name)})
+                end
+            end
+        end
+    end
+    function catalog.NormalizeSelection(selection)
+        local normalized={}
+        for id,on in pairs(selection or {})do if on then normalized[catalog.Aliases[id]or id]=true end end
+        return normalized
+    end
+    local kindOrder={Boss=1,["Mini boss"]=2,Arena=3}
     function catalog.Sort()
         table.sort(catalog.Spots,function(a,b)
             if a.Floor.Number~=b.Floor.Number then return a.Floor.Number<b.Floor.Number end
-            if a.Kind~=b.Kind then
-                local ranks={Boss=1,['Mini boss']=2,Arena=3}
-                return (ranks[a.Kind] or 4)<(ranks[b.Kind] or 4)
-            end
+            if a.Kind~=b.Kind then return (kindOrder[a.Kind]or 4)<(kindOrder[b.Kind]or 4)end
             if a.Name~=b.Name then return a.Name<b.Name end
             return a.Id<b.Id
         end)
@@ -8190,21 +7413,26 @@ end
     end)()
     local makeUI=(function()
 -- BEGIN BUNDLED AUTOMATION UI
--- Controller status bridge. Modern WindUI is the only interactive interface.
+-- Publish automation status into lightweight records consumed by modern WindUI.
 return function(ctx)
     local state=ctx.State
-    local api={}
-    local fields={"SafeMode","SafeFloor","SafeWhitelist","SafeModeStatus","MultiSpot","MultiSpotDropdown",
-        "MultiSpotStatus","AutoJoinFriend","JoinFriendUsername","AutoJoinFriendStatus"}
-    for _,name in ipairs(fields)do
-        state.UI[name]=ctx.Create("TextBox",{Name=name,Text=""},ctx.Parent)
+    local defaults={SafeModeStatus="Safe Mode is off",MultiSpotStatus="Multi Spot is off",AutoJoinFriendStatus="Auto Join Friend is off"}
+    local inputs={"SafeMode","SafeFloor","SafeWhitelist","MultiSpot","MultiSpotDropdown","AutoJoinFriend","JoinFriendUsername"}
+    local function record(name)
+        local value=ctx.Create("TextBox",{Name=name,Text=state[name]or ""},ctx.Parent)
+        state.UI[name]=value
+        return value
     end
+    for _,name in ipairs(inputs)do record(name)end
+    for name in pairs(defaults)do record(name)end
     state.UI.SafeWhitelist.Text=state.SafeWhitelistText or ""
-    function state.CloseAutomationMenus()end
+    state.CloseAutomationMenus=function()end
+    local api={}
     function api.Refresh()
-        state.UI.SafeModeStatus.Text=state.SafeModeStatus or "Safe Mode is off"
-        state.UI.MultiSpotStatus.Text=state.MultiSpotStatus or "Multi Spot is off"
-        state.UI.AutoJoinFriendStatus.Text=state.AutoJoinFriendStatus or "Auto Join Friend is off"
+        for name,fallback in pairs(defaults)do
+            local text=state[name]or fallback
+            if state.UI[name].Text~=text then state.UI[name].Text=text end
+        end
     end
     api.Refresh()
     return api
@@ -8214,59 +7442,56 @@ end
     end)()
     local attach=(function()
 -- BEGIN BUNDLED SERVER ISOLATION CLIENT
--- Roblox/executor adapter. No credentials, web sessions, or block-list HTTP calls.
+-- Native Roblox/executor boundary for safe search, floor travel and arena rotation.
 return function(ctx)
-    local state, player, Players = ctx.State, ctx.Player, ctx.Players
+    local state,player,Players=ctx.State,ctx.Player,ctx.Players
     local farmClock=state.FarmClock or os.clock
-    if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
-    if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
-    if type(state.MultiSpotSelected)~="table" then state.MultiSpotSelected={} end
-    if type(state.MultiSpotOrder)~="table"then state.MultiSpotOrder={}end
-    local HttpService, StarterGui = game:GetService("HttpService"), game:GetService("StarterGui")
-    local TeleportService = game:GetService("TeleportService")
-    local path = "SB2Codex/solo-search_" .. tostring(player.UserId) .. ".json"
-    local queuedResume = getgenv().SB2SoloResumeTicket
-    getgenv().SB2SoloResumeTicket = nil
-    local queue, savedSource,validatedSource,validatedPath,validatedGeneration
-    local GuiService = game:GetService("GuiService")
-    -- Optional desktop input must not prevent Multi Spot / autosave on mobile.
+    state.SafeWhitelistText=type(state.SafeWhitelistText)=="string"and state.SafeWhitelistText or ""
+    state.SafeWhitelistIds=type(state.SafeWhitelistIds)=="table"and state.SafeWhitelistIds or {}
+    state.MultiSpotSelected=type(state.MultiSpotSelected)=="table"and state.MultiSpotSelected or {}
+    state.MultiSpotOrder=type(state.MultiSpotOrder)=="table"and state.MultiSpotOrder or {}
+    local HttpService=game:GetService("HttpService")
+    local StarterGui=game:GetService("StarterGui")
+    local TeleportService=game:GetService("TeleportService")
+    local GuiService=game:GetService("GuiService")
+    local path="SB2Codex/solo-search_"..player.UserId..".json"
+    local queuedResume=getgenv().SB2SoloResumeTicket
+    getgenv().SB2SoloResumeTicket=nil
+    local queue,savedSource,validatedSource,validatedPath,validatedGeneration
     local virtualInput
     pcall(function()virtualInput=game:GetService("VirtualInputManager")end)
-    local blockPoint=ctx.BlockPoint or function(button,inset)
-        return button.AbsolutePosition+button.AbsoluteSize/2+inset
-    end
+    local blockPoint=ctx.BlockPoint or function(button,inset)return button.AbsolutePosition+button.AbsoluteSize/2+inset end
     local function workerIdentity()
-        -- Some mobile executors expose this function but reject identity changes.
-        if type(setthreadidentity)=="function" then pcall(setthreadidentity,8) end
+        if type(setthreadidentity)=="function"then pcall(setthreadidentity,8)end
     end
     local ui
     local definitions=require(game.ReplicatedStorage.Database.Locations).floors
     local nativeFloors={}
     for _,floor in ipairs(definitions)do nativeFloors[floor.PlaceId]=floor end
     local function floorUnlocked(floor)
+        if floor.PlaceId==game.PlaceId or floor.Unlocked==true then return true end
         local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
         local locations=profile and profile:FindFirstChild("Locations")
-        return floor.PlaceId==game.PlaceId or floor.Unlocked==true
-            or (locations and locations:FindFirstChild(tostring(floor.PlaceId)))~=nil
+        return locations~=nil and locations:FindFirstChild(tostring(floor.PlaceId))~=nil
     end
     local catalog=ctx.MakeCatalog({Floors=definitions,Unlocked=floorUnlocked})
     catalog.AddCurrent(state.FloorDestinations,game.PlaceId);catalog.Sort()
     state.MultiSpotSelected=catalog.NormalizeSelection(state.MultiSpotSelected)
-    state.MultiSpotCursor=catalog.Aliases[state.MultiSpotCursor] or state.MultiSpotCursor
-    state.MultiSpotPending=catalog.Aliases[state.MultiSpotPending] or state.MultiSpotPending
+    state.MultiSpotCursor=catalog.Aliases[state.MultiSpotCursor]or state.MultiSpotCursor
+    state.MultiSpotPending=catalog.Aliases[state.MultiSpotPending]or state.MultiSpotPending
     state.AutomationCatalog=catalog
     function state.IsAutomationFloorUnlocked(id)
-        id=tonumber(id)
-        local floor=catalog.FloorById[id]
-        if not floor or not nativeFloors[id] then return false end
-        local unlocked=floorUnlocked(nativeFloors[id])
+        local key=tonumber(id)
+        local floor=catalog.FloorById[key]
+        if not floor or not nativeFloors[key]then return false end
+        local unlocked=floorUnlocked(nativeFloors[key])
         if floor.Unlocked~=unlocked then
             floor.Unlocked=unlocked
             state.AutomationFloorUnlockVersion=(state.AutomationFloorUnlockVersion or 0)+1
         end
-        return floor.Unlocked
+        return unlocked
     end
-    local function refresh() if ui then ui.Refresh() end end
+    local function refresh()if ui then ui.Refresh()end end
     state.RefreshAutomationUI=refresh
     local function refreshUnlocks()
         for _,floor in ipairs(catalog.Floors)do state.IsAutomationFloorUnlocked(floor.Id)end
@@ -8274,105 +7499,97 @@ return function(ctx)
     end
     local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
     local locations=profile and profile:FindFirstChild("Locations")
-    if locations then
-        ctx.Bind(locations.ChildAdded,refreshUnlocks)
-        ctx.Bind(locations.ChildRemoved,refreshUnlocks)
-    end
+    if locations then ctx.Bind(locations.ChildAdded,refreshUnlocks);ctx.Bind(locations.ChildRemoved,refreshUnlocks)end
     local function snapshot()return {Enabled=state.Enabled,AutoFarm=state.AutoFarm,SkillAura=state.SkillAura}end
     local function restoreFeatures(features)
-        if type(features)~="table" or not state.Running then return end
-        if type(features.AutoFarm)=="boolean" then state.SetAutoFarm(features.AutoFarm) end
-        if type(features.Enabled)=="boolean" then state.SetEnabled(features.Enabled) end
-        if type(features.SkillAura)=="boolean" then state.SetSkillAura(features.SkillAura) end
+        if not state.Running or type(features)~="table"then return end
+        local setters={AutoFarm=state.SetAutoFarm,Enabled=state.SetEnabled,SkillAura=state.SetSkillAura}
+        for _,name in ipairs({"AutoFarm","Enabled","SkillAura"})do
+            if type(features[name])=="boolean"then setters[name](features[name])end
+        end
     end
     local function allowed(person)return person==player or state.SafeWhitelistIds[tostring(person.UserId)]==true end
     local function others()
-        local result={};for _,person in ipairs(Players:GetPlayers()) do if person~=player then result[#result+1]=person end end
+        local result={}
+        for _,person in ipairs(Players:GetPlayers())do if person~=player then result[#result+1]=person end end
         return result
     end
     local function save(ticket)
         if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure(true);assert(ready,reason)end
-        writefile(path, HttpService:JSONEncode(ticket))
-        return true
+        writefile(path,HttpService:JSONEncode(ticket));return true
     end
     local function readTicket()
-        if typeof(isfile) ~= "function" or typeof(readfile) ~= "function" or not isfile(path) then return end
-        local raw = readfile(path)
-        assert(#raw < 16384, "Solo-search state exceeds its size limit")
-        return HttpService:JSONDecode(raw)
+        if typeof(isfile)~="function"or typeof(readfile)~="function"or not isfile(path)then return nil end
+        local source=readfile(path)
+        assert(#source<16384,"Solo-search state exceeds its size limit")
+        return HttpService:JSONDecode(source)
     end
     local nativeBlockedEvents,blockEventsBound={},false
     local function bindBlockEvents()
         if blockEventsBound then return end
-        local blockedOK,blockedEvent=pcall(StarterGui.GetCore,StarterGui,"PlayerBlockedEvent")
-        local unblockedOK,unblockedEvent=pcall(StarterGui.GetCore,StarterGui,"PlayerUnblockedEvent")
-        if not blockedOK or not unblockedOK then return end
-        local function id(person)return typeof(person)=="Instance"and person.UserId or tonumber(person)end
-        ctx.Bind(blockedEvent.Event,function(person)local userId=id(person);if userId then nativeBlockedEvents[userId]=true end end)
-        ctx.Bind(unblockedEvent.Event,function(person)local userId=id(person);if userId then nativeBlockedEvents[userId]=nil end end)
+        local blocked,added=pcall(StarterGui.GetCore,StarterGui,"PlayerBlockedEvent")
+        local unblocked,removed=pcall(StarterGui.GetCore,StarterGui,"PlayerUnblockedEvent")
+        if not blocked or not unblocked then return end
+        local function identity(value)return typeof(value)=="Instance"and value.UserId or tonumber(value)end
+        ctx.Bind(added.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=true end end)
+        ctx.Bind(removed.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=nil end end)
         blockEventsBound=true
     end
     local function getBlocked()
         bindBlockEvents()
-        local ids = StarterGui:GetCore("GetBlockedUserIds")
-        assert(type(ids) == "table", "Blocked-user list is unavailable")
-        local result = {}
-        for _, id in ipairs(ids) do result[tonumber(id)] = true end
-        for id in pairs(nativeBlockedEvents)do result[id]=true end
-        return result
+        local values=StarterGui:GetCore("GetBlockedUserIds")
+        assert(type(values)=="table","Blocked-user list is unavailable")
+        local membership={}
+        for _,value in ipairs(values)do membership[tonumber(value)]=true end
+        for id in pairs(nativeBlockedEvents)do membership[id]=true end
+        return membership
     end
     local function queuePreflight()
         if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure();assert(ready,reason)end
-        assert(typeof(readfile) == "function" and typeof(writefile) == "function" and typeof(isfile) == "function",
+        assert(typeof(readfile)=="function"and typeof(writefile)=="function"and typeof(isfile)=="function",
             "File access is required to resume after rejoining")
-        queue = queue_on_teleport or queueonteleport
-            or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-        assert(typeof(queue) == "function", "This executor has no queue_on_teleport support")
-        assert(isfile(state.SavedScriptPath), "Automatic source installation failed: " .. state.SavedScriptPath)
+        queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)or (fluxus and fluxus.queue_on_teleport)
+        assert(typeof(queue)=="function","This executor has no queue_on_teleport support")
+        local location=state.SavedScriptPath
+        assert(isfile(location),"Automatic source installation failed: "..location)
         local generation=state.StorageBootstrap and state.StorageBootstrap.Generation or 0
-        if validatedSource and validatedPath==state.SavedScriptPath and validatedGeneration==generation then return end
-        savedSource = readfile(state.SavedScriptPath)
-        assert(string.find(savedSource, state.Build, 1, true)
-            and string.find(savedSource, "-- BEGIN BUNDLED SERVER ISOLATION", 1, true),
+        if validatedSource and validatedPath==location and validatedGeneration==generation then return end
+        local source=readfile(location)
+        assert(source:find(state.Build,1,true)and source:find("-- BEGIN BUNDLED SERVER ISOLATION",1,true),
             "The executor's saved script could not be refreshed automatically")
-        if savedSource~=validatedSource then
-            assert(loadstring(savedSource), "The saved script does not compile")
-            validatedSource=savedSource
+        if source~=validatedSource then
+            assert(loadstring(source),"The saved script does not compile")
+            validatedSource=source
         end
-        validatedPath=state.SavedScriptPath;validatedGeneration=generation
+        savedSource=source;validatedPath=location;validatedGeneration=generation
     end
     local function preflight()
         queuePreflight()
-        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent) == "function", "Automatic prompt input is unavailable")
-        getBlocked() -- Refuse to add blocks if we cannot verify them afterward.
-        if not isfile(path) then save({Version=1, Active=false}) end
+        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic prompt input is unavailable")
+        getBlocked()
+        if not isfile(path)then save({Version=1,Active=false})end
     end
     local function findPrompt(target)
-        local CoreGui = game:GetService("CoreGui")
-        assert(CoreGui, "The search worker cannot access Roblox's block dialog")
-        -- FoundationOverlay names can be duplicated. Inspect each actual overlay,
-        -- then bind the observed Title/AlertContents/Footer structure to this user.
-        for _, overlay in ipairs(CoreGui:GetChildren()) do
-            if overlay.Name == "FoundationOverlay" and overlay:IsA("ScreenGui") and overlay.Enabled then
-                for _, title in ipairs(overlay:QueryDescendants("TextLabel")) do
-                    if title.Name == "Title" and title.Visible then
-                        local contents = title.Parent and title.Parent.Parent and title.Parent.Parent.Parent
-                        local modal = contents and contents.Parent
-                        if contents and contents.Name == "AlertContents" and modal and modal.Name == "AlertModal"
-                            and modal.Parent and modal.Parent.Name == "BlockingModal" then
-                            local footer = contents:FindFirstChild("Footer")
-                            local buttons = footer and footer:FindFirstChild("Buttons")
-                            local confirm = buttons and buttons:FindFirstChild("3")
-                            local cancel = buttons and buttons:FindFirstChild("1")
-                            local report = buttons and buttons:FindFirstChild("2")
-                            local matches = string.find(title.Text, target.DisplayName, 1, true)
-                                or string.find(title.Text, target.Name, 1, true)
-                            if matches and confirm and cancel and report
-                                and confirm:IsA("GuiButton") and confirm.LayoutOrder == 0
-                                and cancel.LayoutOrder == 2 and report.LayoutOrder == 1 then
-                                return confirm, cancel
-                            end
-                            error("Another or unsupported Roblox block dialog is open")
+        local core=game:GetService("CoreGui")
+        assert(core,"The search worker cannot access Roblox's block dialog")
+        for _,overlay in ipairs(core:GetChildren())do
+            if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
+                for _,title in ipairs(overlay:QueryDescendants("TextLabel"))do
+                    if title.Name=="Title"and title.Visible then
+                        local contents=title.Parent and title.Parent.Parent and title.Parent.Parent.Parent
+                        local modal=contents and contents.Parent
+                        if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
+                            and modal.Parent and modal.Parent.Name=="BlockingModal"then
+                            local footer=contents:FindFirstChild("Footer")
+                            local buttons=footer and footer:FindFirstChild("Buttons")
+                            local confirm=buttons and buttons:FindFirstChild("3")
+                            local cancel=buttons and buttons:FindFirstChild("1")
+                            local report=buttons and buttons:FindFirstChild("2")
+                            local matches=title.Text:find(target.DisplayName,1,true)or title.Text:find(target.Name,1,true)
+                            local supported=confirm and cancel and report and confirm:IsA("GuiButton")
+                                and confirm.LayoutOrder==0 and cancel.LayoutOrder==2 and report.LayoutOrder==1
+                            assert(matches and supported,"Another or unsupported Roblox block dialog is open")
+                            return confirm,cancel
                         end
                     end
                 end
@@ -8380,64 +7597,61 @@ return function(ctx)
         end
     end
     local function click(button)
-        assert(button.Visible and button.Active and button.AbsoluteSize.X > 0, "Block dialog is not ready")
+        assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=blockPoint(button,GuiService:GetGuiInset())
-        virtualInput:SendMouseMoveEvent(point.X, point.Y, game)
-        virtualInput:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0)
+        virtualInput:SendMouseMoveEvent(point.X,point.Y,game)
+        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
         task.wait(.03)
-        virtualInput:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0)
+        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
     end
-    local block
+    local function directBlock(target,active)
+        local button,cancel=findPrompt(target)
+        if not active()then return false end
+        if not button then StarterGui:SetCore("PromptBlockPlayer",target)end
+        local deadline=os.clock()+8
+        repeat
+            button,cancel=findPrompt(target)
+            if not active()then if cancel then click(cancel)end;return false end
+            if button then break end
+            task.wait(.05)
+        until os.clock()>=deadline
+        assert(button,"Roblox block dialog did not open; no rejoin attempted")
+        if not active()then if cancel then click(cancel)end;return false end
+        click(button)
+        local receipt
+        deadline=os.clock()+10
+        repeat
+            if not active()then return false end
+            if getBlocked()[target.UserId]then
+                receipt=receipt or os.clock()
+                if os.clock()-receipt>=math.clamp((state.PingMs or 100)/1000+.05,.15,.75)then return true end
+            else receipt=nil end
+            task.wait(.05)
+        until os.clock()>=deadline
+        error("Roblox did not confirm the block; no rejoin attempted")
+    end
+    local block=directBlock
     if ctx.MakeBlockConfirm then
         block=ctx.MakeBlockConfirm({Find=findPrompt,Prompt=function(target)StarterGui:SetCore("PromptBlockPlayer",target)end,
             Ready=function(button)return button.Visible and button.Active and button.AbsoluteSize.X>0 end,
             Key=function(button)return tostring(button.AbsolutePosition).."/"..tostring(button.AbsoluteSize)end,
             Click=click,Now=os.clock,Sleep=task.wait,
             Blocked=function(target)return nativeBlockedEvents[target.UserId]==true or getBlocked()[target.UserId]==true end,
-            -- The native event/list is the acknowledgment; no extra ping timer is needed.
             Settle=function()return 0 end})
-    else
-        block=function(target,active)
-        local confirm = findPrompt(target)
-        if not active() then return false end
-        if not confirm then StarterGui:SetCore("PromptBlockPlayer", target) end
-        local deadline = os.clock() + 8
-        local cancel
-        repeat
-            confirm, cancel = findPrompt(target)
-            if not active() then if cancel then click(cancel) end; return false end
-            if confirm then break end
-            task.wait(.05)
-        until os.clock() >= deadline
-        assert(confirm, "Roblox block dialog did not open; no rejoin attempted")
-        if not active() then if cancel then click(cancel) end; return false end
-        click(confirm) -- Only the block button; the adjacent report button is excluded.
-        local confirmedAt
-        deadline = os.clock() + 10
-        repeat
-            if not active() then return false end
-            if getBlocked()[target.UserId] then
-                confirmedAt = confirmedAt or os.clock()
-                if os.clock() - confirmedAt >= math.clamp((state.PingMs or 100)/1000+.05,.15,.75) then return true end
-            else confirmedAt = nil end
-            task.wait(.05)
-        until os.clock() >= deadline
-        error("Roblox did not confirm the block; no rejoin attempted")
-    end
     end
     local blockBusy=false
     local function performBlock(target,active)
-        local deadline=os.clock()+10
-        while blockBusy do
+        local expires=os.clock()+10
+        repeat
             if not active()then return false end
-            assert(os.clock()<deadline,"Another native block confirmation is still active")
+            if not blockBusy then break end
+            assert(os.clock()<expires,"Another native block confirmation is still active")
             task.wait(.04)
-        end
-        if not active()then return false end
+        until false
         blockBusy=true
-        local ok,result=pcall(block,target,active)
+        local sent,result=pcall(block,target,active)
         blockBusy=false
-        if not ok then error(result)end
+        if not sent then error(result)end
         return result==true
     end
     function state.BlockPlayerNative(target,active)
@@ -8449,146 +7663,131 @@ return function(ctx)
     end
     local queuedToken
     function state.QueueAutomation()
-        if queuedToken and queuedToken==state.AutomationRunId then return end
+        if queuedToken==state.AutomationRunId and queuedToken then return end
         queuePreflight()
-        state.AutomationRunId=state.AutomationRunId or HttpService:GenerateGUID(false)
-        state.AutomationResumeFeatures=snapshot()
+        local runId=state.AutomationRunId or HttpService:GenerateGUID(false)
+        state.AutomationRunId=runId;state.AutomationResumeFeatures=snapshot()
         assert(state.SaveNow(),"Could not save automation settings")
         local code=string.format([[
-if not game:IsLoaded() then game.Loaded:Wait() end
-local p=game:GetService("Players").LocalPlayer
-while not p do task.wait();p=game:GetService("Players").LocalPlayer end
-local h=game:GetService("HttpService")
-local ok,c=pcall(function()return h:JSONDecode(readfile(%q))end)
-if ok and type(c)=="table" and c.AutomationRunId==%q and (c.SafeMode==true or c.MultiSpot==true or c.AccountProgression==true)
-    and game.GameId==%s then
-    local old=getgenv().SB2KillAura
-    if not (old and old.Running and old.AutomationLoadedJob==game.JobId and old.AutomationRunId==c.AutomationRunId) then
+if not game:IsLoaded()then game.Loaded:Wait()end
+local Players=game:GetService("Players")
+local player=Players.LocalPlayer
+while not player do task.wait();player=Players.LocalPlayer end
+local HttpService=game:GetService("HttpService")
+local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
+if valid and type(settings)=="table"and settings.AutomationRunId==%q
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression)and game.GameId==%s then
+    local active=getgenv().SB2KillAura
+    if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
-        if string.find(source,%q,1,true) then
-            getgenv().SB2AutomationResumeFeatures=c.AutomationResumeFeatures
-            local valid,t=pcall(function()return h:JSONDecode(readfile(%q))end)
-            if valid and type(t)=="table" and t.Active==true and t.UserId==p.UserId and t.PlaceId==game.PlaceId then
-                getgenv().SB2SoloResumeTicket=t
+        if source:find(%q,1,true)then
+            getgenv().SB2AutomationResumeFeatures=settings.AutomationResumeFeatures
+            local ok,ticket=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
+            if ok and type(ticket)=="table"and ticket.Active==true and ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId then
+                getgenv().SB2SoloResumeTicket=ticket
             end
             assert(loadstring(source))()
         end
     end
 end
-]],state.ConfigPath,state.AutomationRunId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
-        queue(code);queuedToken=state.AutomationRunId
+]],state.ConfigPath,runId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
+        queue(code);queuedToken=runId
     end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
     end
     local function escapeAfterRejoin()
-        if not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting and state.Running and not state.StopEverything and not state.ModeratorBlocking then
-            if state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
-        end
+        local canMove=not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting
+            and state.Running and not state.StopEverything and not state.ModeratorBlocking
+        if canMove and state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
     end
-    local function fail(message)
-        clearRejoinAway()
-        state.AutomationTeleporting=false
-        if state.SoloServerSearch and state.SoloServerSearch.Active then state.SoloServerSearch.Stop("Automation stopped") end
-        if state.MultiSpotController then state.MultiSpotController.Pause(tostring(message)) end
-        if state.AccountProgression and state.ProgressionController then state.ProgressionController.Pause(message) end
-        if state.SafeMode and state.SafeController then state.SafeController.Pause(message)
-        elseif state.ReleaseSafePanic then state.ReleaseSafePanic() end
-        state.SafeModeStatus=tostring(message);state.MultiSpotStatus=tostring(message)
+    local function fail(reason)
+        clearRejoinAway();state.AutomationTeleporting=false
+        if state.SoloServerSearch and state.SoloServerSearch.Active then state.SoloServerSearch.Stop("Automation stopped")end
+        if state.MultiSpotController then state.MultiSpotController.Pause(tostring(reason))end
+        if state.AccountProgression and state.ProgressionController then state.ProgressionController.Pause(reason)end
+        if state.SafeMode and state.SafeController then state.SafeController.Pause(reason)
+        elseif state.ReleaseSafePanic then state.ReleaseSafePanic()end
+        state.SafeModeStatus=tostring(reason);state.MultiSpotStatus=tostring(reason)
         state.SaveNow();refresh()
     end
     function state.ChangeAutomationFloor(placeId)
         if state.AutomationTeleporting then return true end
         local floor=catalog.FloorById[placeId]
-        if not floor or not state.IsAutomationFloorUnlocked(placeId) then
+        if not floor or not state.IsAutomationFloorUnlocked(placeId)then
             local reason="Selected floor is locked or unavailable"
             state.LastFloorTravelError=reason;fail(reason);return false,reason
         end
-        local ownedByProgression=state.AccountProgression==true
+        local progression=state.AccountProgression==true
         state.FloorTravelAttempt=0
-        local ok,message=pcall(function()
+        local sent,reason=pcall(function()
             assert(state.PanicToSpawn(),"Wait for a living character at the teleport pad")
-            state.QueueAutomation()
-            state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+45
-            -- Give the pad position time to replicate. A live .5-second retry
-            -- succeeded after the previous .2-second first request was rejected.
-            for attempt=1,2 do
+            state.QueueAutomation();state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+45
+            local attempt=1
+            repeat
                 task.wait(math.clamp((state.PingMs or 100)/1000+.25,.5,1))
                 assert(state.Running and not state.StopEverything and state.AutomationTeleporting,"Floor travel cancelled")
-                assert(not ownedByProgression or state.AccountProgression,"Account Progression stopped")
+                assert(not progression or state.AccountProgression,"Account Progression stopped")
                 assert(state.PanicToSpawn(),"Wait for a living character at the teleport pad")
                 state.FloorTravelAttempt=attempt
-                local result=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"Teleport",placeId})
-                if result==nil or result==""then return end
-                if attempt==2 then error(tostring(result))end
-            end
+                local reply=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"Teleport",placeId})
+                if reply==nil or reply==""then return end
+                if attempt==2 then error(tostring(reply))end
+                attempt=attempt+1
+            until attempt>2
         end)
-        state.LastFloorTravelError=not ok and tostring(message)or nil
-        if not ok then fail(message) end
-        return ok,state.LastFloorTravelError
+        state.LastFloorTravelError=not sent and tostring(reason)or nil
+        if not sent then fail(reason)end
+        return sent,state.LastFloorTravelError
     end
-    local api=ctx.Make({
-        UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
-        SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,
-        NewId=function()return HttpService:GenerateGUID(false)end,Random=function(count)return math.random(1,count)end,
-        Preflight=preflight,Save=save,GetBlocked=getBlocked,SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,
-        GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
-        ChooseTarget=function(candidates)
-            for _,target in ipairs(candidates) do if target.UserId==state.SafePendingUserId then return target end end
-            return candidates[math.random(1,#candidates)]
-        end,
-        IsPresent=function(target)return target.Parent==Players end,
-        Block=function(target,active)
-            local started=os.clock()
-            local result=performBlock(target,active)
-            state.LastSafeBlockSeconds=os.clock()-started
+    local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
+        SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
+        Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
+        SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
+        ChooseTarget=function(people)
+            for _,person in ipairs(people)do if person.UserId==state.SafePendingUserId then return person end end
+            return people[math.random(1,#people)]
+        end,IsPresent=function(person)return person.Parent==Players end,
+        Block=function(person,active)
+            local before=os.clock();local confirmed=performBlock(person,active)
+            state.LastSafeBlockSeconds=os.clock()-before
             local search=state.SoloServerSearch
             if search and search.Ticket then search.Ticket.LastBlockSeconds=state.LastSafeBlockSeconds end
-            return result
+            return confirmed
         end,
         Queue=function()state.QueueAutomation()end,
         Hop=function()
-            state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
-            state.SafeRejoinRequested=true
+            state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40;state.SafeRejoinRequested=true
             local dispatch={};state.SafeRejoinDispatch=dispatch
-            -- Defer runs after the native call is entered (or returns), so a
-            -- yielding Teleport call cannot hold the character at spawn.
-            task.defer(function()
-                if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end
-            end)
-            local sent,message=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
-            if not sent then clearRejoinAway();error(message)end
+            task.defer(function()if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end end)
+            local ok,reason=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
+            if not ok then clearRejoinAway();error(reason)end
             escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
             if state.SafeMode then state.SafeModeStatus=search.Status end
             refresh()
-        end,
-    })
+        end})
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
-        Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,ReleasePanic=function()state.ReleaseSafePanic()end,
-        Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
-        Status=function(text)state.SafeModeStatus=text end,Save=state.SaveNow})
+        Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,
+        ReleasePanic=function()state.ReleaseSafePanic()end,Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
+        Status=function(message)state.SafeModeStatus=message end,Save=state.SaveNow})
     state.SafeController=safe
     local multi=ctx.MakeMulti({State=state,Respawns=state.MultiSpotRespawns,Spots=function()return catalog.Spots end,
         PriorityTarget=function()return state.GetFarmPriorityTarget and state.GetFarmPriorityTarget(os.clock())end,
         DepartureReady=function()return not state.FarmCoordination or state.FarmCoordination.Ready("spot")end,
         Suspend=function()
             state.MultiSpotPriorityActive=true
-            if state.MultiSpotOwnsTravel and state.TravelBusy then
-                state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
-            end
-            state.MultiSpotOwnsTravel=false;state.MultiSpotTravelPending=false
-            state.MultiSpotLandingPosition=nil;state.MultiSpotEmptySince=nil
+            if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
+            state.MultiSpotOwnsTravel=false;state.MultiSpotTravelPending=false;state.MultiSpotLandingPosition=nil;state.MultiSpotEmptySince=nil
             state.TravelHold=false;state.TravelHoldPosition=nil
             if state.ArenaFloat then state.ArenaFloat.Release()end
         end,
-        Resume=function()state.MultiSpotPriorityActive=false end,
-        CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
+        Resume=function()state.MultiSpotPriorityActive=false end,CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
             if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
@@ -8596,123 +7795,108 @@ end
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
             if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-            return not state.AutomationTeleporting and not state.SafeModePanic and not api.Active and not (state.SafeMode and safe.Seeking)
-                and not state.TravelBusy and not state.Dodging and not state.Recovering
+            return not(state.AutomationTeleporting or state.SafeModePanic or api.Active or state.SafeMode and safe.Seeking
+                or state.TravelBusy or state.Dodging or state.Recovering)
         end,
         Moving=function()return state.TravelBusy end,
         Arrived=function(spot)
             state.MultiSpotOwnsTravel=false
-            local character=player.Character
-            local root=character and character:FindFirstChild("HumanoidRootPart")
-            local landed=state.LastTravelPosition
-            local arrived=spot and root and landed and state.LastTravelDestination==spot.DestinationId
-                and (root.Position-landed).Magnitude<=25
-            if arrived and state.FinishMultiSpotArrival then state.FinishMultiSpotArrival() end
+            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            local position=state.LastTravelPosition
+            local arrived=spot and root and position and state.LastTravelDestination==spot.DestinationId and (root.Position-position).Magnitude<=25
+            if arrived and state.FinishMultiSpotArrival then state.FinishMultiSpotArrival()end
             return arrived
         end,
         Go=function(spot,resume)
             if state.TravelBusy then return false end
-            state.RegisterAutomationDestination(spot)
-            state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position;state.MultiSpotEncounter=resume and state.MultiSpotEncounter or {};state.MultiSpotNextScan=0;state.FollowTarget=nil;state.LastTravelDestination=nil
-            state.MultiSpotOwnsTravel=true
+            state.RegisterAutomationDestination(spot);state.MultiSpotEmptySince=nil;state.MultiSpotAnchor=spot.Position
+            state.MultiSpotEncounter=resume and state.MultiSpotEncounter or {};state.MultiSpotNextScan=0
+            state.FollowTarget=nil;state.LastTravelDestination=nil;state.MultiSpotOwnsTravel=true
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
         Encounter=function(spot)return state.ReadAutomationEncounter(spot)end,
         ClearEncounter=function()state.MultiSpotEncounter={};state.MultiSpotNextScan=0 end,
         Release=function()
-            if state.ArenaFloat then state.ArenaFloat.Release() end
+            if state.ArenaFloat then state.ArenaFloat.Release()end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
-            state.MultiSpotPriorityActive=false
-            state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false;state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
-            state.MultiSpotTravelPending=false
-            state.MultiSpotLandingPosition=nil
-        end,
-        Status=function(text)state.MultiSpotStatus=text end,Save=state.SaveNow})
+            state.MultiSpotPriorityActive=false;state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false
+            state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
+            state.MultiSpotTravelPending=false;state.MultiSpotLandingPosition=nil
+        end,Status=function(message)state.MultiSpotStatus=message end,Save=state.SaveNow})
     state.MultiSpotController=multi
     local function ensureToken()
-        if not state.SafeMode and not state.MultiSpot and not state.AccountProgression then
-            state.AutomationRunId=HttpService:GenerateGUID(false);queuedToken=nil
-        end
+        if state.SafeMode or state.MultiSpot or state.AccountProgression then return end
+        state.AutomationRunId=HttpService:GenerateGUID(false);queuedToken=nil
     end
     function state.SetSafeMode(on)
         if state.SafeKickFallback then state.SafeKickFallback.Reset()end
         ensureToken();safe.Reset();state.SafeMode=on==true
-        if not state.SafeMode then state.ReleaseSafePanic() end
-        state.SafeModeStatus=state.SafeMode and "Checking selected floor..." or "Safe Mode is off"
+        if not state.SafeMode then state.ReleaseSafePanic()end
+        state.SafeModeStatus=state.SafeMode and "Checking selected floor..."or "Safe Mode is off"
         state.SafePendingUserId=nil;state.SaveNow();refresh()
         if state.SafeMode then task.defer(function()workerIdentity();safe.Update();refresh()end)end
     end
     state.SetSoloServerSearch=state.SetSafeMode
     function state.SetSafeFloor(id)
         if state.AccountProgression then
-            state.SafeFloorId=game.PlaceId
-            state.SafeModeStatus="Account Progression · protecting the current floor"
+            state.SafeFloorId=game.PlaceId;state.SafeModeStatus="Account Progression · protecting the current floor"
             state.SaveNow();refresh();return false
         end
         local floor=catalog.FloorById[tonumber(id)]
-        if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
-        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id;state.SaveNow();refresh()
-        if state.SafeMode then
-            state.PanicToSpawn()
-            task.defer(function()workerIdentity();safe.Update();refresh()end)
-        end
+        if not floor or not state.IsAutomationFloorUnlocked(floor.Id)then state.SafeModeStatus="That floor is locked";refresh();return false end
+        safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id
+        state.SaveNow();refresh()
+        if state.SafeMode then state.PanicToSpawn();task.defer(function()workerIdentity();safe.Update();refresh()end)end
         return true
     end
     local whitelistGeneration=0
     function state.SetSafeWhitelist(text)
-        text=tostring(text or ""):gsub("[^%w_]", " ")
-        local entries,seen={},{}
-        for word in text:gmatch("%S+")do
-            local key=word:lower()
-            if not seen[key]then seen[key]=true;entries[#entries+1]=word end
+        local entries,used={},{}
+        for value in tostring(text or ""):gsub("[^%w_]"," "):gmatch("%S+")do
+            if not used[value:lower()]then used[value:lower()]=true;entries[#entries+1]=value end
         end
         text=table.concat(entries,", ")
         if #text>2000 then state.SafeModeStatus="Whitelist is too long";refresh();return false end
-        whitelistGeneration=whitelistGeneration+1;local token=whitelistGeneration
+        whitelistGeneration=whitelistGeneration+1
+        local token=whitelistGeneration
         safe.Reset();state.SafeWhitelistResolving=true
         task.delay(12,function()
             if token~=whitelistGeneration or not state.Running or not state.SafeWhitelistResolving then return end
             whitelistGeneration=whitelistGeneration+1;state.SafeWhitelistResolving=false
-            state.SafeModeStatus="Whitelist lookup timed out · using the saved whitelist"
-            refresh()
+            state.SafeModeStatus="Whitelist lookup timed out · using the saved whitelist";refresh()
         end)
         task.spawn(function()
-            local ids,count={},0
-            local ok,message=pcall(function()
-                for word in text:gmatch("[^,%s;]+") do
-                    count=count+1;assert(count<=100,"Use at most 100 whitelist entries")
-                    word=word:gsub("^@","")
-                    local id=tonumber(word)
-                    if not id then id=Players:GetUserIdFromNameAsync(word) end
-                    assert(id and id>0 and id%1==0,"Invalid whitelist user: "..word)
-                    ids[tostring(id)]=true
+            local membership={}
+            local ok,reason=pcall(function()
+                assert(#entries<=100,"Use at most 100 whitelist entries")
+                for _,name in ipairs(entries)do
+                    local id=tonumber(name)or Players:GetUserIdFromNameAsync(name)
+                    assert(id and id>0 and id%1==0,"Invalid whitelist user: "..name)
+                    membership[tostring(id)]=true
                 end
             end)
             if token~=whitelistGeneration or not state.Running then return end
             state.SafeWhitelistResolving=false
-            if not ok then state.SafeModeStatus="Whitelist was not saved: "..tostring(message);refresh();return end
-            state.SafeWhitelistIds=ids;state.SafeWhitelistText=text;safe.Reset()
-            if state.UI.SafeWhitelist and not state.UI.SafeWhitelist:IsFocused() then state.UI.SafeWhitelist.Text=text end
-            state.SafeModeStatus=state.SafeMode and "Whitelist updated · checking server" or "Whitelist saved"
+            if not ok then state.SafeModeStatus="Whitelist was not saved: "..tostring(reason);refresh();return end
+            state.SafeWhitelistIds=membership;state.SafeWhitelistText=text;safe.Reset()
+            if state.UI.SafeWhitelist and not state.UI.SafeWhitelist:IsFocused()then state.UI.SafeWhitelist.Text=text end
+            state.SafeModeStatus=state.SafeMode and "Whitelist updated · checking server"or "Whitelist saved"
             state.SaveNow();refresh()
-            if state.SafeMode then
-                workerIdentity()
-                safe.Update();refresh()
-            end
+            if state.SafeMode then workerIdentity();safe.Update();refresh()end
         end)
         return true
     end
     function state.SetMultiSpot(on)
         ensureToken();multi.Reset();state.MultiSpot=on==true
-        state.MultiSpotStatus=state.MultiSpot and "Starting selected arenas..." or "Multi Spot is off"
+        state.MultiSpotStatus=state.MultiSpot and "Starting selected arenas..."or "Multi Spot is off"
         state.SaveNow();refresh()
         if state.MultiSpot and not state.AccountProgression then task.defer(function()workerIdentity();multi.Update(farmClock());refresh()end)end
     end
     local function spotOrder(selected,requested)
-        local order,seen={},{}
+        local order,membership={},{}
         local function append(id)
-            id=catalog.Aliases[id]or id
-            if selected[id]and not seen[id]then order[#order+1]=id;seen[id]=true end
+            local canonical=catalog.Aliases[id]or id
+            if selected[canonical]and not membership[canonical]then order[#order+1]=canonical;membership[canonical]=true end
         end
         for _,id in ipairs(state.MultiSpotOrder)do
             local spot=catalog.SpotById[id]
@@ -8724,82 +7908,75 @@ end
         return order
     end
     function state.SetMultiSpotSelection(id,on)
-        id=catalog.Aliases[id] or id
-        local spot=catalog.SpotById[id]
-        if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId) then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
-        state.MultiSpotSelected[id]=on==true or nil;state.MultiSpotOrder=spotOrder(state.MultiSpotSelected);multi.Reset();state.SaveNow();refresh();return true
+        local key=catalog.Aliases[id]or id
+        local spot=catalog.SpotById[key]
+        if not spot or not state.IsAutomationFloorUnlocked(spot.PlaceId)then state.MultiSpotStatus="That arena's floor is locked";refresh();return false end
+        state.MultiSpotSelected[key]=on==true or nil;state.MultiSpotOrder=spotOrder(state.MultiSpotSelected)
+        multi.Reset();state.SaveNow();refresh();return true
     end
     function state.SetMultiSpotSelections(selected,order)
-        local result=table.clone(state.MultiSpotSelected)
-        for id in pairs(result)do
+        local nextSelection=table.clone(state.MultiSpotSelected)
+        for id in pairs(nextSelection)do
             local spot=catalog.SpotById[id]
-            if spot and spot.PlaceId==game.PlaceId then result[id]=nil end
+            if spot and spot.PlaceId==game.PlaceId then nextSelection[id]=nil end
         end
         for id,on in pairs(selected or {})do
             if on then
                 local spot=catalog.SpotById[catalog.Aliases[id]or id]
                 if not spot or spot.PlaceId~=game.PlaceId or not state.IsAutomationFloorUnlocked(spot.PlaceId)then return false end
-                result[spot.Id]=true
+                nextSelection[spot.Id]=true
             end
         end
-        state.MultiSpotOrder=spotOrder(result,order)
-        state.MultiSpotSelected=result;multi.Reset();state.SaveNow();refresh();return true
+        state.MultiSpotOrder=spotOrder(nextSelection,order);state.MultiSpotSelected=nextSelection
+        multi.Reset();state.SaveNow();refresh();return true
     end
     local function joinFriendAtPad(id,active)
         state.AutoJoinFriendHolding=true
-        local function permitted()
-            return active()and not api.Active and not (state.SafeMode and safe.Seeking)
-        end
+        local function permitted()return active()and not api.Active and not(state.SafeMode and safe.Seeking)end
         local ok,result=pcall(function()
-            for attempt=1,2 do
+            local attempt=1
+            repeat
                 assert(permitted(),"Friend join cancelled for protection or travel")
                 assert(state.PanicToSpawn(),"Wait for a living character at the teleport pad")
                 task.wait(math.clamp((state.PingMs or 100)/1000+.25,.5,1))
                 assert(permitted(),"Friend join cancelled for protection or travel")
                 assert(state.PanicToSpawn(),"Teleport pad is unavailable")
-                local message=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})
-                if message==nil or message==""then
-                    -- Hold through the native transition instead of farming away from the pad.
-                    local deadline=os.clock()+5
-                    repeat task.wait(.1)until not permitted()or state.ServerTeleportStarted or os.clock()>=deadline
-                    return message
+                local reply=game.ReplicatedStorage.Function:InvokeServer("Teleport",{"FriendTeleport",id})
+                if reply==nil or reply==""then
+                    local expires=os.clock()+5
+                    repeat task.wait(.1)until not permitted()or state.ServerTeleportStarted or os.clock()>=expires
+                    return reply
                 end
-                if attempt==2 or not tostring(message):lower():find("teleport pad",1,true)then return message end
-            end
+                if attempt==2 or not tostring(reply):lower():find("teleport pad",1,true)then return reply end
+                attempt=attempt+1
+            until attempt>2
         end)
         state.AutoJoinFriendHolding=false
-        if state.Running and not state.ModeratorBlocking and not api.Active and not (state.SafeMode and safe.Seeking)then
-            state.ReleaseSafePanic()
-        end
+        if state.Running and not state.ModeratorBlocking and not api.Active and not(state.SafeMode and safe.Seeking)then state.ReleaseSafePanic()end
         if not ok then error(result)end
         return result
     end
     local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
-        Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,
-        Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
+        Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
         Queue=function()
-            local queue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-            assert(type(queue)=="function","Executor has no teleport queue support")
-            state.SaveNow()
-            queue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
-        end,
-        Join=joinFriendAtPad})
+            local enqueue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)or (fluxus and fluxus.queue_on_teleport)
+            assert(type(enqueue)=="function","Executor has no teleport queue support")
+            state.SaveNow();enqueue('loadstring(game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau"))()')
+        end,Join=joinFriendAtPad})
     state.AutoJoinFriendController=friend
-    function state.SetAutoJoinFriend(on)
-        state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()
-    end
+    function state.SetAutoJoinFriend(on)state.AutoJoinFriend=on==true;friend.Reset();state.SaveNow();refresh()end
     function state.SetJoinFriendUsername(name)
-        state.JoinFriendUsername=tostring(name or ""):match("^%s*(.-)%s*$"):gsub("^@", ""):sub(1,20)
+        state.JoinFriendUsername=tostring(name or ""):match("^%s*(.-)%s*$"):gsub("^@",""):sub(1,20)
         friend.Reset();state.SaveNow();refresh()
     end
     ui=ctx.MakeUI({State=state,Catalog=catalog,Create=ctx.Create,Button=ctx.Button,Label=ctx.Label,
         Bind=ctx.Bind,Corner=ctx.Corner,Reveal=ctx.Reveal,Parent=ctx.Parent})
     ctx.Bind(Players.PlayerAdded,function(person)
         safe.Joined(person)
-        task.defer(function()workerIdentity();if state.Running then safe.Update();refresh() end end)
+        task.defer(function()workerIdentity();if state.Running then safe.Update();refresh()end end)
     end)
-    ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,message)
-        if who==player then state.AutomationTeleporting=false;api.TeleportFailed(message or result.Name);fail(message or result.Name) end
+    ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,reason)
+        if who==player then state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)end
     end)
     local function fallbackTicket()
         local ticket=api.Ticket
@@ -8818,28 +7995,22 @@ end
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
             Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
-            Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,
-            Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
             Pause=function()
-                workerIdentity();state.SafeKickFallbackBusy=true
-                api.Destroy(true) -- Invalidate pending normal block/hop callbacks without resetting the ticket.
+                workerIdentity();state.SafeKickFallbackBusy=true;api.Destroy(true)
                 if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
             Prepare=function(person)
-                local ticket=fallbackTicket() or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
+                local ticket=fallbackTicket()or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
                 assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
                 ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
-                ticket.LastBlockedUserId=person.UserId
-                save(ticket)
-                state.QueueAutomation()
+                ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
             end,
-            Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,
-            Kick=function(message)player:Kick(message)end,
-            Finish=function()state.SafeKickFallbackBusy=false end,
-            Status=function(message)state.SafeModeStatus=message;refresh()end})
+            Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end,
+            Finish=function()state.SafeKickFallbackBusy=false end,Status=function(message)state.SafeModeStatus=message;refresh()end})
         state.SafeKickFallback=kickFallback
     end
     ctx.Bind(player.OnTeleport,function(stage)
@@ -8847,36 +8018,39 @@ end
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
             escapeAfterRejoin()
-            if state.SafeMode or state.MultiSpot or state.AccountProgression then
-                local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
-            end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
         elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()
         workerIdentity()
-        local features=getgenv().SB2AutomationResumeFeatures
-        getgenv().SB2AutomationResumeFeatures=nil
-        if features then restoreFeatures(features) end
-        local ok,resume=pcall(readTicket);if queuedResume then ok,resume=true,queuedResume end
-        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
+        local resumeFeatures=getgenv().SB2AutomationResumeFeatures;getgenv().SB2AutomationResumeFeatures=nil
+        if resumeFeatures then restoreFeatures(resumeFeatures)end
+        local ok,resume=pcall(readTicket)
+        if queuedResume then ok,resume=true,queuedResume end
+        local resumeAllowed=not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId)
+        if resumeAllowed and ok and type(resume)=="table"and resume.Active==true and resume.PlaceId==game.PlaceId then
+            api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end
+        end
         state.SaveNow()
         while state.Running do
-            if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
-            local updated,message=pcall(function()
-                if state.ModeratorBlocking or state.SafeKickFallbackBusy or (kickFallback and kickFallback.Armed)then return end
-                friend.Update(os.clock())
-                safe.Update()
+            if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
+            local updated,reason=pcall(function()
+                if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
+                friend.Update(os.clock());safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end
                 else multi.Update(farmClock())end
             end)
-            if not updated then fail(message) end
+            if not updated then fail(reason)end
             refresh()
-            task.wait((api.Active or state.SafeModePanic) and .03 or (state.MultiSpot or state.AccountProgression) and .1 or state.SafeMode and .2 or 1)
+            local interval=1
+            if api.Active or state.SafeModePanic then interval=.03
+            elseif state.MultiSpot or state.AccountProgression then interval=.1
+            elseif state.SafeMode then interval=.2 end
+            task.wait(interval)
         end
     end)
-    -- Population monitoring stays responsive even while the search worker yields.
     task.spawn(function()
         while state.Running do
             if kickFallback then pcall(kickFallback.Update,os.clock())end
@@ -8891,54 +8065,64 @@ end
     end)()
     local blockPoint=(function()
 -- BEGIN BUNDLED BLOCK INPUT
--- Live Core FoundationOverlay input needs GuiService's inset, even when the
--- overlay reports IgnoreGuiInset=true (58 px in the observed client).
+-- FoundationOverlay's native coordinate space includes the GuiService inset.
 return function(button,inset)
-    return button.AbsolutePosition+button.AbsoluteSize/2+inset
+    local origin=button.AbsolutePosition
+    local half=button.AbsoluteSize*.5
+    return origin+inset+half
 end
 
 -- END BUNDLED BLOCK INPUT
     end)()
     local makeBlockConfirm=(function()
 -- BEGIN BUNDLED BLOCK CONFIRM
--- Native dialog confirmation only: never reopen after dismissal or click report.
+-- Confirmation is a two-stage native-dialog transaction with an authoritative receipt.
 return function(ctx)
+    local function cancel(target)
+        local _,button=ctx.Find(target)
+        if button then ctx.Click(button)end
+        return false
+    end
     return function(target,active)
-        local button,cancel=ctx.Find(target)
+        local initial=ctx.Find(target)
         if not active()then return false end
-        if not button then ctx.Prompt(target)end
-        local deadline=ctx.Now()+8
+        if not initial then ctx.Prompt(target)end
+        local expires=ctx.Now()+8
+        local ready
         repeat
-            button,cancel=ctx.Find(target)
-            if not active()then if cancel then ctx.Click(cancel)end;return false end
-            if button and ctx.Ready(button)then break end
+            if not active()then return cancel(target)end
+            local button=ctx.Find(target)
+            if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
-        until ctx.Now()>=deadline
-        assert(button and ctx.Ready(button),"Roblox block dialog did not open; no rejoin attempted")
-        local firstReady=ctx.Now()
-        local stableSince,key=firstReady,ctx.Key(button)
-        local nextClick,clicks,confirmedAt=firstReady+.10,0,nil
-        deadline=firstReady+10
+        until ctx.Now()>=expires
+        assert(ready,"Roblox block dialog did not open; no rejoin attempted")
+        local began=ctx.Now()
+        local geometry=ctx.Key(ready)
+        local geometryAt=began
+        local clickAt=began+.1
+        local clicked=0
+        local receiptAt
         repeat
-            if not active()then
-                button,cancel=ctx.Find(target);if cancel then ctx.Click(cancel)end
-                return false
-            end
+            if not active()then return cancel(target)end
             local now=ctx.Now()
             if ctx.Blocked(target)then
-                confirmedAt=confirmedAt or now
-                if now-confirmedAt>=ctx.Settle()then return true end
-            else confirmedAt=nil end
-            if not confirmedAt then button,cancel=ctx.Find(target)end
-            if not confirmedAt and button and ctx.Ready(button)and clicks<4 then
-                local currentKey=ctx.Key(button)
-                if currentKey~=key then key=currentKey;stableSince=now end
-                if now>=nextClick and now-stableSince>=.06 then
-                    ctx.Click(button);clicks+=1;nextClick=ctx.Now()+.3
+                receiptAt=receiptAt or now
+                if now-receiptAt>=ctx.Settle()then return true end
+            else
+                receiptAt=nil
+                local button=ctx.Find(target)
+                if button and ctx.Ready(button)and clicked<4 then
+                    local key=ctx.Key(button)
+                    if key~=geometry then geometry=key;geometryAt=now end
+                    if now>=clickAt and now-geometryAt>=.06 then
+                        ctx.Click(button)
+                        clicked=clicked+1
+                        clickAt=ctx.Now()+.3
+                    end
                 end
             end
             ctx.Sleep(.03)
-        until ctx.Now()>=deadline
+        until ctx.Now()>=began+10
         error("Roblox did not confirm the block; no rejoin attempted")
     end
 end
@@ -8947,57 +8131,68 @@ end
     end)()
     local makeFriend=(function()
 -- BEGIN BUNDLED AUTO JOIN FRIEND
--- Uses the game's native friend-teleport route; never guesses server IDs.
+-- Resolve identities lazily and protect every yielding step with a generation token.
 return function(ctx)
-    local s=ctx.State
+    local state=ctx.State
     local api={}
-    local nextTry,busy,serial=0,false,0
-    local resolvedName,resolvedId
+    local generation,due=0,0
+    local operation
+    local identity={}
+    local function status(message)state.AutoJoinFriendStatus=message end
     function api.Reset()
-        serial+=1;nextTry=0;resolvedName=nil;resolvedId=nil
-        s.AutoJoinFriendStatus=s.AutoJoinFriend and "Checking friend..." or "Auto Join Friend is off"
+        generation=generation+1;due=0;identity={}
+        status(state.AutoJoinFriend and "Checking friend..."or "Auto Join Friend is off")
+    end
+    local function blocked()
+        local gates={{state.ModeratorBlocking,"moderator protection"},{state.SafeModePanic,"Safe Mode protection"},
+            {state.TravelBusy,"current movement"},{state.AutomationTeleporting,"teleport in progress"},
+            {state.AccountProgression,"Account Progression owns floor travel"}}
+        for _,gate in ipairs(gates)do if gate[1]then return gate[2]end end
     end
     function api.Update(now)
-        if not s.AutoJoinFriend then s.AutoJoinFriendStatus="Auto Join Friend is off";return end
-        if not s.Running then return end
-        if s.StopEverything then s.AutoJoinFriendStatus="Paused · Stop Everything is on";return end
-        if busy then return end
-        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@", "")
-        if name==""then s.AutoJoinFriendStatus="Enter a Roblox username";return end
-        if not name:match("^[%w_]+$")or #name>20 then s.AutoJoinFriendStatus="Enter a username, not a display name";return end
-        if s.ModeratorBlocking then s.AutoJoinFriendStatus="Waiting · moderator protection";return end
-        if s.SafeModePanic then s.AutoJoinFriendStatus="Waiting · Safe Mode protection";return end
-        if s.TravelBusy then s.AutoJoinFriendStatus="Waiting · current movement";return end
-        if s.AutomationTeleporting then s.AutoJoinFriendStatus="Waiting · teleport in progress";return end
-        if s.AccountProgression then s.AutoJoinFriendStatus="Waiting · Account Progression owns floor travel";return end
-        if now<nextTry then return end
-        s.AutoJoinFriendStatus="Checking @"..name
-        nextTry=now+20;busy=true
-        local token=serial
-        local function active()return token==serial and s.Running and not s.StopEverything and s.AutoJoinFriend end
-        local function ready()return active()and not(s.ModeratorBlocking or (s.SafeModePanic and not s.AutoJoinFriendHolding) or s.TravelBusy or s.AutomationTeleporting or s.AccountProgression)end
+        if not state.AutoJoinFriend then status("Auto Join Friend is off");return end
+        if not state.Running then return end
+        if state.StopEverything then status("Paused · Stop Everything is on");return end
+        if operation then return end
+        local name=tostring(state.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
+        if name==""then status("Enter a Roblox username");return end
+        if #name>20 or not name:match("^[%w_]+$")then status("Enter a username, not a display name");return end
+        local gate=blocked()
+        if gate then status("Waiting · "..gate);return end
+        if now<due then return end
+        due=now+20
+        local ticket={generation=generation};operation=ticket
+        local function current()
+            return generation==ticket.generation and state.Running and not state.StopEverything and state.AutoJoinFriend
+        end
+        local function ready()
+            return current()and not(state.ModeratorBlocking or (state.SafeModePanic and not state.AutoJoinFriendHolding)
+                or state.TravelBusy or state.AutomationTeleporting or state.AccountProgression)
+        end
+        status("Checking @"..name)
         ctx.Spawn(function()
             local ok,reason=pcall(function()
-                if resolvedName~=name:lower()then
+                local canonical=name:lower()
+                if identity.name~=canonical then
                     local id=ctx.Resolve(name)
-                    if not active()then return end
+                    if not current()then return end
                     assert(type(id)=="number"and id>0,"Username was not found")
-                    resolvedName,resolvedId=name:lower(),id
+                    identity={name=canonical,id=id}
                 end
                 if not ready()then return end
-                if resolvedId==ctx.LocalUserId then s.AutoJoinFriendStatus="Choose another player";return end
-                if ctx.Present(resolvedId)then s.AutoJoinFriendStatus="Joined @"..name.." · staying in this server";return end
-                if s.SafeMode and not(s.SafeWhitelistIds and s.SafeWhitelistIds[tostring(resolvedId)])then
-                    s.AutoJoinFriendStatus="Add @"..name.." to the Safe Mode whitelist first";return
+                if identity.id==ctx.LocalUserId then status("Choose another player");return end
+                if ctx.Present(identity.id)then status("Joined @"..name.." · staying in this server");return end
+                if state.SafeMode and not(state.SafeWhitelistIds and state.SafeWhitelistIds[tostring(identity.id)])then
+                    status("Add @"..name.." to the Safe Mode whitelist first");return
                 end
                 ctx.Queue()
                 if not ready()then return end
-                s.AutoJoinFriendStatus="Joining @"..name
-                local message=ctx.Join(resolvedId,ready)
-                if active()then s.AutoJoinFriendStatus=type(message)=="string"and message~=""and message or "Join requested · waiting for teleport"end
+                status("Joining @"..name)
+                local result=ctx.Join(identity.id,ready)
+                if current()then status(type(result)=="string"and result~=""and result or "Join requested · waiting for teleport")end
             end)
-            busy=false
-            if not ok and active()then s.AutoJoinFriendStatus="Retrying · "..tostring(reason)end
+            if operation==ticket then operation=nil end
+            if not ok and current()then status("Retrying · "..tostring(reason))end
         end)
     end
     api.Reset()
@@ -9008,60 +8203,74 @@ end
     end)()
     local makeKickFallback=(function()
 -- BEGIN BUNDLED SAFE KICK FALLBACK
--- Eight seconds with a present outsider in this job triggers one confirmed-block kick.
+-- Delayed recovery is armed only after the outsider's native block is verified.
 return function(ctx)
     local api={Armed=false,Attempts=0}
-    local seen,busy,retryAt,failures={},false,0,0
-    local generation=0
-    function api.Reset()generation=generation+1;seen={};retryAt=0;failures=0;api.Armed=false;api.Started=false;api.Attempts=0 end
+    local arrivals={}
+    local epoch=0
+    local executing=false
+    local attempts=0
+    local retryDue=0
     local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
+    function api.Reset()
+        epoch=epoch+1;arrivals={};attempts=0;retryDue=0
+        api.Armed=false;api.Started=false;api.Attempts=0
+    end
     function api.MarkStarted()if api.Armed and api.Attempts>0 then api.Started=true end end
-    function api.Update(now)
-        if api.Armed then return end
-        if not enabled()then seen={};return end
-        local present,target,oldest={}
+    local function oldest(now)
+        local membership={}
+        local chosen,since
         for _,person in ipairs(ctx.Players())do
             if not ctx.Allowed(person)then
-                present[person.UserId]=true
-                seen[person.UserId]=seen[person.UserId]or now
-                if not oldest or seen[person.UserId]<oldest then target,oldest=person,seen[person.UserId]end
+                local id=person.UserId
+                membership[id]=true;arrivals[id]=arrivals[id]or now
+                if not since or arrivals[id]<since then chosen,since=person,arrivals[id]end
             end
         end
-        for id in pairs(seen)do if not present[id]then seen[id]=nil end end
-        if not target then failures=0;retryAt=0;return end
-        if busy or failures>=3 or now<retryAt or now-oldest<8 then return end
-        busy=true
-        local token=generation
-        local function active()return token==generation and enabled()and not ctx.Allowed(target)and ctx.Present(target)end
+        for id in pairs(arrivals)do if not membership[id]then arrivals[id]=nil end end
+        return chosen,since
+    end
+    function api.Update(now)
+        if api.Armed then return end
+        if not enabled()then arrivals={};return end
+        local target,since=oldest(now)
+        if not target then attempts=0;retryDue=0;return end
+        if executing or attempts>=3 or now<retryDue or now-since<8 then return end
+        executing=true
+        local token=epoch
+        local function valid()
+            return token==epoch and enabled()and ctx.Present(target)and not ctx.Allowed(target)
+        end
+        local function recovery()
+            ctx.Sleep(.2)
+            local attempt=1
+            while attempt<=3 and token==epoch and enabled()and not api.Started do
+                api.Attempts=attempt
+                local sent,reason=pcall(ctx.Rejoin)
+                if not sent then ctx.Status("Fallback rejoin · "..tostring(reason))end
+                ctx.Sleep(3);attempt=attempt+1
+            end
+            if enabled()and not api.Started then ctx.Status("Fallback rejoin unavailable · rejoin manually")end
+        end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
-                if not active()then return end
+                if not valid()then return end
                 if ctx.CheckLimits then ctx.CheckLimits()end
                 ctx.Pause()
-                if not active()then return end
-                assert(ctx.Block(target,active)==true,"Native block was not confirmed · no kick")
-                if not active()then return end
+                if not valid()then return end
+                local confirmed=ctx.Block(target,valid)
+                assert(confirmed==true,"Native block was not confirmed · no kick")
+                if not valid()then return end
                 ctx.Prepare(target)
-                if not active()then return end
+                if not valid()then return end
                 api.Armed=true
                 ctx.Status("Outsider still present after 8s · blocked · kicking and rejoining")
-                -- Arm recovery before Kick: it may throw or return after disconnect.
-                ctx.Spawn(function()
-                    ctx.Sleep(.2)
-                    for attempt=1,3 do
-                        if token~=generation or not enabled()or api.Started then return end
-                        api.Attempts=attempt
-                        local sent,message=pcall(ctx.Rejoin)
-                        if not sent then ctx.Status("Fallback rejoin · "..tostring(message))end
-                        ctx.Sleep(3)
-                    end
-                    if enabled()and not api.Started then ctx.Status("Fallback rejoin unavailable · rejoin manually")end
-                end)
+                ctx.Spawn(recovery)
                 ctx.Kick("Safe Mode: blocked @"..target.Name.." before automatic rejoin.")
             end)
-            busy=false;ctx.Finish()
+            executing=false;ctx.Finish()
             if not ok then
-                failures=failures+1;retryAt=ctx.Now()+math.min(8,2^failures)
+                attempts=attempts+1;retryDue=ctx.Now()+math.min(8,2^attempts)
                 ctx.Status("Safe fallback · "..tostring(reason))
             end
         end)
@@ -9080,131 +8289,118 @@ end
 do
     local makeController=(function()
 -- BEGIN BUNDLED ACCOUNT PROGRESSION
--- Floor orchestration only. Combat, safe matchmaking, equipment and travel keep
--- their existing owners; no health, unlock or inventory values are written.
+-- Progression checkpoints advance only after observed credited boss death and unlocks.
 return function(ctx)
     local state=ctx.State
     local api={Phase="Idle",Attempts=0}
-    local nextTry,arrivalDeadline,waitingSince=0,nil,nil
-    local spot,scoutIndex=nil,1
-    local unlockWaitSince
-    local function status(phase,message)
+    local travel={spot=nil,deadline=nil,waiting=nil,scout=1,due=0,unlock=nil}
+    local function publish(phase,message)
         api.Phase=phase;state.ProgressionPhase=phase;ctx.Status(message)
     end
-    function api.Pause(message)
-        api.Paused=true;api.LastError=tostring(message)
-        ctx.Release();status("Paused","Paused · "..tostring(message).." · toggle OFF/ON to retry")
+    local function release()
+        ctx.Release();travel.spot=nil;travel.deadline=nil;travel.waiting=nil
+    end
+    function api.Pause(reason)
+        api.Paused=true;api.LastError=tostring(reason)
+        ctx.Release();publish("Paused","Paused · "..tostring(reason).." · toggle OFF/ON to retry")
     end
     function api.Reset()
         api.Paused=false;api.LastError=nil;api.Attempts=0
-        nextTry,arrivalDeadline,waitingSince,spot,scoutIndex=0,nil,nil,nil,1
-        unlockWaitSince=nil
-        ctx.Release();status("Idle",state.AccountProgression and "Starting account progression..." or "Account Progression is off")
+        travel={spot=nil,deadline=nil,waiting=nil,scout=1,due=0,unlock=nil}
+        ctx.Release()
+        publish("Idle",state.AccountProgression and "Starting account progression..."or "Account Progression is off")
     end
-    local function travelFailed(now,message)
-        api.Attempts+=1;ctx.Release();spot=nil;arrivalDeadline=nil
-        if api.Attempts>=3 then api.Pause(message);return end
-        nextTry=now+api.Attempts*2;status("Retrying","Retrying boss travel · "..tostring(message))
+    local function failure(now,reason)
+        api.Attempts=api.Attempts+1
+        release()
+        if api.Attempts>=3 then api.Pause(reason);return end
+        travel.due=now+api.Attempts*2
+        publish("Retrying","Retrying boss travel · "..tostring(reason))
+    end
+    local function change(floor,now)
+        publish("Changing floor","Returning to the teleport pad · F"..floor.Number)
+        travel.due=now+2
+        local ok,reason=ctx.ChangeFloor(floor)
+        if not ok then api.Pause(reason or "Floor travel failed")end
     end
     local function advance(now)
         local number=state.ProgressionFloor+1
         if number==6 then number=7 end
         local floor=ctx.Floor(number)
         if not floor then api.Pause("Floor "..number.." is unavailable");return end
-        if not ctx.Unlocked(floor) then
+        if not ctx.Unlocked(floor)then
             if state.ProgressionFloor~=6 then
-                unlockWaitSince=unlockWaitSince or now
-                if now-unlockWaitSince>=8 then
-                    -- A saved/observed death does not prove the server granted
-                    -- progression credit. Reacquire this floor's boss if it did not.
+                travel.unlock=travel.unlock or now
+                if now-travel.unlock>=8 then
                     state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
-                    unlockWaitSince=nil;spot=nil;arrivalDeadline=nil;waitingSince=nil
-                    ctx.Release();ctx.Save()
-                    status("Rechecking boss","Next floor is still locked · returning to the current main boss")
+                    travel.unlock=nil;release();ctx.Save()
+                    publish("Rechecking boss","Next floor is still locked · returning to the current main boss")
                     return
                 end
             end
-            status("Waiting for unlock","Boss defeated · waiting for F"..number.." unlock")
+            publish("Waiting for unlock","Boss defeated · waiting for F"..number.." unlock")
             return
         end
-        ctx.Release();spot=nil;waitingSince=nil;arrivalDeadline=nil;api.Attempts=0
-        unlockWaitSince=nil
+        release();travel.unlock=nil;api.Attempts=0
         state.ProgressionFloor=number;state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
-        -- Save the next checkpoint BEFORE queuing a cross-server transition.
-        ctx.Save();status("Changing floor","Returning to the teleport pad · F"..number)
-        nextTry=now+2
-        local ok,message=ctx.ChangeFloor(floor)
-        if not ok then api.Pause(message or "Floor travel failed") end
+        ctx.Save();change(floor,now)
+    end
+    local function arrival(now)
+        if not travel.deadline then return true end
+        if ctx.Moving()then
+            if now>travel.deadline then failure(now,"Boss travel timed out")end
+            return false
+        end
+        if not ctx.Arrived(travel.spot)then failure(now,"Boss arrival was not confirmed");return false end
+        travel.deadline=nil;api.Attempts=0;travel.waiting=now
+        ctx.Arrival();publish("Fighting","Waiting for the main boss · F"..state.ProgressionFloor)
+        return true
+    end
+    local function fight(floor,now)
+        if not ctx.CombatReady()then publish("Waiting for combat","Enable Kill Aura and Auto Farm to continue");return end
+        ctx.Equipment(now)
+        if travel.spot and not travel.deadline and ctx.NearBossSpot and not ctx.NearBossSpot(travel.spot)then release()end
+        if not arrival(now)then return end
+        if not travel.spot then
+            local spot=ctx.BossSpot(floor,travel.scout)
+            if not spot then publish("Finding boss","Waiting for the main boss arena to load · F"..floor.Number);return end
+            travel.spot=spot
+            local sent,reason=ctx.Go(spot)
+            if not sent then failure(now,reason or "Boss arena is unavailable");return end
+            travel.deadline=now+15
+            publish("Travelling to boss","Moving to the main boss · F"..floor.Number)
+            return
+        end
+        local boss=ctx.Boss(travel.spot)
+        if boss and boss.Defeated and boss.Credited then
+            state.ProgressionBossCleared=true;state.ProgressionBossClearedName=boss.Name
+            release();ctx.Save();publish("Boss defeated","Main boss defeated · F"..floor.Number)
+            return
+        end
+        publish("Fighting",boss and boss.Alive and ("Defeating "..boss.Name.." · F"..floor.Number)
+            or ("Waiting for the main boss to spawn · F"..floor.Number))
+        if travel.spot.Scout and not(boss and boss.Alive)and now-(travel.waiting or now)>=20 then
+            travel.scout=travel.scout+1;release()
+        end
     end
     function api.Update(now)
         if not state.AccountProgression or not state.Running or state.StopEverything or api.Paused then return end
         if ctx.SyncFloor then ctx.SyncFloor()end
-        if state.ProgressionComplete then
-            status("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes")
-            return
-        end
-        if not ctx.Ready() then unlockWaitSince=nil;status("Waiting","Waiting for protection, character or current movement");return end
-        if now<nextTry then return end
+        if state.ProgressionComplete then publish("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes");return end
+        if not ctx.Ready()then travel.unlock=nil;publish("Waiting","Waiting for protection, character or current movement");return end
+        if now<travel.due then return end
         local number=state.ProgressionFloor
         local floor=ctx.Floor(number)
         if not floor then api.Pause("Floor "..tostring(number).." is unavailable");return end
-        -- Skip town even when resuming an old F6 checkpoint from another server.
         if number==6 then advance(now);return end
         if ctx.CurrentFloor()~=floor.Id then
-            if not ctx.Unlocked(floor) then api.Pause("F"..number.." is locked");return end
-            status("Changing floor","Returning to the teleport pad · F"..number)
-            nextTry=now+2
-            local ok,message=ctx.ChangeFloor(floor)
-            if not ok then api.Pause(message or "Floor travel failed") end
+            if ctx.Unlocked(floor)then change(floor,now)else api.Pause("F"..number.." is locked")end
             return
         end
-        if state.ProgressionBossCleared then
-            if number==12 then
-                state.ProgressionComplete=true;ctx.Complete();ctx.Save()
-                status("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes")
-            else advance(now) end
-            return
-        end
-        if not ctx.CombatReady() then status("Waiting for combat","Enable Kill Aura and Auto Farm to continue");return end
-        ctx.Equipment(now)
-        if spot and not arrivalDeadline and ctx.NearBossSpot and not ctx.NearBossSpot(spot) then
-            -- Respawn/panic can return to a pad beyond Auto Farm's detection range.
-            -- Re-enter through finite arena travel rather than pinning the old point.
-            ctx.Release();spot=nil;waitingSince=nil
-        end
-        if api.Phase=="Travelling to boss" or arrivalDeadline then
-            if ctx.Moving() then
-                if now>arrivalDeadline then travelFailed(now,"Boss travel timed out") end
-                return
-            end
-            if not ctx.Arrived(spot) then travelFailed(now,"Boss arrival was not confirmed");return end
-            arrivalDeadline=nil;api.Attempts=0;waitingSince=now
-            ctx.Arrival();status("Fighting","Waiting for the main boss · F"..number)
-        end
-        if not spot then
-            spot=ctx.BossSpot(floor,scoutIndex)
-            if not spot then status("Finding boss","Waiting for the main boss arena to load · F"..number);return end
-            local ok,message=ctx.Go(spot)
-            if not ok then travelFailed(now,message or "Boss arena is unavailable");return end
-            arrivalDeadline=now+15
-            status("Travelling to boss","Moving to the main boss · F"..number)
-            return
-        end
-        local boss=ctx.Boss(spot)
-        if boss and boss.Defeated and boss.Credited then
-            state.ProgressionBossCleared=true
-            state.ProgressionBossClearedName=boss.Name
-            ctx.Release();spot=nil;ctx.Save()
-            status("Boss defeated","Main boss defeated · F"..number)
-            return
-        end
-        status("Fighting",boss and boss.Alive and ("Defeating "..boss.Name.." · F"..number)
-            or ("Waiting for the main boss to spawn · F"..number))
-        -- F12 source contains several arenas. Scout only unclassified candidates;
-        -- never treat a miniboss/regular mob or disappearance as a main-boss kill.
-        if spot.Scout and not (boss and boss.Alive) and now-(waitingSince or now)>=20 then
-            scoutIndex+=1;ctx.Release();spot=nil;waitingSince=nil
-        end
+        if not state.ProgressionBossCleared then fight(floor,now);return end
+        if number~=12 then advance(now);return end
+        state.ProgressionComplete=true;ctx.Complete();ctx.Save()
+        publish("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes")
     end
     function api.Destroy()ctx.Release()end
     return api
@@ -9214,116 +8410,132 @@ end
     end)()
     local makeGear=(function()
 -- BEGIN BUNDLED PROGRESSION GEAR
--- Rank only owned, level-usable items using the native inventory display formula.
+-- Build an owned-gear ordering, then reconcile one replicated equipment operation.
 return function(ctx)
     local api={Dirty=true}
-    local pending,nextRead,failures=nil,0,0
-    local function effective(item,stat,snapshot)
-        local value=tonumber(item.Stats[stat])
-        if not value then return 0 end
-        if item.Scale then value*=item.Scale*snapshot.Level end
-        if item.MatchBest then value+=(snapshot.Highest[stat] or 0)*item.MatchBest end
-        value=math.floor(value)
-        local maximum=ctx.Rarity.RarityUpgrades[item.Rarity] or ctx.Rarity.RarityUpgrades.Common
+    local request
+    local readAt=0
+    local failures=0
+    local function value(item,name,snapshot)
+        local base=tonumber(item.Stats[name])
+        if not base then return 0 end
+        if item.Scale then base=base*item.Scale*snapshot.Level end
+        if item.MatchBest then base=base+(snapshot.Highest[name]or 0)*item.MatchBest end
+        base=math.floor(base)
+        local grades=ctx.Rarity.RarityUpgrades
+        local maximum=grades[item.Rarity]or grades.Common
         if maximum and item.Upgrade>0 then
-            local multiplier=ctx.Rarity.UpgradeLevelMultipliers[maximum] or ctx.Rarity.UpgradeLevelMultipliers.default
-            if stat=="Damage" then multiplier=tonumber(item.Stats.DamageUpgrade) or multiplier
-            else multiplier=ctx.Rarity.UpgradeLevelMultipliers.default end
-            value=math.floor(value+item.Upgrade/maximum*multiplier*value)
+            local levels=ctx.Rarity.UpgradeLevelMultipliers
+            local factor=name=="Damage"and (tonumber(item.Stats.DamageUpgrade)or levels[maximum]or levels.default)or levels.default
+            base=math.floor(base+base*item.Upgrade*factor/maximum)
         end
-        return value
+        return base
     end
-    function api.Plan(snapshot)
-        local weapons,armor,accessories={},{},{}
-        local equipped={};for _,id in pairs(snapshot.Equip)do equipped[id]=true end
-        for _,item in ipairs(snapshot.Items)do
-            if item.Level<=snapshot.Level and not item.Skin then
-                local damage,defense=effective(item,"Damage",snapshot),effective(item,"Defense",snapshot)
-                item.Damage,item.Defense=damage,defense
-                item.Utility=(tonumber(item.Stats.Critical)or 0)+(tonumber(item.Stats.Lifesteal)or 0)
-                    +(tonumber(item.Stats.HealthRegeneration)or 0)+(tonumber(item.Stats.StaminaRegeneration)or 0)
-                if item.Type=="Weapon" then item.Score=damage;weapons[#weapons+1]=item
-                elseif item.Type=="Clothing" and damage==0 and defense>0 then item.Score=defense;armor[#armor+1]=item
-                elseif item.Type=="Accessory" and (damage>0 or defense>0 or item.Utility>0)then
-                    item.Score=damage/math.max(1,snapshot.Highest.Damage or 1)
-                        +defense/math.max(1,snapshot.Highest.Defense or 1)+item.Utility/100
-                    accessories[#accessories+1]=item
-                end
-            end
-        end
-        local function less(a,b)
+    local function candidates(snapshot)
+        local buckets={weapons={},armor={},accessories={}}
+        local worn={}
+        for _,id in pairs(snapshot.Equip)do worn[id]=true end
+        local function compare(a,b)
             if a.Score~=b.Score then return a.Score>b.Score end
             if a.Utility~=b.Utility then return a.Utility>b.Utility end
-            if equipped[a.Id]~=equipped[b.Id]then return equipped[a.Id]==true end
+            if worn[a.Id]~=worn[b.Id]then return worn[a.Id]==true end
             return a.Id<b.Id
         end
-        table.sort(weapons,less);table.sort(armor,less);table.sort(accessories,less)
+        for _,item in ipairs(snapshot.Items)do
+            if item.Level<=snapshot.Level and not item.Skin then
+                item.Damage=value(item,"Damage",snapshot)
+                item.Defense=value(item,"Defense",snapshot)
+                item.Utility=0
+                for _,stat in ipairs({"Critical","Lifesteal","HealthRegeneration","StaminaRegeneration"})do
+                    item.Utility=item.Utility+(tonumber(item.Stats[stat])or 0)
+                end
+                local group
+                if item.Type=="Weapon"then item.Score=item.Damage;group=buckets.weapons
+                elseif item.Type=="Clothing"and item.Damage==0 and item.Defense>0 then item.Score=item.Defense;group=buckets.armor
+                elseif item.Type=="Accessory"and (item.Damage>0 or item.Defense>0 or item.Utility>0)then
+                    item.Score=item.Damage/math.max(1,snapshot.Highest.Damage or 1)
+                        +item.Defense/math.max(1,snapshot.Highest.Defense or 1)+item.Utility/100
+                    group=buckets.accessories
+                end
+                if group then group[#group+1]=item end
+            end
+        end
+        for _,group in pairs(buckets)do table.sort(group,compare)end
+        return buckets
+    end
+    function api.Plan(snapshot)
+        local ranked=candidates(snapshot)
         local operations={}
+        local lookup={}
+        for _,item in ipairs(snapshot.Items)do lookup[item.Id]=item end
         local function add(action,item,slot)
             operations[#operations+1]={Action=action,Item=item,Slot=slot}
         end
-        if not (ctx.SkipWeapons and ctx.SkipWeapons())then
-            local weapon=weapons[1]
-            if weapon then
-                -- Clear an existing offhand first, including when the winner is
-                -- currently in Left. Only request Right after native acknowledgment.
-                local left=snapshot.Equip.Left
-                if left and left~=0 then
-                    for _,item in ipairs(snapshot.Items)do
-                        if item.Id==left then add("Unequip",item,"Left");break end
-                    end
-                end
-                if snapshot.Equip.Right~=weapon.Id then add("EquipWeapon",weapon,"Right")end
-            end
+        local weapon=ranked.weapons[1]
+        if weapon and not(ctx.SkipWeapons and ctx.SkipWeapons())then
+            local left=snapshot.Equip.Left
+            if left and left~=0 and lookup[left]then add("Unequip",lookup[left],"Left")end
+            if snapshot.Equip.Right~=weapon.Id then add("EquipWeapon",weapon,"Right")end
         end
         if ctx.WeaponsOnly and ctx.WeaponsOnly()then return operations end
-        if armor[1] and snapshot.Equip.Clothing~=armor[1].Id then add("Wear",armor[1],"Clothing")end
-        local desired={};for i=1,math.min(2,#accessories)do desired[accessories[i].Id]=true end
-        local worn={};for _,slot in ipairs({"Accessory1","Accessory2"})do
+        local armor=ranked.armor[1]
+        if armor and snapshot.Equip.Clothing~=armor.Id then add("Wear",armor,"Clothing")end
+        local wanted={}
+        for index=1,math.min(2,#ranked.accessories)do wanted[ranked.accessories[index].Id]=true end
+        local existing={}
+        for _,slot in ipairs({"Accessory1","Accessory2"})do
             local id=snapshot.Equip[slot]
             if id and id~=0 then
-                worn[id]=true
-                if not desired[id] and next(desired) then
-                    for _,item in ipairs(snapshot.Items)do if item.Id==id then add("Unequip",item,slot);break end end
-                end
+                existing[id]=true
+                if not wanted[id]and next(wanted)and lookup[id]then add("Unequip",lookup[id],slot)end
             end
         end
-        for i=1,math.min(2,#accessories)do if not worn[accessories[i].Id]then add("Wear",accessories[i],"Accessory")end end
+        for index=1,math.min(2,#ranked.accessories)do
+            local item=ranked.accessories[index]
+            if not existing[item.Id]then add("Wear",item,"Accessory")end
+        end
         return operations
     end
+    local function acknowledged(snapshot,operation)
+        if operation.Action=="Unequip"then return snapshot.Equip[operation.Slot]~=operation.Item.Id end
+        if operation.Slot=="Accessory"then
+            return snapshot.Equip.Accessory1==operation.Item.Id or snapshot.Equip.Accessory2==operation.Item.Id
+        end
+        return snapshot.Equip[operation.Slot]==operation.Item.Id
+    end
+    local function reject(reason)
+        failures=failures+1;api.Error=reason
+        if failures>=3 then api.Paused=true end
+        ctx.Status(reason)
+    end
     function api.Invalidate()api.Dirty=true end
-    function api.HasWork()return api.Dirty or pending~=nil end
-    function api.Reset()pending=nil;nextRead=0;failures=0;api.Paused=false;api.Error=nil;api.Dirty=true end
+    function api.HasWork()return api.Dirty or request~=nil end
+    function api.Reset()
+        request=nil;readAt=0;failures=0;api.Paused=false;api.Error=nil;api.Dirty=true
+    end
     function api.Update(now)
-        if api.Paused or not ctx.Active() or ctx.Busy() or now<nextRead then return end
-        nextRead=now+.3
-        if not pending and not api.Dirty then return end
+        if api.Paused or now<readAt or not ctx.Active()or ctx.Busy()then return end
+        readAt=now+.3
+        if not request and not api.Dirty then return end
         local snapshot=ctx.Read()
         if not snapshot then return end
-        if pending then
-            local found=false
-            if pending.Action=="Unequip" then found=snapshot.Equip[pending.Slot]~=pending.Item.Id
-            elseif pending.Slot=="Accessory"then
-                found=snapshot.Equip.Accessory1==pending.Item.Id or snapshot.Equip.Accessory2==pending.Item.Id
-            else found=snapshot.Equip[pending.Slot]==pending.Item.Id end
-            if not found and now<pending.Deadline then return end
-            if not found then
-                failures+=1;api.Error="Equipment was not acknowledged: "..pending.Item.Name
-                if failures>=3 then api.Paused=true;ctx.Status(api.Error);return end
-            else failures=0;api.Error=nil end
-            pending=nil
+        if request then
+            local completed=acknowledged(snapshot,request)
+            if not completed and now<request.Deadline then return end
+            if completed then failures=0;api.Error=nil
+            else reject("Equipment was not acknowledged: "..request.Item.Name)end
+            request=nil
+            if api.Paused then return end
         end
-        local op=api.Plan(snapshot)[1]
-        if not op then api.Dirty=false;nextRead=now+1;ctx.Status("Best usable gear equipped");return end
-        if not ctx.Active() or ctx.Busy() then return end
-        local ok,message=ctx.Equip(op)
-        if not ok then
-            failures+=1;api.Error=tostring(message or "Equipment request failed");nextRead=now+2
-            if failures>=3 then api.Paused=true end
-            ctx.Status(api.Error);return
+        local operation=api.Plan(snapshot)[1]
+        if not operation then
+            api.Dirty=false;readAt=now+1;ctx.Status("Best usable gear equipped");return
         end
-        pending=op;pending.Deadline=now+4
-        ctx.Status("Equipping "..op.Item.Name)
+        if not ctx.Active()or ctx.Busy()then return end
+        local sent,reason=ctx.Equip(operation)
+        if not sent then reject(tostring(reason or "Equipment request failed"));readAt=now+2;return end
+        operation.Deadline=now+4;request=operation
+        ctx.Status("Equipping "..operation.Item.Name)
     end
     return api
 end
@@ -9332,145 +8544,163 @@ end
     end)()
     local attach=(function()
 -- BEGIN BUNDLED PROGRESSION CLIENT
--- Engine adapter for the opt-in Account Progression coordinator.
+-- Native inventory, boss-observation and travel bindings for the progression machine.
 return function(ctx)
     local state,player=ctx.State,ctx.Player
-    local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
+    local rs=game.ReplicatedStorage
+    local profile=rs.Profiles:FindFirstChild(player.Name)
     local inventory,equip=profile.Inventory,profile.Equip
-    local definitions=game.ReplicatedStorage.Database.Items
-    local disposed,gearThread=false,nil
-    local boss,health,lives,death,baseline,maxOwn,deathAt=nil,nil,nil,false,0,0,nil
-    local bossConnections={}
-    local function matchesBoss(spot,mob)
-        if not spot.EncounterNames then return true end
-        local name=mob.Name:lower():gsub("[^%w]","")
-        for expected in pairs(spot.EncounterNames)do
-            if expected:lower():gsub("[^%w]","")==name then return true end
-        end
-        return false
-    end
-    local function clearBoss()
-        for _,connection in ipairs(bossConnections)do connection:Disconnect()end
-        bossConnections={};boss,health,lives,death,baseline,maxOwn,deathAt=nil,nil,nil,false,0,0,nil
-        state.ProgressionBossMob=nil
-    end
-    local function contribution()
-        if not health then return end
-        local value=ctx.OwnDamage(health)
-        maxOwn=math.max(maxOwn,value or 0)
-    end
-    local function observe(mob,data)
-        clearBoss();boss,health,lives=mob,data.Health,data.HitLives
-        baseline=ctx.OwnDamage(health)or 0;maxOwn=baseline
-        local function changed()
-            contribution()
-            if health.Value<=0 and (not lives or lives.Value<=0)then death=true;deathAt=deathAt or os.clock()end
-        end
-        bossConnections[#bossConnections+1]=health:GetPropertyChangedSignal("Value"):Connect(changed)
-        if lives then bossConnections[#bossConnections+1]=lives.Changed:Connect(changed)end
-        bossConnections[#bossConnections+1]=health.ChildAdded:Connect(function(child)
-            if child.Name==player.Name and child:IsA("ValueBase")then
-                contribution()
-                bossConnections[#bossConnections+1]=child.Changed:Connect(contribution)
-            end
-        end)
-        local counter=health:FindFirstChild(player.Name)
-        if counter then bossConnections[#bossConnections+1]=counter.Changed:Connect(contribution)end
-        state.ProgressionBossMob=mob
-    end
+    local definitions=rs.Database.Items
+    local closed=false
+    local equipmentWorker
+    local observation
+    local watched={}
     local ui=state.UI
     ui.ProgressionToggle=ctx.Button("AccountProgression","Account Progression · OFF",10,34,ctx.Parent)
     ui.ProgressionStatus=ctx.Label("ProgressionStatus","Account Progression is off",20,64)
-    ui.ProgressionStatus.Parent=ctx.Parent;ui.ProgressionStatus.TextWrapped=true
     ui.ProgressionGear=ctx.Label("ProgressionGear","Owned usable swords, armor and accessories",30,48)
-    ui.ProgressionGear.Parent=ctx.Parent;ui.ProgressionGear.TextWrapped=true
-    local hint=ctx.Label("ProgressionHint","F1 → F12 · resumes after joins. F6 is skipped. Safe Mode protects the current floor; Multi Spot waits. Toggle OFF to restore your farm settings.",40,96)
-    hint.Parent=ctx.Parent;hint.TextWrapped=true
+    ui.ProgressionStatus.Parent=ctx.Parent;ui.ProgressionGear.Parent=ctx.Parent
+    ui.ProgressionStatus.TextWrapped=true;ui.ProgressionGear.TextWrapped=true
     local function text(label,value)if label.Text~=value then label.Text=value end end
-    local function field(instance,name,fallback)
-        local child=instance and instance:FindFirstChild(name)
-        return child and child:IsA("ValueBase") and child.Value or fallback
+    local function field(object,name,default)
+        local value=object and object:FindFirstChild(name)
+        if value and value:IsA("ValueBase")then return value.Value end
+        return default
+    end
+    local function matches(spot,mob)
+        if not spot.EncounterNames then return true end
+        local name=mob.Name:lower():gsub("[^%w]","")
+        for candidate in pairs(spot.EncounterNames)do if candidate:lower():gsub("[^%w]","")==name then return true end end
+        return false
+    end
+    local function clearBoss()
+        local old=observation;observation=nil;state.ProgressionBossMob=nil
+        if old then for _,connection in ipairs(old.connections)do connection:Disconnect()end end
+    end
+    local function credit(record)
+        local amount=ctx.OwnDamage(record.health)
+        record.high=math.max(record.high,amount or 0)
+    end
+    local function observe(mob,data)
+        clearBoss()
+        local own=ctx.OwnDamage(data.Health)or 0
+        local record={mob=mob,health=data.Health,lives=data.HitLives,baseline=own,high=own,connections={}}
+        observation=record;state.ProgressionBossMob=mob
+        local function bind(signal,callback)record.connections[#record.connections+1]=signal:Connect(callback)end
+        local function changed()
+            credit(record)
+            if record.health.Value<=0 and (not record.lives or record.lives.Value<=0)then
+                record.dead=true;record.diedAt=record.diedAt or os.clock()
+            end
+        end
+        bind(record.health:GetPropertyChangedSignal("Value"),changed)
+        if record.lives then bind(record.lives.Changed,changed)end
+        bind(record.health.ChildAdded,function(value)
+            if value.Name==player.Name and value:IsA("ValueBase")then credit(record);bind(value.Changed,function()credit(record)end)end
+        end)
+        local counter=record.health:FindFirstChild(player.Name)
+        if counter then bind(counter.Changed,function()credit(record)end)end
     end
     local function gearActive()
-        return not disposed and state.Running and not state.StopEverything and not state.ModeratorBlocking
-            and ((state.AccountProgression and not state.ProgressionComplete)or (not state.AccountProgression and state.AutoEquipBestSword))
+        if closed or not state.Running or state.StopEverything or state.ModeratorBlocking then return false end
+        if state.AccountProgression then return not state.ProgressionComplete end
+        return state.AutoEquipBestSword
     end
-    local function readGear()
-            local result={Level=math.floor(profile.Stats.Exp.Value^(1/3)),Items={},Equip={},
-                Highest={Damage=player:GetAttribute("HighestDamage")or 0,Defense=player:GetAttribute("HighestDefense")or 0}}
-            for _,slot in ipairs(equip:GetChildren())do if slot:IsA("IntValue")then result.Equip[slot.Name]=slot.Value end end
-            for _,item in ipairs(inventory:GetChildren())do
-                local definition=definitions:FindFirstChild(item.Name)
-                local stats=definition and definition:FindFirstChild("Stats")
-                if item:IsA("IntValue") and stats then
-                    local values={};for _,value in ipairs(stats:GetChildren())do
-                        if value:IsA("ValueBase")then values[value.Name]=value.Value end
-                    end
-                    local match=definition:FindFirstChild("MatchBest")
-                    result.Items[#result.Items+1]={Native=item,Id=item.Value,Name=item.Name,
-                        Type=field(definition,"Type",""),Class=field(definition,"Class",""),
-                        Level=field(definition,"Level",0),Rarity=field(definition,"Rarity","Common"),
-                        Upgrade=field(item,"Upgrade",0),Skin=field(definition,"Type","")=="Accessory"and item:FindFirstChild("Skin")~=nil,
-                        Scale=field(definition,"ScaleByLevel",nil),
-                        MatchBest=match and (match:IsA("ValueBase")and tonumber(match.Value)or 1)or nil,Stats=values}
-                end
+    local function gearSnapshot()
+        local snapshot={Level=math.floor(profile.Stats.Exp.Value^(1/3)),Items={},Equip={},
+            Highest={Damage=player:GetAttribute("HighestDamage")or 0,Defense=player:GetAttribute("HighestDefense")or 0}}
+        for _,slot in ipairs(equip:GetChildren())do if slot:IsA("IntValue")then snapshot.Equip[slot.Name]=slot.Value end end
+        for _,item in ipairs(inventory:GetChildren())do
+            local definition=definitions:FindFirstChild(item.Name)
+            local stats=definition and definition:FindFirstChild("Stats")
+            if item:IsA("IntValue")and stats then
+                local values={}
+                for _,stat in ipairs(stats:GetChildren())do if stat:IsA("ValueBase")then values[stat.Name]=stat.Value end end
+                local match=definition:FindFirstChild("MatchBest")
+                snapshot.Items[#snapshot.Items+1]={Native=item,Id=item.Value,Name=item.Name,
+                    Type=field(definition,"Type",""),Class=field(definition,"Class",""),
+                    Level=field(definition,"Level",0),Rarity=field(definition,"Rarity","Common"),Upgrade=field(item,"Upgrade",0),
+                    Skin=field(definition,"Type","")=="Accessory"and item:FindFirstChild("Skin")~=nil,
+                    Scale=field(definition,"ScaleByLevel",nil),
+                    MatchBest=match and (match:IsA("ValueBase")and tonumber(match.Value)or 1)or nil,Stats=values}
             end
-            return result
+        end
+        return snapshot
     end
-    local gear=ctx.MakeGear({SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return false end,Rarity=require(game.ReplicatedStorage.Shared.Library.RarityData),
-        Active=gearActive,
+    local gear=ctx.MakeGear({
+        Active=gearActive,SkipWeapons=function()return state.AutoEquipBestSword==false end,WeaponsOnly=function()return false end,
+        Rarity=require(rs.Shared.Library.RarityData),Read=gearSnapshot,
         Busy=function()return state.AutoTradeBusy or state.SafeModePanic or state.TravelBusy or state.AutomationTeleporting
             or state.Dodging or state.Recovering or state.SkillCastRunning or state.MiscCastRunning or ctx.SkillsBusy()end,
-        Read=readGear,
-        Equip=function(op)
-            if not gearActive() or op.Item.Native.Parent~=inventory then return false,"Equipment changed"end
+        Equip=function(operation)
+            if not gearActive()or operation.Item.Native.Parent~=inventory then return false,"Equipment changed"end
             ctx.StopCombat("Equipping best usable weapon / gear")
-            local args={op.Action,op.Item.Native}
-            if op.Action=="EquipWeapon"then args[3]=op.Slot end
-            local reply=game.ReplicatedStorage.Function:InvokeServer("Equipment",args)
-            if reply==false then return false,"Equipment request was rejected"end
+            local payload={operation.Action,operation.Item.Native}
+            if operation.Action=="EquipWeapon"then payload[3]=operation.Slot end
+            if rs.Function:InvokeServer("Equipment",payload)==false then return false,"Equipment request was rejected"end
             return true
         end,
-        Status=function(value)state.ProgressionGearStatus=value;text(ui.ProgressionGear,value)end})
+        Status=function(message)state.ProgressionGearStatus=message;text(ui.ProgressionGear,message)end})
     state.ProgressionGearController=gear
     function state.IsAutoEquipmentCandidate(item)
         if not gearActive()then return false end
-        for _,op in ipairs(gear.Plan(readGear()))do
-            if op.Action~="Unequip"and op.Item.Native==item then return true end
+        for _,operation in ipairs(gear.Plan(gearSnapshot()))do
+            if operation.Action~="Unequip"and operation.Item.Native==item then return true end
         end
         return false
     end
-
-    local function invalidate()if not disposed then gear.Invalidate()end end
-    local gearValueConnections={}
-    local function watchGearValue(value)
-        if not gearValueConnections[value]then gearValueConnections[value]=value.Changed:Connect(invalidate)end
+    local function invalidate()if not closed then gear.Invalidate()end end
+    local function watch(value)
+        if not watched[value]then watched[value]=value.Changed:Connect(invalidate)end
     end
-    local function forgetGearValue(value)
-        local connection=gearValueConnections[value]
-        if connection then connection:Disconnect();gearValueConnections[value]=nil end
+    local function forget(value)
+        local connection=watched[value];watched[value]=nil
+        if connection then connection:Disconnect()end
     end
-    ctx.Bind(inventory.DescendantAdded,function(child)
-        invalidate()
-        if child.Name=="Upgrade" and child:IsA("ValueBase")then watchGearValue(child)end
+    ctx.Bind(inventory.DescendantAdded,function(value)
+        invalidate();if value.Name=="Upgrade"and value:IsA("ValueBase")then watch(value)end
     end)
-    ctx.Bind(inventory.DescendantRemoving,function(child)forgetGearValue(child);invalidate()end)
-    for _,upgrade in ipairs(inventory:QueryDescendants("#Upgrade"))do
-        if upgrade:IsA("ValueBase")then watchGearValue(upgrade)end
-    end
-    ctx.Bind(equip.DescendantAdded,function(slot)
-        invalidate();if slot:IsA("ValueBase")then watchGearValue(slot)end
-    end)
-    ctx.Bind(equip.DescendantRemoving,function(slot)forgetGearValue(slot);invalidate()end)
-    for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")then watchGearValue(slot)end end
+    ctx.Bind(inventory.DescendantRemoving,function(value)forget(value);invalidate()end)
+    ctx.Bind(equip.DescendantAdded,function(value)invalidate();if value:IsA("ValueBase")then watch(value)end end)
+    ctx.Bind(equip.DescendantRemoving,function(value)forget(value);invalidate()end)
+    for _,value in ipairs(inventory:QueryDescendants("#Upgrade"))do if value:IsA("ValueBase")then watch(value)end end
+    for _,value in ipairs(equip:GetChildren())do if value:IsA("ValueBase")then watch(value)end end
     ctx.Bind(profile.Stats.Exp.Changed,invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDamage"),invalidate)
     ctx.Bind(player:GetAttributeChangedSignal("HighestDefense"),invalidate)
+    local function cancelEquipment()
+        if equipmentWorker then pcall(task.cancel,equipmentWorker);equipmentWorker=nil end
+        state.ProgressionEquipping=false
+    end
+    local function equipment(now)
+        if equipmentWorker or gear.Paused or not gear.HasWork()then return end
+        local thread=task.spawn(function()
+            state.ProgressionEquipping=true
+            local ok,reason=pcall(gear.Update,now)
+            state.ProgressionEquipping=false;equipmentWorker=nil
+            if not ok then gear.Paused=true;gear.Error=tostring(reason);text(ui.ProgressionGear,gear.Error)end
+        end)
+        if coroutine.status(thread)=="dead"then return end
+        equipmentWorker=thread
+        task.delay(8,function()
+            if closed or equipmentWorker~=thread then return end
+            cancelEquipment();gear.Paused=true
+            gear.Error="Equipment request timed out · toggle Auto Farm or progression OFF/ON to retry"
+            text(ui.ProgressionGear,gear.Error)
+        end)
+    end
+    local swordActive=false
+    function state.UpdateBestSword(now)
+        local active=not state.AccountProgression and state.AutoEquipBestSword
+        if swordActive~=active then swordActive=active;gear.Reset()end
+        if active then equipment(now)end
+    end
+    local function root()
+        return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    end
     local function release()
         clearBoss();state.ProgressionAnchor=nil
-        if state.ProgressionTravelOwned and state.TravelBusy then
-            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false
-        end
+        if state.ProgressionTravelOwned and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
         state.ProgressionTravelOwned=false;state.TravelHold=false;state.TravelHoldPosition=nil
         ctx.StopCombat("Progression movement released")
     end
@@ -9482,141 +8712,106 @@ return function(ctx)
         if not state.AccountProgression or state.SafeFloorId==game.PlaceId then return end
         for _,floor in ipairs(state.AutomationCatalog.Floors)do
             if floor.Id==game.PlaceId then
-                state.SafeFloorId=game.PlaceId
-                state.SaveNow()
+                state.SafeFloorId=game.PlaceId;state.SaveNow()
                 if state.RefreshAutomationUI then state.RefreshAutomationUI()end
-                break
+                return
             end
         end
     end
-    local function updateEquipment(now)
-            if gearThread or gear.Paused or not gear.HasWork() then return end
-            gearThread=task.spawn(function()
-                state.ProgressionEquipping=true
-                local ok,message=pcall(gear.Update,now)
-                state.ProgressionEquipping=false;gearThread=nil
-                if not ok then gear.Paused=true;gear.Error=tostring(message);text(ui.ProgressionGear,gear.Error)end
-            end)
-            -- task.spawn can finish synchronously, before its return assigns the handle.
-            if coroutine.status(gearThread)=="dead"then gearThread=nil end
-            if gearThread then
-                local pendingThread=gearThread
-                task.delay(8,function()
-                    if disposed or gearThread~=pendingThread then return end
-                    pcall(task.cancel,pendingThread);gearThread=nil;state.ProgressionEquipping=false
-                    gear.Paused=true;gear.Error="Equipment request timed out · toggle Auto Farm or progression OFF/ON to retry"
-                    text(ui.ProgressionGear,gear.Error)
-                end)
+    local function bossSpot(floor,index)
+        local catalog=state.AutomationCatalog
+        catalog.AddCurrent(state.FloorDestinations,game.PlaceId)
+        local primary=catalog.SpotById and catalog.SpotById[tostring(floor.Id).."/Boss"]
+        if primary then return primary end
+        local scouts={}
+        for _,spot in ipairs(catalog.Spots)do
+            if spot.PlaceId==floor.Id and spot.MainBoss then return spot end
+        end
+        for _,spot in ipairs(catalog.Spots)do
+            if spot.PlaceId==floor.Id then
+                if spot.Kind=="Boss"then return spot end
+                if floor.Number==12 and spot.Kind=="Arena"then scouts[#scouts+1]=spot end
             end
+        end
+        table.sort(scouts,function(a,b)return a.Id<b.Id end)
+        local spot=scouts[(index-1)%math.max(1,#scouts)+1]
+        if spot then return {Id=spot.Id,PlaceId=spot.PlaceId,Name=spot.Name,Kind=spot.Kind,
+            DestinationId=spot.DestinationId,Position=spot.Position,Scout=true}end
     end
-    local swordWasActive=false
-    function state.UpdateBestSword(now)
-        local active=not state.AccountProgression and state.AutoEquipBestSword
-        if active~=swordWasActive then swordWasActive=active;gear.Reset()end
-        if active then updateEquipment(now)end
+    local function readBoss(spot)
+        if observation and not matches(spot,observation.mob)then clearBoss()end
+        local record=observation
+        if record then
+            credit(record)
+            if record.dead or record.health.Value<=0 and (not record.lives or record.lives.Value<=0)then
+                record.diedAt=record.diedAt or os.clock()
+                if record.high>record.baseline or os.clock()-record.diedAt<1 or record.mob.Parent then
+                    return {Defeated=true,Credited=record.high>record.baseline,Name=record.mob.Name}
+                end
+                clearBoss();return
+            end
+            if record.mob.Parent and record.health.Parent then return {Alive=true,Name=record.mob.Name}end
+            clearBoss()
+        end
+        for mob in pairs(ctx.Mobs())do
+            if mob.Parent and ctx.Rank(mob)==1 and matches(spot,mob)then
+                local data=ctx.Data(mob)
+                if data and data.Health.Value>0 and (data.Root.Position-spot.Position).Magnitude<=220 then
+                    observe(mob,data);return {Alive=true,Name=mob.Name}
+                end
+            end
+        end
     end
     local controller=ctx.MakeController({State=state,SyncFloor=syncFloor,
-        Floor=function(number)
-            for _,floor in ipairs(state.AutomationCatalog.Floors)do if floor.Number==number then return floor end end
-        end,
-        Unlocked=function(floor)return state.IsAutomationFloorUnlocked(floor.Id)end,
-        CurrentFloor=function()return game.PlaceId end,
+        Floor=function(number)for _,floor in ipairs(state.AutomationCatalog.Floors)do if floor.Number==number then return floor end end end,
+        Unlocked=function(floor)return state.IsAutomationFloorUnlocked(floor.Id)end,CurrentFloor=function()return game.PlaceId end,
         Ready=function()
-            local character=player.Character
-            local root=character and character:FindFirstChild("HumanoidRootPart")
-            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            return not state.AutoTradeBusy and root and not root.Anchored and humanoid and humanoid.Health>0
-                and not state.SafeModePanic and not state.AutomationTeleporting and not state.Dodging
-                and not state.Recovering and not state.ProgressionEquipping and not (state.SafeController and state.SafeController.Seeking)
-                and (not state.TravelBusy or state.ProgressionTravelOwned)
+            local r=root();local humanoid=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+            return not state.AutoTradeBusy and r and not r.Anchored and humanoid and humanoid.Health>0
+                and not(state.SafeModePanic or state.AutomationTeleporting or state.Dodging or state.Recovering or state.ProgressionEquipping)
+                and not(state.SafeController and state.SafeController.Seeking)and (not state.TravelBusy or state.ProgressionTravelOwned)
         end,
         CombatReady=function()return state.Enabled and state.AutoFarm end,
         NearBossSpot=function(spot)
-            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if not root then return false end
-            if (root.Position-spot.Position).Magnitude<=350 then return true end
-            local data=boss and boss.Parent and ctx.Data(boss)
-            return data and (root.Position-data.Root.Position).Magnitude<=500 or false
+            local r=root();if not r then return false end
+            if (r.Position-spot.Position).Magnitude<=350 then return true end
+            local data=observation and observation.mob.Parent and ctx.Data(observation.mob)
+            return data and (r.Position-data.Root.Position).Magnitude<=500 or false
         end,
-        ChangeFloor=function(floor)return state.ChangeAutomationFloor(floor.Id)end,
-        BossSpot=function(floor,index)
-            state.AutomationCatalog.AddCurrent(state.FloorDestinations,game.PlaceId)
-            local key=tostring(floor.Id).."/Boss"
-            local primary=state.AutomationCatalog.SpotById and state.AutomationCatalog.SpotById[key]
-            if primary then return primary end
-            for _,spot in ipairs(state.AutomationCatalog.Spots)do
-                if spot.PlaceId==floor.Id and spot.MainBoss then return spot end
-            end
-            local candidates={}
-            for _,spot in ipairs(state.AutomationCatalog.Spots)do
-                if spot.PlaceId==floor.Id then
-                    if spot.Kind=="Boss"then return spot end
-                    if floor.Number==12 and spot.Kind=="Arena"then candidates[#candidates+1]=spot end
-                end
-            end
-            table.sort(candidates,function(a,b)return a.Id<b.Id end)
-            local spot=candidates[(index-1)%math.max(1,#candidates)+1]
-            if spot then return {Id=spot.Id,PlaceId=spot.PlaceId,Name=spot.Name,Kind=spot.Kind,
-                DestinationId=spot.DestinationId,Position=spot.Position,Scout=true}end
-        end,
+        ChangeFloor=function(floor)return state.ChangeAutomationFloor(floor.Id)end,BossSpot=bossSpot,
         Go=function(spot)
             if state.TravelBusy then return false,"Another movement is active"end
             clearBoss();ctx.StopCombat("Moving to the progression boss")
-            state.RegisterAutomationDestination(spot);state.ProgressionAnchor=spot.Position
-            state.ProgressionTravelOwned=true
+            state.RegisterAutomationDestination(spot);state.ProgressionAnchor=spot.Position;state.ProgressionTravelOwned=true
             return state.TeleportToDestination(spot.DestinationId,false,false)
         end,
         Moving=function()return state.TravelBusy end,
         Arrived=function(spot)
-            local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            return spot and root and state.LastTravelPosition and state.LastTravelDestination==spot.DestinationId
-                and (root.Position-state.LastTravelPosition).Magnitude<=25
+            local r=root()
+            return spot and r and state.LastTravelPosition and state.LastTravelDestination==spot.DestinationId
+                and (r.Position-state.LastTravelPosition).Magnitude<=25
         end,
         Arrival=function()state.ProgressionTravelOwned=false;state.TravelHold=false;state.TravelHoldPosition=nil end,
-        Boss=function(spot)
-            if boss and not matchesBoss(spot,boss)then clearBoss()end
-            contribution()
-            if boss then
-                if death or (health.Value<=0 and (not lives or lives.Value<=0)) then
-                    deathAt=deathAt or os.clock()
-                    if maxOwn>baseline or os.clock()-deathAt<1 or boss.Parent then
-                        return {Defeated=true,Credited=maxOwn>baseline,Name=boss.Name}
-                    end
-                    clearBoss();return
-                end
-                if boss.Parent and health.Parent then return {Alive=true,Name=boss.Name}end
-                clearBoss()
-            end
-            for mob in pairs(ctx.Mobs())do
-                if mob.Parent and ctx.Rank(mob)==1 and matchesBoss(spot,mob)then
-                    local data=ctx.Data(mob)
-                    if data and data.Health.Value>0 and (data.Root.Position-spot.Position).Magnitude<=220 then
-                        observe(mob,data);return {Alive=true,Name=mob.Name}
-                    end
-                end
-            end
-        end,
-        Equipment=updateEquipment,
-        Complete=complete,Release=release,Save=state.SaveNow,
-        Status=function(value)state.ProgressionStatus=value;text(ui.ProgressionStatus,value)end})
+        Boss=readBoss,Equipment=equipment,Complete=complete,Release=release,Save=state.SaveNow,
+        Status=function(message)state.ProgressionStatus=message;text(ui.ProgressionStatus,message)end})
     state.ProgressionController=controller
     function state.SetAccountProgression(on,restoring)
         if on and state.StopEverything then return false end
-        if gearThread then pcall(task.cancel,gearThread);gearThread=nil end
-        state.ProgressionEquipping=false;gear.Reset()
+        cancelEquipment();gear.Reset()
         if on then
             for _,floor in ipairs(state.AutomationCatalog.Floors)do
                 if floor.Number==state.ProgressionFloor then
-                    local primary=state.AutomationCatalog.SpotById and state.AutomationCatalog.SpotById[tostring(floor.Id).."/Boss"]
+                    local catalog=state.AutomationCatalog
+                    local primary=catalog.SpotById and catalog.SpotById[tostring(floor.Id).."/Boss"]
                     if state.ProgressionBossCleared and primary and primary.EncounterNames
-                        and not matchesBoss(primary,{Name=state.ProgressionBossClearedName or ""})then
-                        -- Older builds could persist a side boss as the floor clear.
+                        and not matches(primary,{Name=state.ProgressionBossClearedName or ""})then
                         state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
                     end
                     break
                 end
             end
-            if not state.ProgressionRestore then state.ProgressionRestore={Enabled=state.Enabled,AutoFarm=state.AutoFarm,AutoSwing=state.AutoSwing,SafeFloorId=state.SafeFloorId}end
+            state.ProgressionRestore=state.ProgressionRestore or {Enabled=state.Enabled,AutoFarm=state.AutoFarm,
+                AutoSwing=state.AutoSwing,SafeFloorId=state.SafeFloorId}
             if state.ProgressionRestore.SafeFloorId==nil then state.ProgressionRestore.SafeFloorId=state.SafeFloorId end
             if state.ProgressionComplete and not restoring then
                 state.ProgressionFloor=1;state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil;state.ProgressionComplete=false
@@ -9624,30 +8819,29 @@ return function(ctx)
         end
         state.AccountProgression=on==true
         if state.AccountProgression then syncFloor()
-        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then state.SafeFloorId=state.SharedSafeFloorId or state.ProgressionRestore.SafeFloorId end
+        elseif state.ProgressionRestore and state.ProgressionRestore.SafeFloorId then
+            state.SafeFloorId=state.SharedSafeFloorId or state.ProgressionRestore.SafeFloorId
+        end
         if state.MultiSpotController then state.MultiSpotController.Reset()end
-        -- A queued startup may already be resuming an active block/rejoin ticket.
-        -- Preserve its attempt budget and phase across progression-owned joins.
         if not restoring and state.SafeController then state.SafeController.Reset()end
         controller.Reset()
         if state.AccountProgression then
-            if state.ProgressionComplete then complete()
-            else state.SetAutoFarm(true,"Account progression");state.SetEnabled(true)end
+            if state.ProgressionComplete then complete()else state.SetAutoFarm(true,"Account progression");state.SetEnabled(true)end
         elseif state.ProgressionRestore then
-            local previous=state.ProgressionRestore;state.ProgressionRestore=nil
-            state.SetAutoFarm(previous.AutoFarm==true,"Account progression stopped");state.SetEnabled(previous.Enabled==true)
-            if type(previous.AutoSwing)=="boolean"and state.SetAutoSwing then state.SetAutoSwing(previous.AutoSwing)end
+            local saved=state.ProgressionRestore;state.ProgressionRestore=nil
+            state.SetAutoFarm(saved.AutoFarm==true,"Account progression stopped");state.SetEnabled(saved.Enabled==true)
+            if type(saved.AutoSwing)=="boolean"and state.SetAutoSwing then state.SetAutoSwing(saved.AutoSwing)end
         end
-        ui.ProgressionToggle.Text=state.AccountProgression and "Account Progression · ON"or"Account Progression · OFF"
+        ui.ProgressionToggle.Text=state.AccountProgression and "Account Progression · ON"or "Account Progression · OFF"
         ui.ProgressionToggle.BackgroundColor3=state.AccountProgression and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
-        state.SaveNow();if state.RefreshAutomationUI then state.RefreshAutomationUI()end;return true
+        state.SaveNow();if state.RefreshAutomationUI then state.RefreshAutomationUI()end
+        return true
     end
     ctx.Bind(ui.ProgressionToggle.Activated,function()state.SetAccountProgression(not state.AccountProgression)end)
     function state.ProgressionDestroy()
-        disposed=true
-        for value in pairs(gearValueConnections)do forgetGearValue(value)end
-        if gearThread then pcall(task.cancel,gearThread);gearThread=nil end
-        state.ProgressionEquipping=false;controller.Destroy()
+        closed=true
+        for value in pairs(watched)do forget(value)end
+        cancelEquipment();controller.Destroy()
     end
     if state.AccountProgression then state.SetAccountProgression(true,true)end
     return controller
@@ -9668,103 +8862,116 @@ end
 end
 
 runtimeOwner.Ready()
--- Manual restart intentionally retires the same-build singleton before reloading.
+-- Native utility adapters expose controller actions directly to modern WindUI.
 do
     local make=(function()
 -- BEGIN BUNDLED RESTART SCRIPT
+-- A replacement is prepared completely before the current owner retires.
 return function(ctx)
-    local busy=false
+    local phase="Idle"
+    local function failure(reason)
+        phase="Idle"
+        ctx.Status("Restart failed · try again")
+        ctx.Error(tostring(reason))
+    end
     return function()
-        if busy then return end
-        busy=true;ctx.Status("Restarting...")
+        if phase~="Idle"then return end
+        phase="Preparing";ctx.Status("Restarting...")
         ctx.Spawn(function()
-            local ok,reason=pcall(function()
+            local ready,replacement=pcall(function()
                 ctx.Save()
-                -- Download and compile before retiring the current runtime.
-                local run=ctx.Compile(ctx.Fetch())
-                assert(type(run)=="function","Loader did not compile")
-                ctx.Destroy()
-                run()
+                local compiled=ctx.Compile(ctx.Fetch())
+                assert(type(compiled)=="function","Loader did not compile")
+                return compiled
             end)
-            busy=false
-            if not ok then ctx.Status("Restart failed · try again");ctx.Error(tostring(reason))end
+            if not ready then failure(replacement);return end
+            phase="Replacing"
+            local complete,reason=pcall(function()ctx.Destroy();replacement()end)
+            phase="Idle"
+            if not complete then failure(reason)end
         end)
     end
 end
 
 -- END BUNDLED RESTART SCRIPT
     end)()
-    local button=uiButton("RestartScript","restart script",390,34)
-    state.UI.RestartScript=button
-    state.RestartScript=make({Spawn=task.spawn,
-        Save=state.SaveNow,
+    state.RestartScript=make({Spawn=task.spawn,Save=state.SaveNow,
         Fetch=function()return game:HttpGet("https://raw.githubusercontent.com/AttackerDestiny/balls/main/loader.luau")end,
-        Compile=function(source)return assert(loadstring(source,"SB2 restart loader"))end,
+        Compile=function(source)return assert(loadstring(source,"Feather restart loader"))end,
         Destroy=function()state.Destroy(true)end,
-        Status=function(text)if button.Parent then button.Text=text end end,
+        Status=function(message)state.RestartStatus=message end,
         Error=function(reason)state.LastRestartError=reason;warn("[SB2 Restart] "..reason)end})
-    bind(button.Activated,state.RestartScript)
 end
 
--- Inventory and new-drop dismantling, separately opt-in for each rarity.
 do
     local make=(function()
 -- BEGIN BUNDLED AUTO DISMANTLE
--- Existing inventory and new drops; bounded scans and send-time protections.
+-- A receipt is never retried: native item destruction has no request acknowledgment.
 return function(ctx)
     local api={}
-    local allowed={Common=true,Uncommon=true,Rare=true}
-    local queue,queued={},setmetatable({}, {__mode="k"})
-    local head,tail,nextSend=1,0,0
-    local scan,scanIndex,scanAt=nil,1,0
-    local requested=setmetatable({}, {__mode="k"})
+    local rarities={Common=true,Uncommon=true,Rare=true}
+    local fifo={}
+    local membership=setmetatable({}, {__mode="k"})
+    local attempted=setmetatable({}, {__mode="k"})
+    local cursor,tail=1,0
+    local inventory,inventoryCursor,inventoryTime
+    local cooldown=0
     function api.Add(item,now)
-        if queued[item]or requested[item]then return end
+        if membership[item] or attempted[item] then return end
         local rarity=ctx.Rarity(item)
-        if not allowed[rarity]or not ctx.Selected(rarity)then return end
-        tail+=1;queue[tail]={Item=item,Rarity=rarity,Ready=now+.75};queued[item]=true
+        if rarities[rarity] and ctx.Selected(rarity) then
+            tail=tail+1
+            fifo[tail]={item=item,rarity=rarity,due=now+.75}
+            membership[item]=true
+        end
     end
     function api.Scan(items,now)
-        scan,scanIndex,scanAt=items,1,now
+        inventory,inventoryCursor,inventoryTime=items,1,now
+    end
+    local function processInventory()
+        if not inventory then return end
+        local last=math.min(#inventory,inventoryCursor+31)
+        while inventoryCursor<=last do
+            api.Add(inventory[inventoryCursor],inventoryTime)
+            inventoryCursor=inventoryCursor+1
+        end
+        if inventoryCursor>#inventory then inventory=nil end
+    end
+    local function take(now)
+        local entry=fifo[cursor]
+        if not entry or now<entry.due then return nil end
+        fifo[cursor]=nil
+        cursor=cursor+1
+        membership[entry.item]=nil
+        if cursor>tail then fifo={};cursor,tail=1,0 end
+        return entry
     end
     function api.Update(now)
-        if not ctx.Active()or ctx.Busy()then return end
-        if scan then
-            for _=1,32 do
-                local item=scan[scanIndex]
-                if not item then scan=nil;break end
-                scanIndex+=1;api.Add(item,scanAt)
-            end
-        end
-        if now<nextSend or head>tail then return end
-        local entry=queue[head]
-        if now<entry.Ready then return end
-        queue[head]=nil;head+=1;queued[entry.Item]=nil
-        if head>tail then table.clear(queue);head,tail=1,0 end
-        local item,rarity=entry.Item,entry.Rarity
-        if not ctx.Selected(rarity)or ctx.Rarity(item)~=rarity or ctx.Protected(item)then return end
-        -- Native Event has no response. Send once, never retry destruction blindly.
-        nextSend=now+.4
-        requested[item]=true
-        local ok,reason=pcall(ctx.Send,item)
-        ctx.Status(ok and ("Dismantle requested · "..item.Name)or ("Dismantle failed · "..tostring(reason)))
+        if not ctx.Active() or ctx.Busy() then return end
+        processInventory()
+        if now<cooldown then return end
+        local entry=take(now)
+        if not entry then return end
+        local item=entry.item
+        if not ctx.Selected(entry.rarity) or ctx.Rarity(item)~=entry.rarity or ctx.Protected(item) then return end
+        attempted[item]=true
+        cooldown=now+.4
+        local sent,reason=pcall(ctx.Send,item)
+        ctx.Status(sent and ("Dismantle requested · "..item.Name)or ("Dismantle failed · "..tostring(reason)))
     end
-    function api.Clear()table.clear(queue);table.clear(queued);table.clear(requested);scan=nil;head,tail=1,0 end
+    function api.Clear()
+        fifo={};cursor,tail=1,0;inventory=nil;inventoryCursor=nil
+        table.clear(membership);table.clear(attempted)
+    end
     return api
 end
 
 -- END BUNDLED AUTO DISMANTLE
     end)()
-    local ReplicatedStorage=game:GetService("ReplicatedStorage")
     local profile=ReplicatedStorage.Profiles[player.Name]
     local nativeRestrictions=require(ReplicatedStorage.Shared.Util.ItemRestrictions)
-    local inventory=profile.Inventory
-    local equip=ReplicatedStorage.Profiles[player.Name].Equip
-    local definitions=ReplicatedStorage.Database.Items
-    local buttons={}
-    local status=uiLabel("AutoDismantleStatus","Inventory + drops · equipped, locked and favorited items are kept",140,42)
-    state.UI.AutoDismantleStatus=status
-    status.Parent=state.UI.Pages.Utility
+    local inventory,equip,definitions=profile.Inventory,profile.Equip,ReplicatedStorage.Database.Items
+    local selectable={Common=true,Uncommon=true,Rare=true}
     local function rarity(item)
         if item.Parent~=inventory or not item:IsA("IntValue")then return nil end
         local definition=definitions:FindFirstChild(item.Name)
@@ -9772,169 +8979,153 @@ end
         return value and value.Value
     end
     local function protected(item)
-        if item.Parent~=inventory then return true end
-        if nativeRestrictions.CanOfferDismantle(profile,item)~=true then return true end
+        if item.Parent~=inventory or nativeRestrictions.CanOfferDismantle(profile,item)~=true then return true end
         if item.Name:find("Novice",1,true)or item.Name:find("Aura",1,true)then return true end
-        for _,slot in ipairs(equip:GetChildren())do
-            if slot:IsA("IntValue")and slot.Value==item.Value then return true end
-        end
-        local function marked(object)
-            for _,key in ipairs({"Locked","Lock","Favorite","Favorited","Favourite","Favourited","Skin"})do
-                local attr=object:GetAttribute(key)
-                if attr~=nil and attr~=false and attr~=0 and attr~=""then return true end
-                local flag=object:FindFirstChild(key)
-                if flag then
-                    if not flag:IsA("ValueBase")then return true end
-                    if flag.Value~=false and flag.Value~=0 and flag.Value~=""then return true end
-                end
+        for _,slot in ipairs(equip:GetChildren())do if slot:IsA("IntValue")and slot.Value==item.Value then return true end end
+        local function protectedFlag(object)
+            for _,name in ipairs({"Locked","Lock","Favorite","Favorited","Favourite","Favourited","Skin"})do
+                local value=object:GetAttribute(name)
+                if value~=nil and value~=false and value~=0 and value~=""then return true end
+                local flag=object:FindFirstChild(name)
+                if flag and (not flag:IsA("ValueBase")or flag.Value~=false and flag.Value~=0 and flag.Value~="")then return true end
             end
             return false
         end
         local definition=definitions:FindFirstChild(item.Name)
-        if marked(item)or (definition and marked(definition))then return true end
-        if state.IsAutoEquipmentCandidate and state.IsAutoEquipmentCandidate(item)then return true end
-        return false
+        return protectedFlag(item)or definition and protectedFlag(definition)or state.IsAutoEquipmentCandidate and state.IsAutoEquipmentCandidate(item)or false
     end
-    local worker=make({Rarity=rarity,Protected=protected,
-        Selected=function(name)return state.AutoDismantle[name]==true end,
+    local worker=make({Rarity=rarity,Protected=protected,Selected=function(name)return state.AutoDismantle[name]==true end,
         Active=function()return state.Running and not state.StopEverything and not state.ModeratorBlocking end,
         Busy=function()return state.AutoTradeBusy or state.ProgressionEquipping or state.TravelBusy or state.AutomationTeleporting or state.SafeModePanic end,
         Send=function(item)ReplicatedStorage.Event:FireServer("Equipment",{"Dismantle",{item}})end,
-        Status=function(text)if status.Parent then status.Text=text end end})
-    local dropdown=uiButton("AutoDismantleDropdown","Auto Dismantle  v",100,34,state.UI.Pages.Utility)
-    local options=create("Frame",{Name="AutoDismantleOptions",Visible=false,LayoutOrder=105,Size=UDim2.new(1,0,0,114),BackgroundTransparency=1},state.UI.Pages.Utility)
-    create("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},options)
-    bind(dropdown.Activated,function()options.Visible=not options.Visible end)
-    local renders={}
-    function state.SetAutoDismantle(name,on)
-        if not buttons[name]or state.StopEverything then return false end
-        state.AutoDismantle[name]=on==true;renders[name]();requestSave()
-        if state.AutoDismantle[name]then worker.Scan(inventory:GetChildren(),os.clock())end
+        Status=function(message)state.AutoDismantleStatus=message end})
+    state.AutoDismantleController=worker
+    function state.SetAutoDismantle(name,value)
+        if not selectable[name]or state.StopEverything then return false end
+        state.AutoDismantle[name]=value==true;requestSave()
+        if value==true then worker.Scan(inventory:GetChildren(),os.clock())end
         return true
     end
-    for index,name in ipairs({"Common","Uncommon","Rare"})do
-        local button=uiButton("AutoDismantle"..name,"",index,34,options)
-        buttons[name]=button
-        local function refresh()
-            button.Text="Auto Dismantle "..name..(state.AutoDismantle[name]and " · ON"or " · OFF")
-            button.BackgroundColor3=state.AutoDismantle[name]and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
-        end
-        renders[name]=refresh
-        bind(button.Activated,function()state.SetAutoDismantle(name,not state.AutoDismantle[name])end)
-        refresh()
-    end
-    if state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare then
-        worker.Scan(inventory:GetChildren(),os.clock())
-    end
-    bind(inventory.ChildAdded,function(item)
-        if state.Running and not state.StopEverything then worker.Add(item,os.clock())end
-    end)
+    local function enabled()return state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare end
+    if enabled()then worker.Scan(inventory:GetChildren(),os.clock())end
+    bind(inventory.ChildAdded,function(item)if state.Running and not state.StopEverything then worker.Add(item,os.clock())end end)
     bind(gui.Destroying,worker.Clear)
     task.spawn(function()
         while state.Running do
             local ok,reason=pcall(worker.Update,os.clock())
-            if not ok and status.Parent then status.Text="Dismantle paused · "..tostring(reason)end
-            task.wait((state.AutoDismantle.Common or state.AutoDismantle.Uncommon or state.AutoDismantle.Rare)and .25 or 1)
+            if not ok then state.AutoDismantleStatus="Dismantle paused · "..tostring(reason)end
+            task.wait(enabled()and .25 or 1)
         end
         worker.Clear()
     end)
 end
 
--- Native trade automation. Final acceptance is built in and whitelist-gated.
 do
     local make=(function()
 -- BEGIN BUNDLED AUTO TRADE
+-- Trade synchronization compares a desired offer with the replicated offer ledger.
 return function(ctx)
     local api={}
+    local session={trade=nil,request=nil,accepted=nil,receipt=nil,signature=nil,stableAt=0,action=nil}
+    local rarities={Legendary=true,Tribute=true,Burst=true}
     function api.AlwaysInclude(name)
         return name=="Upgrade Protection Scroll"or name=="Resurrection Crystal"
     end
-    local highRarities={Legendary=true,Tribute=true,Burst=true}
     function api.IncludesRarity(mode,rarity)
-        return (mode=="Legendary"or mode=="Tribute")and highRarities[rarity]==true
+        return (mode=="Legendary"or mode=="Tribute")and rarities[rarity]==true
     end
     function api.MaxVel(balance)
-        if type(balance)~="number"or balance~=balance or balance==math.huge or balance<=0 then return 0 end
-        -- Clamp before multiplying: avoids float division by 1.1 rounding exact
-        -- balances down (e.g. 660000 must permit an offer of 600000).
-        return math.floor(math.min(math.floor(balance),110000000)*10/11)
+        if type(balance)~="number"or balance~=balance or balance<=0 or balance==math.huge then return 0 end
+        local taxable=math.min(110000000,math.floor(balance))
+        return math.floor(taxable*10/11)
     end
-    local trade,lastSignature,stableSince,lastAction=nil,nil,0,nil
-    local pending,acceptedRequest,pendingAdd
+    local function clear()
+        session={trade=nil,request=nil,accepted=nil,receipt=nil,signature=nil,stableAt=0,action=nil}
+    end
     function api.Event(kind,data)
-        if not ctx.Active()then trade=nil;return end
-        if kind=="Request"then
-            pending=data
-            ctx.Status("Checking incoming trade request")
-        elseif kind=="TradeChanged"or kind=="RequestAccept"then
-            if kind=="RequestAccept"then pendingAdd=nil;lastSignature=nil;lastAction=nil end
-            trade=data;pending=nil;acceptedRequest=nil
-        elseif kind=="TradeCancel"or kind=="TradeCompleted"then trade=nil;pending=nil;acceptedRequest=nil;pendingAdd=nil;lastSignature=nil;lastAction=nil end
+        if not ctx.Active()then clear();return end
+        if kind=="Request"then session.request=data;ctx.Status("Checking incoming trade request");return end
+        if kind=="TradeCancel"or kind=="TradeCompleted"then clear();return end
+        if kind=="RequestAccept"then session.receipt=nil;session.signature=nil;session.action=nil end
+        if kind=="RequestAccept"or kind=="TradeChanged"then
+            session.trade=data;session.request=nil;session.accepted=nil
+        end
+    end
+    local function request()
+        local requester=ctx.Pending and ctx.Pending()or (not ctx.Pending and session.request or nil)
+        if not requester then session.accepted=nil;return end
+        if not ctx.Allowed(requester)then ctx.Status("Trade request ignored · user is not whitelisted");return end
+        if session.accepted~=requester then
+            ctx.Send("RequestAccept",{})
+            session.accepted=requester;session.request=nil
+            ctx.Status("Accepted whitelisted trade request")
+        end
+    end
+    local function offer(trade,role,peer,items,currency)
+        local desired,actual={},{}
+        local signature={tostring(currency)}
+        for _,item in ipairs(items)do
+            local amount=ctx.Count and ctx.Count(item)or 1
+            if type(amount)~="number"or amount~=amount or amount==math.huge then amount=0 end
+            amount=math.max(0,math.floor(amount))
+            if amount>0 then desired[item]=amount end
+            signature[#signature+1]="want:"..item.Value..":"..amount
+        end
+        for _,side in ipairs({role,peer})do
+            signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
+            for _,entry in ipairs(trade[side.."Items"]or {})do
+                signature[#signature+1]=side..":"..tostring(entry.item and entry.item.Value)..":"..tostring(entry.count or 1)
+                if side==role and entry.item then actual[entry.item]=(actual[entry.item]or 0)+(entry.count or 1)end
+            end
+        end
+        return desired,actual,table.concat(signature,"|")
+    end
+    local function once(action,command,payload)
+        if session.action==action then return end
+        session.action=action
+        ctx.Send(command,payload)
     end
     function api.Update(now)
         if not ctx.Active()then return false end
-        local requester=ctx.Pending and ctx.Pending()or (not ctx.Pending and pending or nil)
-        if not requester then acceptedRequest=nil
-        elseif not ctx.Allowed(requester)then ctx.Status("Trade request ignored · user is not whitelisted")
-        elseif requester~=acceptedRequest then
-            ctx.Send("RequestAccept",{});acceptedRequest=requester;pending=nil
-            ctx.Status("Accepted whitelisted trade request")
-        end
+        request()
+        local trade=session.trade
         if not trade then return false end
         local role=trade.Requester==ctx.Player and "Requester"or trade.Partner==ctx.Player and "Partner"
         if not role then return false end
         local peer=role=="Requester"and "Partner"or "Requester"
         if not ctx.Allowed(trade[peer])then ctx.Status("Trade paused · partner is not whitelisted");return false end
-        local desired,vel=ctx.Plan()
-        local ours=trade[role.."Items"]or{}
-        local have,wanted={},{}
-        local signature={tostring(vel)}
-        for _,item in ipairs(desired)do
-            local count=ctx.Count and ctx.Count(item)or 1
-            count=type(count)=="number"and count==count and count~=math.huge and math.max(0,math.floor(count))or 0
-            local amount=count
-            if amount>0 then wanted[item]=amount end
-            signature[#signature+1]="want:"..item.Value..":"..amount
+        local items,currency=ctx.Plan()
+        local desired,actual,signature=offer(trade,role,peer,items,currency)
+        if session.signature~=signature then
+            session.signature=signature;session.stableAt=now;session.action=nil
         end
-        for _,side in ipairs({role,peer})do
-            signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
-            for _,v in ipairs(trade[side.."Items"]or{})do
-                local item=v.item
-                signature[#signature+1]=side..":"..tostring(item and item.Value)..":"..tostring(v.count or 1)
+        for item,quantity in pairs(actual)do
+            if not desired[item]or quantity>desired[item]then ctx.Status("Trade paused · offer exceeds selected quantity");return true end
+        end
+        local receipt=session.receipt
+        if receipt then
+            if (actual[receipt.item]or 0)<receipt.quantity then
+                ctx.Status(now>=receipt.deadline and "Server has not acknowledged the batch · trade may be full · automatic acceptance paused"or "Waiting for stacked items to register")
+                return true
             end
+            session.receipt=nil
         end
-        local key=table.concat(signature,"|")
-        if key~=lastSignature then lastSignature=key;stableSince=now;lastAction=nil end
-        for _,v in ipairs(ours)do if v.item then have[v.item]=(have[v.item]or 0)+(v.count or 1)end end
-        for item,count in pairs(have)do
-            if not wanted[item]or count>wanted[item]then ctx.Status("Trade paused · offer exceeds selected quantity");return true end
-        end
-        if pendingAdd then
-            if (have[pendingAdd.Item]or 0)<pendingAdd.Expected then
-                ctx.Status(now-pendingAdd.At>=10 and "Server has not acknowledged the batch · trade may be full · automatic acceptance paused"or "Waiting for stacked items to register");return true
-            end
-            pendingAdd=nil
-        end
-        for _,item in ipairs(desired)do
-            local current=have[item]or 0
-            local amount=wanted[item]or 0
-            if current<amount then
-                local batch=math.min(4,amount-current)
-                pendingAdd={Item=item,Expected=current+batch,At=now}
+        for _,item in ipairs(items)do
+            local have,want=actual[item]or 0,desired[item]or 0
+            if have<want then
+                local batch=math.min(4,want-have)
+                session.receipt={item=item,quantity=have+batch,deadline=now+10}
                 for _=1,batch do ctx.Send("TradeAddItem",{item})end
-                ctx.Status("Adding "..item.Name.." · "..current.."/"..amount);return true
+                ctx.Status("Adding "..item.Name.." · "..have.."/"..want)
+                return true
             end
         end
-        if (trade[role.."Currency"]or 0)~=vel then
-            if lastAction~="vel"then lastAction="vel";ctx.Send("TradeChangeCurrency",{vel})end
-            ctx.Status("Setting trade Vel");return true
+        if (trade[role.."Currency"]or 0)~=currency then
+            once("vel","TradeChangeCurrency",{currency});ctx.Status("Setting trade Vel");return true
         end
-        if now-stableSince<2 then ctx.Status("Waiting for the trade offer to settle");return true end
-        if trade[role.."Confirmed"]~=true then
-            if lastAction~="confirm"then lastAction="confirm";ctx.Send("TradeConfirm",{})end
-        elseif trade[peer.."Confirmed"]==true and trade[role.."Accepted"]~=true then
-            if lastAction~="accept"then lastAction="accept";ctx.Send("TradeAccept",{})end
-        end
+        if now-session.stableAt<2 then ctx.Status("Waiting for the trade offer to settle");return true end
+        if trade[role.."Confirmed"]~=true then once("confirm","TradeConfirm",{})
+        elseif trade[peer.."Confirmed"]==true and trade[role.."Accepted"]~=true then once("accept","TradeAccept",{})end
         ctx.Status("Trade offer ready · automatic confirmation active")
         return true
     end
@@ -9943,153 +9134,140 @@ end
 
 -- END BUNDLED AUTO TRADE
     end)()
-    local rs=game:GetService("ReplicatedStorage")
+    local rs=ReplicatedStorage
     local profile=rs.Profiles[player.Name]
     local inventory,equip=profile.Inventory,profile.Equip
     local restrictions=require(rs.Shared.Util.ItemRestrictions)
-    local parent=state.UI.Pages.Utility
-    local status=uiLabel("TradeStatus","Uses Safe Mode whitelist · final acceptance is automatic",250,48);status.Parent=parent
-    state.UI.TradeStatus=status
     if state.TradeMode=="Tribute"then state.TradeMode="Legendary";requestSave()end
-    local toggle=uiButton("AutoTrade","",200,34,parent)
-    local mode=uiButton("TradeMode","",210,34,parent)
-    local items=uiButton("TradeItems","Select inventory items  v",220,34,parent)
-    local list=create("ScrollingFrame",{Name="TradeItemOptions",Visible=false,LayoutOrder=225,Size=UDim2.new(1,0,0,200),BackgroundTransparency=1,ScrollBarThickness=3,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},parent)
-    create("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},list)
-    local velInfo=uiLabel("TradeVelInfo","Vel: maximum affordable · includes 10% tax",240,34);velInfo.Parent=parent
-    local function refresh()
-        toggle.Text=state.AutoTrade and "Auto Trade · ON"or "Auto Trade · OFF"
-        toggle.BackgroundColor3=state.AutoTrade and Color3.fromRGB(91,72,164)or Color3.fromRGB(38,41,56)
-        mode.Text="Offer mode · "..(state.TradeMode=="Legendary"and "Legendary+"or "Selected")
-    end
-    function state.SetAutoTrade(on)
-        if on and state.StopEverything then return false end
-        state.AutoTrade=on==true;refresh();requestSave();return true
+    function state.SetAutoTrade(value)
+        if value and state.StopEverything then return false end
+        state.AutoTrade=value==true;requestSave();return true
     end
     function state.SetTradeMode(value)
         if value~="Selected"and value~="Legendary"then return false end
-        state.TradeMode=value;refresh();requestSave();return true
+        state.TradeMode=value;requestSave();return true
     end
-    function state.SetTradeItems(selected)
-        local result={}
-        for name,on in pairs(selected or {})do if type(name)=="string"and on==true then result[name]=true end end
-        state.TradeItems=result;requestSave()
+    function state.SetTradeItems(values)
+        local selected={}
+        for name,on in pairs(values or {})do if type(name)=="string"and on==true then selected[name]=true end end
+        state.TradeItems=selected;requestSave()
     end
     function state.GetTradeItemChoices()
-        local groups={}
+        local quantities={}
         for _,item in ipairs(inventory:GetChildren())do
-            local count=item:FindFirstChild("Count");groups[item.Name]=(groups[item.Name]or 0)+(count and count.Value or 1)
+            local count=item:FindFirstChild("Count");quantities[item.Name]=(quantities[item.Name]or 0)+(count and count.Value or 1)
         end
-        for name,on in pairs(state.TradeItems)do if on and groups[name]==nil then groups[name]=0 end end
-        local result={};for name,count in pairs(groups)do result[#result+1]={Name=name,Count=count}end
-        table.sort(result,function(a,b)return a.Name<b.Name end);return result
+        for name,on in pairs(state.TradeItems)do if on and quantities[name]==nil then quantities[name]=0 end end
+        local rows={};for name,count in pairs(quantities)do rows[#rows+1]={Name=name,Count=count}end
+        table.sort(rows,function(a,b)return a.Name<b.Name end)
+        return rows
     end
-    bind(toggle.Activated,function()state.SetAutoTrade(not state.AutoTrade)end)
-    bind(mode.Activated,function()state.SetTradeMode(state.TradeMode=="Selected"and "Legendary"or "Selected")end)
-    bind(items.Activated,function()
-        list.Visible=not list.Visible
-        if not list.Visible then return end
-        for _,child in ipairs(list:GetChildren())do if child:IsA("GuiButton")then child:Destroy()end end
-        local groups={};for _,item in ipairs(inventory:GetChildren())do local count=item:FindFirstChild("Count");groups[item.Name]=(groups[item.Name]or 0)+(count and count.Value or 1)end
-        local names={};for name in pairs(groups)do names[#names+1]=name end;table.sort(names)
-        for index,name in ipairs(names)do
-            local button=uiButton("TradeItem"..index,"",index,30,list)
-            local function label()button.Text=(state.TradeItems[name]and "[x] "or "[ ] ")..name.." x"..groups[name]end
-            label();bind(button.Activated,function()state.TradeItems[name]=not state.TradeItems[name];label();requestSave()end)
-        end
-    end)
     local worker
     local function plan()
-        local result={}
+        local offered={}
         for _,item in ipairs(inventory:GetChildren())do
             local definition=rs.Database.Items:FindFirstChild(item.Name)
             local rarity=definition and definition:FindFirstChild("Rarity")
-            local chosen=worker.AlwaysInclude(item.Name)or state.TradeMode=="Selected"and state.TradeItems[item.Name]or rarity and worker.IncludesRarity(state.TradeMode,rarity.Value)
-            if chosen and item:IsA("IntValue")and not item:GetAttribute("Locked")and not item:GetAttribute("Favorited")and restrictions.CanOfferTrading(profile,item)==true then
-                local equipped=false
-                for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")and slot.Value==item.Value then equipped=true;break end end
-                if not equipped then result[#result+1]=item end
+            local selected=worker.AlwaysInclude(item.Name)
+                or state.TradeMode=="Selected"and state.TradeItems[item.Name]
+                or rarity and worker.IncludesRarity(state.TradeMode,rarity.Value)
+            if selected and item:IsA("IntValue")and not item:GetAttribute("Locked")and not item:GetAttribute("Favorited")and restrictions.CanOfferTrading(profile,item)==true then
+                local inUse=false
+                for _,slot in ipairs(equip:GetChildren())do if slot:IsA("ValueBase")and slot.Value==item.Value then inUse=true;break end end
+                if not inUse then offered[#offered+1]=item end
             end
         end
-        table.sort(result,function(a,b)return a.Value<b.Value end)
+        table.sort(offered,function(a,b)return a.Value<b.Value end)
         local balance=profile.Stats:FindFirstChild("Vel")
-        return result,worker.MaxVel(balance and balance.Value or 0)
+        return offered,worker.MaxVel(balance and balance.Value or 0)
     end
     local nativeTrade=require(rs.CardinalClient.MainModule.Services.UI.Trade)
-    local function pendingRequest()
-        local root=player:FindFirstChildOfClass("PlayerGui")
-        local cardinal=root and root:FindFirstChild("CardinalUI")
-        local pui=cardinal and cardinal:FindFirstChild("PlayerUI")
-        local hud=pui and pui:FindFirstChild("HUD")
-        local prompt=hud and hud:FindFirstChild("TradeRequest")
-        local label=prompt and prompt:FindFirstChild("PlayerText")
-        if not prompt or not prompt.Visible or not label then return nil end
+    local function requestOwner()
+        local host=player:FindFirstChildOfClass("PlayerGui")
+        for _,name in ipairs({"CardinalUI","PlayerUI","HUD","TradeRequest"})do host=host and host:FindFirstChild(name)end
+        local label=host and host:FindFirstChild("PlayerText")
+        if not host or not host.Visible or not label then return nil end
         local name=label.Text:match("^([%w_]+) wants to trade with you$")
         return name and Players:FindFirstChild(name)or nil
     end
-    worker=make({Player=player,Plan=plan,Pending=pendingRequest,
-        Count=function(item)local count=item:FindFirstChild("Count");return count and count.Value or 1 end,
+    local function allowed(person)
+        return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true
+    end
+    worker=make({Player=player,Plan=plan,Pending=requestOwner,
+        Count=function(item)local stack=item:FindFirstChild("Count");return stack and stack.Value or 1 end,
         Active=function()return state.AutoTrade and state.Running and not state.StopEverything and not state.ModeratorBlocking end,
-        Allowed=function(person)return typeof(person)=="Instance"and person:IsA("Player")and state.SafeWhitelistIds[tostring(person.UserId)]==true end,
-        Send=function(action,args)
-            if action=="RequestAccept"then
-                local person=pendingRequest()
-                if person and state.SafeWhitelistIds[tostring(person.UserId)]==true then nativeTrade.AcceptRequest()end
+        Allowed=allowed,Send=function(action,args)
+            if action=="RequestAccept"then local person=requestOwner();if person and allowed(person)then nativeTrade.AcceptRequest()end
             else rs.Event:FireServer("Trade",action,args)end
-        end,
-        Status=function(text)status.Text=text end})
-    bind(rs.Event.OnClientEvent,function(route,args)
-        if route=="UI"and type(args)=="table"and args[1]=="Trade"then
-            worker.Event(args[2],args[3])
-            if (args[2]=="TradeChanged"or args[2]=="RequestAccept")and state.AutoTrade then state.AutoTradeBusy=true end
-            if args[2]=="TradeCancel"or args[2]=="TradeCompleted"then state.AutoTradeBusy=false end
-        end
+        end,Status=function(message)state.TradeStatus=message end})
+    state.AutoTradeController=worker
+    bind(rs.Event.OnClientEvent,function(route,payload)
+        if route~="UI"or type(payload)~="table"or payload[1]~="Trade"then return end
+        worker.Event(payload[2],payload[3])
+        if state.AutoTrade and (payload[2]=="TradeChanged"or payload[2]=="RequestAccept")then state.AutoTradeBusy=true end
+        if payload[2]=="TradeCancel"or payload[2]=="TradeCompleted"then state.AutoTradeBusy=false end
     end)
-    refresh()
     task.spawn(function()
         while state.Running do
-            local ok,value=pcall(worker.Update,os.clock());state.AutoTradeBusy=ok and value==true
-            if not ok then status.Text="Trade paused · "..tostring(value)end
+            local ok,busy=pcall(worker.Update,os.clock())
+            state.AutoTradeBusy=ok and busy==true
+            if not ok then state.TradeStatus="Trade paused · "..tostring(busy)end
             task.wait(state.AutoTrade and .3 or 1)
         end
         state.AutoTradeBusy=false
     end)
 end
 
--- Native forge action and five-to-one recipes inspected through connected MCP.
 do
     local make=(function()
 -- BEGIN BUNDLED AUTO CRAFT
--- One acknowledged forge request at a time; never retry a stalled spend blindly.
+-- Crystal conversion is a transaction: input and output replication acknowledge it.
 return function(ctx)
-    local api={}
-    local pending,nextTry=nil,0
-    local recipes={{Output="Legendary Upgrade Crystal",Input="Rare Upgrade Crystal"},
-        {Output="Rare Upgrade Crystal",Input="Uncommon Upgrade Crystal"}}
-    function api.Reset()api.Paused=false;nextTry=0 end
-    function api.Update(now)
-        if not ctx.Active()then return end
-        if pending then
-            local input,output=ctx.Count(pending.Input),ctx.Count(pending.Output)
-            if input<=pending.BeforeInput-pending.Required and output>=pending.BeforeOutput+1 then
-                pending=nil;api.Paused=false;nextTry=now+.2;ctx.Status("Crystal crafted")
-            elseif now-pending.At>=10 then
-                api.Paused=true;ctx.Status("Craft not acknowledged · waiting without duplicate requests")
-            end
-            if pending then return end
+    local api={Paused=false}
+    local transaction
+    local eligibleAt=0
+    local outputs={
+        {"Legendary Upgrade Crystal","Rare Upgrade Crystal"},
+        {"Rare Upgrade Crystal","Uncommon Upgrade Crystal"},
+    }
+    local function acknowledge(now)
+        if not transaction then return true end
+        local receipt=transaction
+        local spent=ctx.Count(receipt.input)<=receipt.inputCount-receipt.quantity
+        local produced=ctx.Count(receipt.output)>=receipt.outputCount+1
+        if spent and produced then
+            transaction=nil
+            api.Paused=false
+            eligibleAt=now+.2
+            ctx.Status("Crystal crafted")
+            return true
         end
-        if api.Paused or ctx.Busy()or now<nextTry then return end
-        nextTry=now+.5
-        for _,recipe in ipairs(recipes)do
-            if ctx.Selected(recipe.Output)then
-                local required=ctx.Recipe(recipe.Output,recipe.Input)
-                if type(required)=="number"and required>0 and required%1==0 then
-                    local input,output=ctx.Count(recipe.Input),ctx.Count(recipe.Output)
-                    if input>=required then
-                        pending={Input=recipe.Input,Output=recipe.Output,Required=required,BeforeInput=input,BeforeOutput=output,At=now}
-                        local ok,reason=pcall(ctx.Send,recipe.Output)
-                        if not ok then api.Paused=true;ctx.Status("Craft request failed · "..tostring(reason))
-                        else ctx.Status("Crafting "..recipe.Output)end
+        if now>=receipt.deadline then
+            api.Paused=true
+            ctx.Status("Craft not acknowledged · waiting without duplicate requests")
+        end
+        return false
+    end
+    function api.Reset()
+        api.Paused=false
+        eligibleAt=0
+    end
+    function api.Update(now)
+        if not ctx.Active() or not acknowledge(now) then return end
+        if api.Paused or ctx.Busy() or now<eligibleAt then return end
+        eligibleAt=now+.5
+        for index=1,#outputs do
+            local output,input=outputs[index][1],outputs[index][2]
+            if ctx.Selected(output) then
+                local amount=ctx.Recipe(output,input)
+                if type(amount)=="number" and amount>0 and amount%1==0 then
+                    local count=ctx.Count(input)
+                    if count>=amount then
+                        transaction={input=input,output=output,quantity=amount,inputCount=count,
+                            outputCount=ctx.Count(output),deadline=now+10}
+                        local sent,reason=pcall(ctx.Send,output)
+                        api.Paused=not sent
+                        ctx.Status(sent and ("Crafting "..output)or ("Craft request failed · "..tostring(reason)))
                         return
                     end
                 end
@@ -10103,37 +9281,36 @@ end
     end)()
     local profile=ReplicatedStorage.Profiles[player.Name]
     local restrictions=require(ReplicatedStorage.Shared.Util.ItemRestrictions)
-    local function count(name)
+    local function count(input)
         local total=0
         for _,item in ipairs(profile.Inventory:GetChildren())do
-            if item.Name==name and item:IsA("IntValue")and restrictions.CanOfferCrafting(profile,item)==true then
-                local stack=item:FindFirstChild("Count")
-                total+=stack and math.max(0,stack.Value)or 1
+            if item.Name==input and item:IsA("IntValue")and restrictions.CanOfferCrafting(profile,item)==true then
+                local stack=item:FindFirstChild("Count");total+=stack and math.max(0,stack.Value)or 1
             end
         end
         return total
     end
+    local function recipe(output,input)
+        local definition=ReplicatedStorage.Database.Items:FindFirstChild(output)
+        local requirements=definition and definition:FindFirstChild("Recipe")
+        if not requirements then return nil end
+        local amount
+        for _,requirement in ipairs(requirements:GetChildren())do
+            if requirement.Name~=input or not requirement:IsA("ValueBase")then return nil end
+            amount=requirement.Value
+        end
+        return amount
+    end
     local worker=make({Active=function()return state.Running end,
-        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutoTradeBusy
-            or state.TravelBusy or state.AutomationTeleporting end,
-        Selected=function(name)return state.AutoCraft[name]==true end,Count=count,
-        Recipe=function(output,input)
-            local definition=ReplicatedStorage.Database.Items:FindFirstChild(output)
-            local recipe=definition and definition:FindFirstChild("Recipe")
-            if not recipe then return end
-            local amount
-            for _,part in ipairs(recipe:GetChildren())do
-                if part.Name==input and part:IsA("ValueBase")then amount=part.Value
-                else return end -- Do not spend currency or additional materials for changed recipes.
-            end
-            return amount
-        end,
-        Send=function(name)ReplicatedStorage.Event:FireServer("Item",{"Craft",name})end,
-        Status=function(text)state.AutoCraftStatus=text end})
-    function state.SetAutoCraft(selected)
-        local result={}
-        for _,name in ipairs({"Rare Upgrade Crystal","Legendary Upgrade Crystal"})do if selected and selected[name]==true then result[name]=true end end
-        state.AutoCraft=result;worker.Reset();requestSave()
+        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutoTradeBusy or state.TravelBusy or state.AutomationTeleporting end,
+        Selected=function(name)return state.AutoCraft[name]==true end,Count=count,Recipe=recipe,
+        Send=function(output)ReplicatedStorage.Event:FireServer("Item",{"Craft",output})end,
+        Status=function(message)state.AutoCraftStatus=message end})
+    state.AutoCraftController=worker
+    function state.SetAutoCraft(values)
+        local selected={}
+        for _,output in ipairs({"Rare Upgrade Crystal","Legendary Upgrade Crystal"})do if values and values[output]==true then selected[output]=true end end
+        state.AutoCraft=selected;worker.Reset();requestSave()
     end
     task.spawn(function()
         while state.Running do
@@ -10147,68 +9324,80 @@ end
 do
     local make=(function()
 -- BEGIN BUNDLED CONFIG TRANSFER
--- Portable preferences and custom arenas; never execute imported text as code.
+-- Strict portable-data schema; imported bytes are decoded only, never executed.
 return function(ctx)
-    local api={}
-    local kinds={}
-    for _,key in ipairs({"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
-    for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
-    for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
-    local function plain(value,depth)
+    local schema={}
+    local groups={
+        boolean={"CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
+        string={"CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
+        table={"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+    }
+    for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
+    local function data(value,depth,path)
         assert(depth<=12,"Config nesting is too deep")
         local kind=type(value)
-        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number")
-        elseif kind=="table"then
-            local count=0
-            for key,item in pairs(value)do
-                count+=1;assert(count<=4096,"Config table is too large")
-                assert(type(key)=="string"or type(key)=="number","Invalid config key")
-                plain(item,depth+1)
-            end
-        else assert(kind=="string"or kind=="boolean","Invalid config value")end
+        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number");return end
+        if kind~="table"then assert(kind=="string"or kind=="boolean","Invalid config value");return end
+        assert(not path[value],"Config cannot contain cycles")
+        path[value]=true
+        local total=0
+        for key,child in pairs(value)do
+            total+=1;assert(total<=4096,"Config table is too large")
+            assert(type(key)=="string"or type(key)=="number","Invalid config key")
+            data(child,depth+1,path)
+        end
+        path[value]=nil
     end
-    function api.Validate(value)
-        assert(type(value)=="table"and value.Format=="FeatherConfig"and value.Version==1,"Not a Feather config")
-        assert(type(value.Settings)=="table"and value.Settings.Version==1,"Invalid settings")
-        plain(value,0)
-        for key,item in pairs(value.Settings)do assert(kinds[key]and type(item)==kinds[key],"Invalid setting: "..tostring(key))end
-        for _,key in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do
-            local position=value.Settings[key]
-            if position then
-                assert(#position==4,"Invalid UI position")
-                for _,coordinate in ipairs(position)do assert(type(coordinate)=="number","Invalid UI position")end
-            end
+    local function tuple(value,count,limit)
+        assert(type(value)=="table"and #value==count,"Invalid position")
+        for _,coordinate in ipairs(value)do assert(type(coordinate)=="number"and (not limit or math.abs(coordinate)<=limit),"Invalid coordinate")end
+    end
+    local function settings(value)
+        assert(type(value)=="table"and value.Version==1,"Invalid settings")
+        for key,item in pairs(value)do assert(schema[key]and type(item)==schema[key],"Invalid setting: "..tostring(key))end
+        for _,name in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do if value[name]then tuple(value[name],4)end end
+        for _,name in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
+            for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
         end
-        for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
-            for name,on in pairs(value.Settings[key]or {})do assert(type(name)=="string"and type(on)=="boolean","Invalid selection: "..key)end
-        end
-        for _,id in ipairs(value.Settings.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
-        assert(type(value.CustomSpots)=="table","Missing custom spots")
-        local floors=0
-        for id,spots in pairs(value.CustomSpots)do
-            floors+=1;assert(floors<=64 and tostring(id):match("^%d+$"),"Invalid spot floor")
+        for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
+    end
+    local function arenas(value)
+        assert(type(value)=="table","Missing custom spots")
+        local count=0
+        for floor,spots in pairs(value)do
+            count+=1;assert(count<=64 and tostring(floor):match("^%d+$"),"Invalid spot floor")
             assert(type(spots)=="table"and #spots<=20,"Too many custom spots")
             for _,spot in ipairs(spots)do
                 assert(type(spot)=="table"and type(spot.Id)=="string"and spot.Id:sub(1,16)=="saved:multispot:","Invalid custom spot")
-                assert(type(spot.Name)=="string"and #spot.Name<=200 and type(spot.Position)=="table"and #spot.Position==3,"Invalid spot name/position")
-                for _,coordinate in ipairs(spot.Position)do assert(type(coordinate)=="number"and math.abs(coordinate)<=1e7,"Invalid coordinate")end
+                assert(type(spot.Name)=="string"and #spot.Name<=200,"Invalid spot name/position")
+                tuple(spot.Position,3,1e7)
             end
         end
-        return value
+    end
+    local api={}
+    function api.Validate(package)
+        assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
+        data(package,0,{})
+        settings(package.Settings);arenas(package.CustomSpots)
+        return package
+    end
+    local function withinStorage(package)
+        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
     end
     function api.Export()
-        local value=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
-        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
-        local text=ctx.Encode(value);assert(#text<=262144,"Config exceeds 256 KB")
+        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        withinStorage(package)
+        local bytes=ctx.Encode(package)
+        assert(#bytes<=262144,"Config exceeds 256 KB")
         assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
-        ctx.Copy(text);return text
+        ctx.Copy(bytes)
+        return bytes
     end
-    function api.Import(text)
-        assert(type(text)=="string"and #text<=262144,"Config exceeds 256 KB")
-        local value=api.Validate(ctx.Decode(text))
-        assert(#ctx.Encode(value.Settings)<=32768,"Settings exceed their storage limit")
-        ctx.Apply(value)
+    function api.Import(bytes)
+        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
+        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
+        ctx.Apply(package)
         return true
     end
     return api
@@ -10216,45 +9405,39 @@ end
 
 -- END BUNDLED CONFIG TRANSFER
     end)()
-    local transfer=make({Settings=settingsPayload,Encode=function(v)return HttpService:JSONEncode(v)end,
-        Decode=function(v)return HttpService:JSONDecode(v)end,Copy=setclipboard or toclipboard,
-        Spots=function()
-            local result={}
-            if filePersistence and type(listfiles)=="function"then
-                for _,file in ipairs(listfiles(configFolder))do
-                    local id=file:match("custom%-spots_(%d+)%.json$")
-                    if id then
-                        local raw=readfile(file)
-                        assert(#raw<=32768,"Custom spots file too large")
-                        local value=HttpService:JSONDecode(raw)
-                        assert(value.Version==1 and type(value.Areas)=="table","Invalid custom spots file")
-                        result[id]=value.Areas
-                    end
+    local function exportSpots()
+        local floors={}
+        if filePersistence and type(listfiles)=="function"then
+            for _,path in ipairs(listfiles(configFolder))do
+                local floor=path:match("custom%-spots_(%d+)%.json$")
+                if floor then
+                    local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
+                    local saved=HttpService:JSONDecode(bytes)
+                    assert(saved.Version==1 and type(saved.Areas)=="table","Invalid custom spots file")
+                    floors[floor]=saved.Areas
                 end
             end
-            local current={}
-            for id,area in pairs(destinations)do
-                if id:sub(1,16)=="saved:multispot:"then
-                    local point=area.Position
-                    current[#current+1]={Id=id,Name=area.Name,Position={point.X,point.Y,point.Z}}
-                end
-            end
-            result[tostring(game.PlaceId)]=current
-            return result
-        end,
-        Apply=function(value)
-            assert(filePersistence or next(value.CustomSpots)==nil,"Importing saved spots requires executor file access")
-            -- Compile first; the imported JSON is data, never executable text.
-            local run=assert(loadstring(embeddedSource,"Feather config reload"))
-            env.SB2ConfigImport={UserId=player.UserId,Settings=value.Settings,CustomSpots=value.CustomSpots}
-            state.AutoSaveSuspended=true
-            state.Destroy(true)
-            run(embeddedSource)
-        end})
-    state.ExportConfig=transfer.Export
-    state.ImportConfig=transfer.Import
+        end
+        local current={}
+        for id,area in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then
+            local point=area.Position;current[#current+1]={Id=id,Name=area.Name,Position={point.X,point.Y,point.Z}}
+        end end
+        floors[tostring(game.PlaceId)]=current
+        return floors
+    end
+    local function importPackage(package)
+        assert(filePersistence or next(package.CustomSpots)==nil,"Importing saved spots requires executor file access")
+        local launch=assert(loadstring(embeddedSource,"Feather imported configuration"))
+        env.SB2ConfigImport={UserId=player.UserId,Settings=package.Settings,CustomSpots=package.CustomSpots}
+        state.AutoSaveSuspended=true;state.Destroy(true);launch(embeddedSource)
+    end
+    local transfer=make({Settings=settingsPayload,Spots=exportSpots,Apply=importPackage,
+        Encode=function(value)return HttpService:JSONEncode(value)end,
+        Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
+    state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
 end
--- WindUI is bundled at a fixed release; queued rejoins need no library download.
+-- WindUI is bundled at a fixed release; no compatibility window exists.
+-- Executor adapter for the sole modern presentation.
 do
     local librarySource=(function()
 -- BEGIN BUNDLED WINDUI SOURCE
@@ -27672,599 +26855,511 @@ return aa
     end)()
     local make=(function()
 -- BEGIN BUNDLED WINDUI
--- WindUI presentation; existing controllers remain the owners of gameplay/settings.
+-- Declarative modern UI: construction, value projection, and user actions are separate.
 return function(ctx)
-    local s=ctx.State
-    local restoreTab=s.UI.ActiveTab or "Main"
-    local api={Controls={},Tabs={},Ready=false,Visible=true}
-    local disposed=false
-    local toggles,dropdowns,paragraphs={},{},{}
-    local syncingInputs={}
-    local nextUpdate,nextChoices=0,0
-    local buildSlice=os.clock()
-    local lastTab
-    local choiceCursor=1
-    local visibilityApplied=false
+    local state=ctx.State
+    local api={Controls={},Tabs={},Ready=false,BackgroundReady=false,Visible=true}
+    local lifetime={Closed=false,VisibilityApplied=false}
+    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local projections={}
+    local cadence={Next=0,Choices=0,Cursor=1,Tab=nil,Build=os.clock()}
     local memory=ctx.Memory or {Pruned=0,Update=function()end}
     api.Memory=memory
-    local function yieldBuild()
-        if disposed or s.Running==false then error("UI initialization cancelled")end
-        if ctx.Yield then ctx.Yield()
-        elseif ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
-        if disposed or s.Running==false then error("UI initialization cancelled")end
+    local function valid()return not lifetime.Closed and state.Running~=false end
+    local function fail(reason)
+        state.WindUIError=tostring(reason)
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=state.WindUIError,Duration=5})end
     end
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
-    local function report(reason)
-        s.WindUIError=tostring(reason)
-        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=s.WindUIError,Duration=5})end
-    end
-    local function guard(fn)
+    local function safe(fn)
         return function(...)
-            if disposed or s.Running==false then return end
+            if not valid()then return end
             local ok,reason=pcall(fn,...)
-            if not ok then report(reason)end
+            if not ok then fail(reason)end
         end
     end
-    local function signature(value)
+    local function action(name,...)
+        assert(type(state[name])=="function","Control unavailable: "..name)
+        return state[name](...)
+    end
+    local function constructionPoint()
+        assert(valid(),"UI initialization cancelled")
+        if ctx.Yield then ctx.Yield()
+        elseif ctx.Defer and os.clock()-cadence.Build>=.002 then task.wait();cadence.Build=os.clock()end
+        assert(valid(),"UI initialization cancelled")
+    end
+    local function signature(value,ordered)
         if type(value)~="table"then return tostring(value)end
-        local values={};for _,v in ipairs(value)do values[#values+1]=tostring(v)end
-        table.sort(values);return table.concat(values,"\0")
+        local items={};for _,item in ipairs(value)do items[#items+1]=tostring(item)end
+        if not ordered then table.sort(items)end
+        return table.concat(items,"\0")
     end
-    local function bool(key)return function()return s[key]==true end end
-    local function invoke(name,...)
-        assert(type(s[name])=="function","Control unavailable: "..name)
-        return s[name](...)
-    end
-    if not ctx.WindUI:GetThemes()[s.Theme or "Dark"]then s.Theme="Dark"end
-    local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..s.Version,
-        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=s.Theme or "Dark",Transparent=false,
-        Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,HideSearchBar=false,ScrollBarEnabled=true,
-        User={Enabled=false},OpenButton={Title="Feather"}})
-    assert(window,"WindUI window was not created")
-    api.Window=window
-    -- Keep the window at its final size: size tweens invalidate every nested layout.
-    local frame=window.UIElements and window.UIElements.Main
-    if frame then
-        local nativeClose=window.Close
-        local function visibility(visible)
-            if disposed or window.Destroyed then return end
-            window.Closed=not visible;window.CanDropdown=visible
-            window.CanResize=visible and window.Resizable~=false
-            if frame.Size~=window.Size then frame.Size=window.Size end
-            frame.Background.ImageTransparency=0
-            frame.Main.Visible=visible;frame.Visible=visible
-            local callback=visible and window.OnOpenCallback or window.OnCloseCallback
-            if callback then callback()end
-        end
-        window.Open=function()visibility(true)end
-        window.Close=function()
-            visibility(false)
-            -- Preserve the library's native disposal and connection cleanup.
-            return {Destroy=function()return nativeClose(window):Destroy()end}
-        end
-    end
-    -- Use the existing mobile Show UI button so the HUD remains independent.
-    window.IsOpenButtonEnabled=false
-    if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    local function buildTabs(first,last)
-        for i=first,last do
-            yieldBuild();local name=tabs[i]
-            api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})
-        end
-    end
-    buildTabs(1,ctx.Defer and 1 or #tabs)
-    local function button(key,tab,title,fn,desc)
-        yieldBuild()
-        api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
-    end
-    local function paragraph(key,tab,title,get)
-        yieldBuild()
-        local text=tostring(get()or "")
-        local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
-        api.Controls[key]=control;paragraphs[#paragraphs+1]={Tab=tab,Control=control,Get=get,Text=text}
-    end
-    local function toggle(key,tab,title,get,set,desc)
-        yieldBuild()
-        local entry={Tab=tab,Get=get,Value=get()}
-        local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
-            if api.Ready and value~=get()then
-                set(value);entry.Value=get();entry.Control:Set(entry.Value,false)
-            end
-        end)})
-        entry.Control=control;api.Controls[key]=control;toggles[#toggles+1]=entry
-    end
-    local function stateToggle(key,tab,title,setter,desc)
-        toggle(key,tab,title,bool(key),function(value)invoke(setter,value)end,desc)
-    end
-    local function dropdown(key,tab,title,build,choose,multi,desc)
-        yieldBuild()
-        local function valueSignature(value)
-            if key=="MultiSpotAreas"and type(value)=="table"then return table.concat(value,"\0")end
-            return signature(value)
-        end
-        local entry={Signature=valueSignature,Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
-        local view=build();entry.Map=view.Map or {};entry.Current=valueSignature(view.Value);entry.Value=entry.Current
-        entry.Options=signature(view.Options)
-        entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
-            Multi=multi==true,AllowNone=multi==true,SearchBarEnabled=true,Callback=guard(function(value)
-                if not api.Ready or entry.Syncing or valueSignature(value)==entry.Current then return end
-                entry.Current=valueSignature(value)
-                entry.Value=nil;entry.Choose(value,entry.Map)
-                nextChoices=0
-            end)})
-        entry.Syncing=false
-        api.Controls[key]=entry.Control;dropdowns[#dropdowns+1]=entry
-    end
-    local function input(key,tab,title,value,set,desc)
-        yieldBuild()
-        api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
-            Placeholder="Enter here...",Callback=guard(function(text)
-                if api.Ready and not syncingInputs[key]then set(text)end
-            end)})
-    end
-    local function selected(options,map,predicate)
-        local result={};for _,label in ipairs(options)do if predicate(map[label])then result[#result+1]=label end end
-        return result
-    end
-    local function option(options,map,label,id)
-        local base,index=label,2
-        while map[label]~=nil do label=base.." ("..index..")";index+=1 end
+    local function mapping(options,label,id,map)
+        local base,suffix=label,2
+        while map[label]~=nil do label=base.." ("..suffix..")";suffix+=1 end
         options[#options+1]=label;map[label]=id
         return label
     end
-    local function status(key,fallback)
-        local item=s.UI and s.UI[key]
-        return item and item.Text or s[key]or fallback or ""
+    local function chosen(options,map,enabled)
+        local result={}
+        for _,label in ipairs(options)do if enabled(map[label])then result[#result+1]=label end end
+        return result
     end
-
-    api.Controls.TeleportSection=api.Tabs.Main:Section({Title="Teleport",TextSize=17})
-    local destination
-    dropdown("TeleportDestination","Main","Spot",function()
-        local list={};for _,area in pairs(s.FloorDestinations or {})do list[#list+1]=area end
-        table.sort(list,function(a,b)
-            if a.Kind~=b.Kind then return a.Kind<b.Kind end
-            if a.Name~=b.Name then return a.Name<b.Name end
-            return a.Id<b.Id
-        end)
-        local options,map,value={},{},nil
-        for _,area in ipairs(list)do
-            local label=option(options,map,area.Kind.." · "..area.Name,area.Id)
-            if destination==area.Id then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)
-        destination=map[label]
-        if destination then invoke("TeleportToDestination",destination)end
-        destination=nil
-    end)
-    button("RefreshDestinations","Main","Refresh List",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
-    api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})
-    stateToggle("SafeMode","Main","Safe Mode","SetSafeMode")
-    dropdown("SafeFloor","Main","Safe floor",function()
-        local options,map,value={},{},nil
-        local catalog=s.AutomationCatalog
-        for _,floor in ipairs(catalog and catalog.Floors or {})do
-            local unlocked=invoke("IsAutomationFloorUnlocked",floor.Id)
-            local label=floor.Label..(unlocked and ""or " · locked")
-            options[#options+1]=label;map[label]=floor.Id
-            if floor.Id==s.SafeFloorId then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)local id=map[label];if id and id~=s.SafeFloorId then invoke("SetSafeFloor",id)end end,
-        false)
-    input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
-        if text:match("[%w_]")and text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
-    end,"Input A List Of User")
-    local clearWhitelist=guard(function()
-        -- Clear the editor only; the active/saved list remains until a replacement is submitted.
-        syncingInputs.SafeWhitelist=true
-        local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
-        syncingInputs.SafeWhitelist=nil
-        if not ok then error(reason)end
-    end)
-    api.ClearWhitelist=clearWhitelist
-    if ctx.AddWhitelistClear then
-        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist)
+    local function selection(values)
+        local result={};for _,name in ipairs(values or {})do result[name]=true end;return result
     end
-    paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
-    api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
-    stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
-    button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
-    dropdown("MultiSpotAreas","Main","Saved Spot",function()
-        local options,map,byId,labels={},{},{},{}
-        local catalog=s.AutomationCatalog
-        if catalog then catalog.AddCurrent(s.FloorDestinations,ctx.PlaceId);catalog.Sort()end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then byId[spot.Id]=spot end end
-        local order,rank={},{}
-        local function add(id)
-            if byId[id]and s.MultiSpotSelected[id]and not rank[id]then order[#order+1]=id;rank[id]=#order end
+    if not ctx.WindUI:GetThemes()[state.Theme or "Dark"]then state.Theme="Dark"end
+    local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..state.Version,
+        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=state.Theme or "Dark",Transparent=false,
+        Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,
+        HideSearchBar=false,ScrollBarEnabled=true,User={Enabled=false},OpenButton={Title="Feather"}})
+    assert(window,"WindUI window was not created")
+    api.Window=window;window.IsOpenButtonEnabled=false
+    if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
+    local frame=window.UIElements and window.UIElements.Main
+    if frame then
+        local nativeClose=window.Close
+        local function present(show)
+            if lifetime.Closed or window.Destroyed then return end
+            window.Closed=not show;window.CanDropdown=show;window.CanResize=show and window.Resizable~=false
+            if frame.Size~=window.Size then frame.Size=window.Size end
+            frame.Background.ImageTransparency=0;frame.Main.Visible=show;frame.Visible=show
+            local callback=show and window.OnOpenCallback or window.OnCloseCallback
+            if callback then callback()end
         end
-        for _,id in ipairs(s.MultiSpotOrder or {})do add(id)end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do add(spot.Id)end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do
-            if spot.PlaceId==ctx.PlaceId then
-                labels[spot.Id]=option(options,map,(rank[spot.Id]and (rank[spot.Id].." · ")or "")..spot.Kind.." · "..spot.Name,spot.Id)
-            end
+        window.Open=function()present(true)end
+        window.Close=function()
+            present(false)
+            return {Destroy=function()return nativeClose(window):Destroy()end}
         end
-        local value={};for _,id in ipairs(order)do value[#value+1]=labels[id]end
-        return {Options=options,Map=map,Value=value}
-    end,function(values,map)
-        local chosen,order={},{}
-        for _,label in ipairs(values or {})do
-            local id=map[label];if id and not chosen[id]then chosen[id]=true;order[#order+1]=id end
-        end
-        invoke("SetMultiSpotSelections",chosen,order)
-    end,true)
-    api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
-    input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
-        if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
-    end)
-    stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
-    paragraph("AutoJoinFriendStatus","Main","Status",function()
-        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
-        return ctx.FriendPresent and ctx.FriendPresent(name)and "Friend Appeared"or "Friend Unappeared"
-    end)
-    local restart=guard(function()invoke("RestartScript")end)
-    api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
-    api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
-        invoke("SetAutoHideUI",not s.AutoHideUI)
-        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
-    end),995)
-    if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
-
-
-    local function buildOtherTabs()
-    stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
-    stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
-    stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
-    stateToggle("CreditCheck","Combat","Credit Check","SetCreditCheck")
-    input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)
-        if text~=s.CreditWhitelistText then invoke("SetCreditWhitelist",text)end
-    end,"Input A List Of User")
-    paragraph("CreditCheckStatus","Combat","Credit Status",function()
-        return not s.CreditCheck and "Credit Check is off"or s.CreditCheckStatus or "Waiting for a boss or mini-boss"
-    end)
-    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
-    stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
-    stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
-    stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
-    api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
-    stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
-    dropdown("SelectedSkill","Auto Skill","Skill",function()
-        return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
-    end,function(name)if name and name~=s.SelectedSkill then invoke("SetSelectedSkill",name)end end)
-    api.Controls.MiscSkillSection=api.Tabs["Auto Skill"]:Section({Title="Misc Skill",TextSize=17})
-    stateToggle("MiscSkillEnabled","Auto Skill","Misc Skill","SetMiscSkillEnabled")
-    dropdown("SelectedMiscSkill","Auto Skill","Skill",function()
-        local options={};for _,item in ipairs(s.MiscSkillChoices or {})do if item.Usable then options[#options+1]=item.Name end end
-        return {Options=options,Value=s.SelectedMiscSkill}
-    end,function(name)if name and name~=s.SelectedMiscSkill then invoke("SetMiscSkill",name)end end)
-    for _,name in ipairs({"Dismantle","Upgrade","The Forge"})do
-        button("Open"..name,"Misc",name,function()invoke("OpenGameMenu",name)end)
     end
-
-    dropdown("SelectedPlayer","Player","Select player",function()
-        local options,map,value={},{},nil
-        for _,person in ipairs(s.PlayerTools.Choices())do
-            local label=person.DisplayName.." (@"..person.Name..")";options[#options+1]=label;map[label]=person.UserId
-            if person.UserId==s.SelectedPlayerId then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)if map[label]then s.PlayerTools.Select(map[label])end end)
-    button("TeleportPlayer","Player","TP to player",function()s.PlayerTools.Teleport()end)
-    toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
-    toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
-
-    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
-    local function applyBoost(values)
-        local picked={};for _,name in ipairs(values or {})do picked[name]=true end
-        for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
+    local function publish(show)
+        api.Visible=show==true;state.UIHidden=not api.Visible;ctx.Visibility(api.Visible)
     end
-    api.Controls.PerformanceBoosterSection=api.Tabs.Utility:Section({Title="Perfromance Booster",TextSize=17})
-    dropdown("PerformanceBoosters","Utility","Performance boosters",function()
-        local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
-        return {Options=boostNames,Value=value}
-    end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
-    local rarities={"Common","Uncommon","Rare"}
-    api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
-    dropdown("AutoDismantle","Utility","Auto Dismantle",function()
-        local value={};for _,name in ipairs(rarities)do if s.AutoDismantle[name]then value[#value+1]=name end end
-        return {Options=rarities,Value=value}
-    end,function(values)
-        local picked={};for _,name in ipairs(values or {})do picked[name]=true end
-        for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
-    end,true)
-    api.Controls.AutoCraftSection=api.Tabs.Utility:Section({Title="Auto Craft",TextSize=17})
-    dropdown("AutoCraft","Utility","Auto Craft",function()
-        local options={"Uncommon → Rare","Rare → Legendary"}
-        local map={[options[1]]="Rare Upgrade Crystal",[options[2]]="Legendary Upgrade Crystal"}
-        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.AutoCraft and s.AutoCraft[name]==true end)}
-    end,function(values,map)
-        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
-        invoke("SetAutoCraft",picked)
-    end,true)
-    api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
-    stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
-    dropdown("TradeMode","Utility","Mode",function()
-        return {Options={"Selected items","Legendary+"},Value=s.TradeMode=="Legendary"and "Legendary+"or "Selected items"}
-    end,function(value)invoke("SetTradeMode",value=="Legendary+"and "Legendary"or "Selected")end)
-    dropdown("TradeItems","Utility","Inventory",function()
-        local options,map={},{ }
-        for _,item in ipairs(s.GetTradeItemChoices())do local label=item.Name.." x"..item.Count;options[#options+1]=label;map[label]=item.Name end
-        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.TradeItems[name]==true end)}
-    end,function(values,map)
-        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
-        invoke("SetTradeItems",picked)
-    end,true)
-    stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
-    dropdown("Theme","Settings","Theme",function()
-        local options={}
-        for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end
-        table.sort(options)
-        return {Options=options,Value=s.Theme or "Dark"}
-    end,function(name)
-        if ctx.WindUI:SetTheme(name)then s.Theme=name;if s.SaveNow then s.SaveNow()end end
-    end)
-    input("ConfigImport","Settings","Config Import","",function(text)
-        if text:match("%S")then invoke("ImportConfig",text)end
-    end)
-    button("ConfigExport","Settings","Config Export",function()
-        invoke("ExportConfig")
-        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
-    end)
-
-
+    function api.SetVisible(show)
+        if lifetime.Closed then return end
+        show=show==true
+        if lifetime.VisibilityApplied and api.Visible==show and window.Closed==not show then return end
+        lifetime.VisibilityApplied=true;publish(show)
+        if show then window:Open()else window:Close()end
     end
-
-    function api.SetVisible(value)
-        if disposed then return end
-        value=value==true
-        if visibilityApplied and api.Visible==value and window.Closed==not value then return end
-        visibilityApplied=true
-        api.Visible=value;s.UIHidden=not api.Visible
-        ctx.Visibility(api.Visible)
-        if api.Visible then window:Open()else window:Close()end
-    end
-    window:OnOpen(function()if not disposed then api.Visible=true;s.UIHidden=false;ctx.Visibility(true)end end)
-    window:OnClose(function()if not disposed then api.Visible=false;s.UIHidden=true;ctx.Visibility(false)end end)
-    window:OnDestroy(function()if not disposed and s.Running~=false then invoke("Destroy")end end)
-    function api.Update(now)
-        if disposed or s.Running==false or now<nextUpdate then return end
-        nextUpdate=now+.25
-        memory.Update();s.UIReferencesPruned=memory.Pruned
-        local tab=window.CurrentTab and tabs[window.CurrentTab]
-        if tab then s.UI.ActiveTab=tab end
-        if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end
-        if not api.Visible then return end
-        for _,entry in ipairs(toggles)do
-            if entry.Tab==tab then
-            local value=entry.Get()
-            if value~=entry.Value then entry.Value=value;entry.Control:Set(value,false)end
-            end
-        end
-        for _,entry in ipairs(paragraphs)do
-            if entry.Tab==tab then
-            local text=tostring(entry.Get()or "")
-            if text~=entry.Text then entry.Text=text;entry.Control:SetDesc(text)end
-            end
-        end
-        if now>=nextChoices then
-            local processed=0
-            while choiceCursor<=#dropdowns do
-                local entry=dropdowns[choiceCursor];choiceCursor+=1
-                if entry.Tab==tab then
-                local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
-                local options=signature(view.Options);local value=entry.Signature(view.Value)
-                local changed=options~=entry.Options
-                entry.Current=value
-                if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
-                if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
-                entry.Syncing=false
-                processed+=1
-                if ctx.Defer and processed>=1 then break end
+    window:OnOpen(function()if valid()then publish(true)end end)
+    window:OnClose(function()if valid()then publish(false)end end)
+    window:OnDestroy(function()if valid()then action("Destroy")end end)
+    local function register(tab,definition)
+        constructionPoint()
+        local key=definition.Key
+        local tabObject=api.Tabs[tab]
+        local kind=definition.Kind
+        if kind=="Section"then api.Controls[key]=tabObject:Section({Title=definition.Title,TextSize=17});return end
+        local projection={Definition=definition,Tab=tab}
+        local options={Title=definition.Title,Desc=definition.Desc}
+        if kind=="Button"then options.Callback=safe(definition.Action)
+        elseif kind=="Paragraph"then projection.Text=tostring(definition.Read()or "");options.Desc=projection.Text
+        elseif kind=="Toggle"then
+            projection.Value=definition.Read();options.Value=projection.Value
+            options.Callback=safe(function(value)
+                if api.Ready and value~=definition.Read()then
+                    definition.Write(value);projection.Value=definition.Read();projection.Control:Set(projection.Value,false)
                 end
-            end
-            if choiceCursor>#dropdowns then choiceCursor=1;nextChoices=now+1
-            else nextChoices=now+.25 end
+            end)
+        elseif kind=="Input"then
+            options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
+            options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Dropdown"then
+            local view=definition.Read()
+            projection.Map=view.Map or {};projection.Options=signature(view.Options)
+            projection.Value=signature(view.Value,definition.Ordered);projection.Current=projection.Value
+            projection.Syncing=true
+            options.Values=view.Options;options.Value=view.Value;options.Multi=definition.Multi==true
+            options.AllowNone=definition.Multi==true;options.SearchBarEnabled=true
+            options.Callback=safe(function(value)
+                local keyValue=signature(value,definition.Ordered)
+                if not api.Ready or projection.Syncing or keyValue==projection.Current then return end
+                projection.Current=keyValue;projection.Value=nil
+                definition.Write(value,projection.Map);cadence.Choices=0;cadence.Cursor=1
+            end)
         end
+        projection.Control=tabObject[kind](tabObject,options)
+        projection.Syncing=false;api.Controls[key]=projection.Control
+        projections[#projections+1]=projection
+        return projection
+    end
+    local function section(tab,key,title)return register(tab,{Kind="Section",Key=key,Title=title})end
+    local function toggle(tab,key,title,setter,desc)
+        return register(tab,{Kind="Toggle",Key=key,Title=title,Desc=desc,Read=function()return state[key]==true end,Write=function(value)action(setter,value)end})
+    end
+    local function dropdown(tab,key,title,read,write,multi,desc)
+        return register(tab,{Kind="Dropdown",Key=key,Title=title,Read=read,Write=write,Multi=multi,Desc=desc,Ordered=key=="MultiSpotAreas"})
+    end
+    local function input(tab,key,title,value,write,desc)return register(tab,{Kind="Input",Key=key,Title=title,Value=value,Write=write,Desc=desc})end
+    local function button(tab,key,title,fn,desc)return register(tab,{Kind="Button",Key=key,Title=title,Action=fn,Desc=desc})end
+    local function paragraph(tab,key,title,read)return register(tab,{Kind="Paragraph",Key=key,Title=title,Read=read})end
+    local function tab(index)
+        constructionPoint();local title=order[index]
+        api.Tabs[title]=window:Tab({Title=title,Icon=icons[index]})
+    end
+    local function destinations()
+        local list={};for _,area in pairs(state.FloorDestinations or {})do list[#list+1]=area end
+        table.sort(list,function(a,b)return a.Kind==b.Kind and (a.Name==b.Name and a.Id<b.Id or a.Name<b.Name)or a.Kind<b.Kind end)
+        local options,map={},{}
+        for _,area in ipairs(list)do mapping(options,area.Kind.." · "..area.Name,area.Id,map)end
+        return {Options=options,Map=map}
+    end
+    local function floors()
+        local options,map,value={},{},nil
+        for _,floor in ipairs(state.AutomationCatalog and state.AutomationCatalog.Floors or {})do
+            local label=floor.Label..(action("IsAutomationFloorUnlocked",floor.Id)and ""or " · locked")
+            options[#options+1]=label;map[label]=floor.Id
+            if floor.Id==state.SafeFloorId then value=label end
+        end
+        return {Options=options,Map=map,Value=value}
+    end
+    local function arenas()
+        local catalog=state.AutomationCatalog
+        if catalog then catalog.AddCurrent(state.FloorDestinations,ctx.PlaceId);catalog.Sort()end
+        local eligible={}
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then eligible[spot.Id]=spot end end
+        local priority,rank={},{}
+        local function append(id)
+            if eligible[id]and state.MultiSpotSelected[id]and not rank[id]then priority[#priority+1]=id;rank[id]=#priority end
+        end
+        for _,id in ipairs(state.MultiSpotOrder or {})do append(id)end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do append(spot.Id)end
+        local options,map,labels={},{},{}
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if eligible[spot.Id]then
+            local label=(rank[spot.Id]and rank[spot.Id].." · "or "")..spot.Kind.." · "..spot.Name
+            labels[spot.Id]=mapping(options,label,spot.Id,map)
+        end end
+        local values={};for _,id in ipairs(priority)do values[#values+1]=labels[id]end
+        return {Options=options,Map=map,Value=values}
+    end
+    local function main()
+        section("Main","TeleportSection","Teleport")
+        dropdown("Main","TeleportDestination","Spot",destinations,function(label,map)if map[label]then action("TeleportToDestination",map[label])end end)
+        button("Main","RefreshDestinations","Refresh List",function()action("RefreshTeleportDestinations");cadence.Choices=0 end)
+        section("Main","SafeModeSection","Safe Mode");toggle("Main","SafeMode","Safe Mode","SetSafeMode")
+        dropdown("Main","SafeFloor","Safe floor",floors,function(label,map)if map[label]and map[label]~=state.SafeFloorId then action("SetSafeFloor",map[label])end end)
+        local editor=input("Main","SafeWhitelist","Whitelist",state.SafeWhitelistText,function(text)
+            if text:match("[%w_]")and text~=state.SafeWhitelistText then action("SetSafeWhitelist",text)end
+        end,"Input A List Of User")
+        api.ClearWhitelist=safe(function()
+            editor.Syncing=true;local ok,reason=pcall(editor.Control.Set,editor.Control,"");editor.Syncing=false
+            if not ok then error(reason)end
+        end)
+        if ctx.AddWhitelistClear then api.Controls.ClearWhitelist=ctx.AddWhitelistClear(editor.Control,api.ClearWhitelist)end
+        paragraph("Main","SafeModeStatus","Status",function()return state.SafeModeStatus end)
+        section("Main","MultiSpotSection","Multi Spot");toggle("Main","MultiSpot","Multi Spot","SetMultiSpot")
+        button("Main","SaveSpot","Save Spot",function()action("SaveMultiSpot");cadence.Choices=0 end)
+        dropdown("Main","MultiSpotAreas","Saved Spot",arenas,function(values,map)
+            local selected,priority={},{}
+            for _,label in ipairs(values or {})do local id=map[label];if id and not selected[id]then selected[id]=true;priority[#priority+1]=id end end
+            action("SetMultiSpotSelections",selected,priority)
+        end,true)
+        section("Main","FriendJoinerSection","Friend Joiner")
+        input("Main","JoinFriendUsername","Friend username",state.JoinFriendUsername,function(text)if text~=state.JoinFriendUsername then action("SetJoinFriendUsername",text)end end)
+        toggle("Main","AutoJoinFriend","Auto Join Friend","SetAutoJoinFriend")
+        paragraph("Main","AutoJoinFriendStatus","Status",function()
+            local username=tostring(state.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
+            return ctx.FriendPresent and ctx.FriendPresent(username)and "Friend Appeared"or "Friend Unappeared"
+        end)
+        api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",safe(function()action("RestartScript")end),996)
+        api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",safe(function()
+            action("SetAutoHideUI",not state.AutoHideUI)
+            if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,state.AutoHideUI)end
+        end),995)
+        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,state.AutoHideUI)end
+    end
+    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
+    local function rest()
+        for _,row in ipairs({{"Enabled","Kill Aura","SetEnabled"},{"AutoFarm","Auto Farm","SetAutoFarm"},{"BossOnly","Boss Only","SetBossOnly"},{"CreditCheck","Credit Check","SetCreditCheck"}})do toggle("Combat",row[1],row[2],row[3])end
+        input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
+        paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
+        for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AtheonDodge","Atheon Dodge","SetAtheonDodge"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
+        toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
+        section("Auto Skill","SkillAuraSection","Skill Aura");toggle("Auto Skill","SkillAura","Skill Aura","SetSkillAura")
+        dropdown("Auto Skill","SelectedSkill","Skill",function()return {Options=state.SkillChoices or {},Value=state.SelectedSkill}end,function(name)if name and name~=state.SelectedSkill then action("SetSelectedSkill",name)end end)
+        section("Auto Skill","MiscSkillSection","Misc Skill");toggle("Auto Skill","MiscSkillEnabled","Misc Skill","SetMiscSkillEnabled")
+        dropdown("Auto Skill","SelectedMiscSkill","Skill",function()
+            local options={};for _,skill in ipairs(state.MiscSkillChoices or {})do if skill.Usable then options[#options+1]=skill.Name end end
+            return {Options=options,Value=state.SelectedMiscSkill}
+        end,function(name)if name and name~=state.SelectedMiscSkill then action("SetMiscSkill",name)end end)
+        for _,name in ipairs({"Dismantle","Upgrade","The Forge"})do button("Misc","Open"..name,name,function()action("OpenGameMenu",name)end)end
+        dropdown("Player","SelectedPlayer","Select player",function()
+            local options,map,value={},{},nil
+            for _,person in ipairs(state.PlayerTools.Choices())do local label=person.DisplayName.." (@"..person.Name..")";options[#options+1]=label;map[label]=person.UserId;if person.UserId==state.SelectedPlayerId then value=label end end
+            return {Options=options,Map=map,Value=value}
+        end,function(label,map)if map[label]then state.PlayerTools.Select(map[label])end end)
+        button("Player","TeleportPlayer","TP to player",function()state.PlayerTools.Teleport()end)
+        register("Player",{Kind="Toggle",Key="ViewingPlayer",Title="View player",Read=function()return state.ViewingPlayer==true end,Write=function(on)state.PlayerTools.SetViewing(on)end})
+        register("Player",{Kind="Toggle",Key="ViewingPlayerInventory",Title="View player inventory",Read=function()return state.ViewingPlayerInventory==true end,Write=function(on)state.PlayerTools.SetInventoryVisible(on)end})
+        section("Utility","PerformanceBoosterSection","Perfromance Booster")
+        dropdown("Utility","PerformanceBoosters","Performance boosters",function()
+            local values={};for _,name in ipairs(boostNames)do if state.PerformanceBoosters[name]then values[#values+1]=name end end
+            return {Options=boostNames,Value=values}
+        end,function(values)
+            local picked=selection(values)
+            for _,name in ipairs(boostNames)do if (state.PerformanceBoosters[name]==true)~=(picked[name]==true)then action("SetPerformanceBoost",name,picked[name]==true)end end
+        end,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+        section("Utility","AutoDismantleSection","Auto Dismantle")
+        local rarities={"Common","Uncommon","Rare"}
+        dropdown("Utility","AutoDismantle","Auto Dismantle",function()
+            local values={};for _,name in ipairs(rarities)do if state.AutoDismantle[name]then values[#values+1]=name end end
+            return {Options=rarities,Value=values}
+        end,function(values)local picked=selection(values);for _,name in ipairs(rarities)do if (state.AutoDismantle[name]==true)~=(picked[name]==true)then action("SetAutoDismantle",name,picked[name]==true)end end end,true)
+        section("Utility","AutoCraftSection","Auto Craft")
+        local recipes={"Uncommon → Rare","Rare → Legendary"};local recipeMap={[recipes[1]]="Rare Upgrade Crystal",[recipes[2]]="Legendary Upgrade Crystal"}
+        dropdown("Utility","AutoCraft","Auto Craft",function()return {Options=recipes,Map=recipeMap,Value=chosen(recipes,recipeMap,function(name)return state.AutoCraft and state.AutoCraft[name]==true end)}end,
+            function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetAutoCraft",picked)end,true)
+        section("Utility","AutoTradeSection","Auto Trade");toggle("Utility","AutoTrade","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
+        dropdown("Utility","TradeMode","Mode",function()return {Options={"Selected items","Legendary+"},Value=state.TradeMode=="Legendary"and "Legendary+"or "Selected items"}end,function(label)action("SetTradeMode",label=="Legendary+"and "Legendary"or "Selected")end)
+        dropdown("Utility","TradeItems","Inventory",function()
+            local options,map={},{}
+            for _,item in ipairs(state.GetTradeItemChoices())do local label=item.Name.." x"..item.Count;options[#options+1]=label;map[label]=item.Name end
+            return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
+        end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
+        toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        dropdown("Settings","Theme","Theme",function()
+            local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
+            return {Options=options,Value=state.Theme or "Dark"}
+        end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
+        input("Settings","ConfigImport","Config Import","",function(bytes)if bytes:match("%S")then action("ImportConfig",bytes)end end)
+        button("Settings","ConfigExport","Config Export",function()
+            action("ExportConfig")
+            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+        end)
+    end
+    local function synchronize(projection,choices)
+        local definition=projection.Definition
+        if definition.Kind=="Toggle"then
+            local value=definition.Read();if value~=projection.Value then projection.Value=value;projection.Control:Set(value,false)end
+        elseif definition.Kind=="Paragraph"then
+            local text=tostring(definition.Read()or "");if text~=projection.Text then projection.Text=text;projection.Control:SetDesc(text)end
+        elseif definition.Kind=="Dropdown"and choices then
+            local view=definition.Read();local options=signature(view.Options);local value=signature(view.Value,definition.Ordered)
+            local changed=projection.Options~=options
+            projection.Syncing=true;projection.Map=view.Map or {};projection.Current=value
+            if changed then projection.Options=options;projection.Control:Refresh(view.Options)end
+            if changed or projection.Value~=value then projection.Value=value;projection.Control:Select(view.Value)end
+            projection.Syncing=false
+        end
+    end
+    function api.Update(stamp)
+        if not valid()or stamp<cadence.Next then return end
+        cadence.Next=stamp+.25;memory.Update();state.UIReferencesPruned=memory.Pruned
+        local current=window.CurrentTab and order[window.CurrentTab]
+        if current then state.UI.ActiveTab=current end
+        if current~=cadence.Tab then cadence.Tab=current;cadence.Choices=0;cadence.Cursor=1 end
+        if not api.Visible then return end
+        for _,projection in ipairs(projections)do if projection.Tab==current and projection.Definition.Kind~="Dropdown"then synchronize(projection,false)end end
+        if stamp<cadence.Choices then return end
+        while cadence.Cursor<=#projections do
+            local projection=projections[cadence.Cursor];cadence.Cursor+=1
+            if projection.Tab==current and projection.Definition.Kind=="Dropdown"then
+                synchronize(projection,true)
+                if ctx.Defer then break end
+            end
+        end
+        if cadence.Cursor>#projections then cadence.Cursor=1;cadence.Choices=stamp+1 else cadence.Choices=stamp+.25 end
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true;api.Ready=false
-        local failures={}
-        local function cleanup(fn,...)
-            local ok,reason=pcall(fn,...)
-            if not ok then failures[#failures+1]=tostring(reason)end
+        if lifetime.Closed then return end
+        lifetime.Closed=true;api.Ready=false;api.BackgroundReady=false
+        local errors={}
+        local function attempt(fn,...)
+            local ok,reason=pcall(fn,...);if not ok then errors[#errors+1]=tostring(reason)end
         end
-        cleanup(ctx.Visibility,false)
-        cleanup(function()window:Destroy()end)
-        if memory.Destroy then cleanup(memory.Destroy)end
-        if ctx.DestroyRoots then cleanup(ctx.DestroyRoots)end
-        if #failures>0 then s.UICleanupErrors=failures end
+        attempt(ctx.Visibility,false);attempt(function()window:Destroy()end)
+        if memory.Destroy then attempt(memory.Destroy)end
+        if ctx.DestroyRoots then attempt(ctx.DestroyRoots)end
+        if #errors>0 then state.UICleanupErrors=errors end
+        table.clear(projections)
     end
-    -- Restore values after all controls exist; initialization never runs actions.
-    if ctx.Defer then
-        ctx.Defer(function()
-            if disposed or s.Running==false then return end
-            local ok,reason=pcall(function()
-                buildTabs(2,#tabs)
-                buildOtherTabs()
-                s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil
-                if window.CurrentTab==1 and api.Tabs[restoreTab]then api.Tabs[restoreTab]:Select()end
-            end)
-            if not ok and not disposed then report(reason)end
+    local savedTab=state.UI.ActiveTab or "Main"
+    tab(1);main()
+    local function background()
+        if not valid()then return end
+        local ok,reason=pcall(function()
+            for index=2,#order do tab(index)end
+            rest();api.BackgroundReady=true
+            state.WindUIReadySeconds=state.WindUIStartedAt and os.clock()-state.WindUIStartedAt or nil
+            if window.CurrentTab==1 and api.Tabs[savedTab]then api.Tabs[savedTab]:Select()end
         end)
-    else buildOtherTabs();s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil end
+        if not ok and valid()then fail(reason)end
+    end
+    if ctx.Defer then ctx.Defer(background)else background()end
     api.Ready=true
-    local activeTab=api.Tabs[s.UI.ActiveTab or "Main"]or api.Tabs.Main
-    activeTab:Select()
+    local active=api.Tabs[state.UI.ActiveTab or "Main"]or api.Tabs.Main;active:Select()
     api.Update(0)
     return api
 end
 
 -- END BUNDLED WINDUI
     end)()
-    local parent=gui.Parent
-    local retryVisibility=state.SetUIVisible
-    local before={};for _,child in ipairs(parent:GetChildren())do before[child]=true end
-    local library,uiMemory
-    local ownedNames={WindUI=true,["WindUI/Notifications"]=true,["WindUI/Dropdowns"]=true,["WindUI/Tooltips"]=true}
-    local function roots(fn)
-        if library then
-            for _,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui"})do
-                local root=library[key]
-                if root then pcall(fn,root)end
-            end
-        end
-    end
-    local ok,result=pcall(function()
-        state.WindUIStartedAt=os.clock()
-        local run=assert(loadstring(librarySource,"WindUI 1.6.66"))
-        local base=getfenv()
-        local nativeMake=makefolder
-        setfenv(run,setmetatable({gethui=function()return parent end,makefolder=function(path)
-            if type(isfolder)=="function"and isfolder(path)then return end
-            assert(type(nativeMake)=="function","Executor filesystem is unavailable")
-            return nativeMake(path)
-        end},{__index=base}))
-        library=run()
-        pcall(function()
-            local icon=library.Creator.Icon("feather")
-            if icon then
-                create("ImageLabel",{Name="FeatherIcon",BackgroundTransparency=1,Size=UDim2.fromOffset(26,26),
-                    Position=UDim2.fromScale(.5,.5),AnchorPoint=Vector2.new(.5,.5),Image=icon[1],
-                    ImageRectSize=icon[2].ImageRectSize,ImageRectOffset=icon[2].ImageRectPosition,
-                    ImageColor3=Color3.fromRGB(239,239,241)},showUI)
-                showUI.Text=""
-            end
-        end)
-        roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
-        local camera=workspace.CurrentCamera
-        local size=camera and camera.ViewportSize or Vector2.new(1280,720)
-        state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
-        state.WindUIPosition=preference("WindUIPosition",nil)
-        local makeMemory=(function()
+    local makeMemory=(function()
 -- BEGIN BUNDLED UI MEMORY
--- Remove destroyed UI references and disconnect every owned signal on shutdown.
+-- Incremental registry collection and unconditional owned-signal disposal.
 return function(creator)
     local api={Pruned=0}
-    if not creator then function api.Update()end;function api.Destroy()end;return api end
-    local disposed=false
-    local cursors={}
-    local function array(name,dead)
-        local list=creator[name]
-        if type(list)~="table"then return end
-        local index=cursors[name]or 1
-        for _=1,128 do
-            if index>#list then index=1;break end
-            if dead(list[index])then list[index]=list[#list];list[#list]=nil;api.Pruned+=1
-            else index+=1 end
+    local closed=false
+    local indices={}
+    local objectKey
+    local rules={
+        Signals=function(value)return value.Connected==false end,
+        FontObjects=function(value)return value.Parent==nil end,
+        LocalizationObjects=function(value)return not value.Object or value.Object.Parent==nil end,
+    }
+    local function compact(name,predicate)
+        local values=creator[name]
+        if type(values)~="table"then return end
+        local cursor=indices[name]or 1
+        local examined=0
+        while cursor<=#values and examined<128 do
+            examined+=1
+            if predicate(values[cursor])then
+                local last=#values
+                values[cursor]=values[last];values[last]=nil;api.Pruned+=1
+            else cursor+=1 end
         end
-        cursors[name]=index
+        indices[name]=cursor>#values and 1 or cursor
     end
-    local objectCursor
-    function api.Update()
-        if disposed then return end
-        array("Signals",function(connection)return connection.Connected==false end)
-        array("FontObjects",function(object)return object.Parent==nil end)
-        array("LocalizationObjects",function(record)return not record.Object or record.Object.Parent==nil end)
-        local objects=creator.Objects
-        if type(objects)=="table"then
-            for _=1,128 do
-                local ok,key=pcall(next,objects,objectCursor)
-                if not ok then key=next(objects)end
-                if not key then objectCursor=nil;break end
-                objectCursor=key
-                if key.Parent==nil then objects[key]=nil;api.Pruned+=1 end
-            end
-        end
-    end
-    creator.DisconnectAll=function()
-        for i=#creator.Signals,1,-1 do
-            pcall(function()creator.Signals[i]:Disconnect()end)
-            creator.Signals[i]=nil
+    local function release()
+        if not creator then return end
+        local signals=creator.Signals or {}
+        for index=#signals,1,-1 do
+            local connection=signals[index];signals[index]=nil
+            pcall(function()connection:Disconnect()end)
         end
         for _,name in ipairs({"Objects","FontObjects","LocalizationObjects"})do
             if type(creator[name])=="table"then table.clear(creator[name])end
         end
     end
+    if creator then creator.DisconnectAll=release end
+    function api.Update()
+        if closed or not creator then return end
+        for name,predicate in pairs(rules)do compact(name,predicate)end
+        local objects=creator.Objects
+        if type(objects)~="table"then return end
+        for _=1,128 do
+            local valid,key=pcall(next,objects,objectKey)
+            if not valid then key=next(objects)end
+            objectKey=key
+            if key==nil then break end
+            if key.Parent==nil then objects[key]=nil;api.Pruned+=1 end
+        end
+    end
     function api.Destroy()
-        if disposed then return end
-        disposed=true;creator.DisconnectAll();table.clear(cursors);objectCursor=nil
+        if closed then return end
+        closed=true;release();table.clear(indices);objectKey=nil
     end
     return api
 end
 
 -- END BUNDLED UI MEMORY
-        end)()
+    end)()
+    local parent=gui.Parent
+    local retryVisibility=state.SetUIVisible
+    local before={};for _,object in ipairs(parent:GetChildren())do before[object]=true end
+    local library,uiMemory
+    local ownedNames={WindUI=true,["WindUI/Notifications"]=true,["WindUI/Dropdowns"]=true,["WindUI/Tooltips"]=true}
+    local rootNames={"ScreenGui","NotificationGui","DropdownGui","TooltipGui"}
+    local function roots(fn)
+        if not library then return end
+        for _,name in ipairs(rootNames)do if library[name]then pcall(fn,library[name])end end
+    end
+    local function viewport()
+        local camera=workspace.CurrentCamera
+        return camera and camera.ViewportSize or Vector2.new(1280,720)
+    end
+    local function validPosition(value)
+        if type(value)~="table"or #value~=4 then return false end
+        for _,coordinate in ipairs(value)do if type(coordinate)~="number"or coordinate~=coordinate or math.abs(coordinate)>100000 then return false end end
+        return true
+    end
+    local function positionWindow(frame,size)
+        local saved=state.WindUIPosition
+        if validPosition(saved)then
+            local x=saved[1]*size.X+saved[2]
+            local y=saved[3]*size.Y+saved[4]
+            frame.Position=UDim2.fromOffset(math.clamp(x,math.min(150,size.X/2),math.max(size.X-150,size.X/2)),
+                math.clamp(y,math.min(100,size.Y/2),math.max(size.Y-100,size.Y/2)))
+        end
+        bind(frame:GetPropertyChangedSignal("Position"),function()
+            if not state.Running then return end
+            local p=frame.Position
+            state.WindUIPosition={p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset};requestSave()
+        end)
+    end
+    local function installFeather()
+        local icon=library.Creator.Icon("feather")
+        if not icon then return end
+        create("ImageLabel",{Name="FeatherIcon",BackgroundTransparency=1,Size=UDim2.fromOffset(26,26),Position=UDim2.fromScale(.5,.5),
+            AnchorPoint=Vector2.new(.5,.5),Image=icon[1],ImageRectSize=icon[2].ImageRectSize,ImageRectOffset=icon[2].ImageRectPosition,
+            ImageColor3=Color3.fromRGB(239,239,241)},showUI)
+        showUI.Text=""
+    end
+    local function mark(button,on)
+        local indicator=button:FindFirstChild("AutoHideIndicator")
+        if not indicator then
+            indicator=create("Frame",{Name="AutoHideIndicator",Size=UDim2.fromOffset(6,6),Position=UDim2.new(1,-8,1,-8),BorderSizePixel=0},button)
+            corner(indicator,3)
+        end
+        indicator.BackgroundColor3=on and Color3.fromRGB(51,199,89)or Color3.fromRGB(110,110,115)
+    end
+    local function clearButton(control,callback)
+        local host=control.InputFrame.UIElements.Main
+        local title=host:FindFirstChild("TitleFrame",true)
+        if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
+        local button=library.Creator.New("TextButton",{Name="ClearWhitelist",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
+            BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(28,36),Position=UDim2.new(1,-158,.5,0),
+            AnchorPoint=Vector2.new(1,.5),ThemeTag={TextColor3="Text"},ZIndex=host.ZIndex+2},nil)
+        button.Parent=host;bind(button.Activated,callback)
+        return button
+    end
+    local function visible(show)
+        if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(show)end
+        showUI.Visible=state.Running==true
+        roots(function(root)root.Enabled=show end)
+    end
+    local function loadLibrary()
+        local chunk=assert(loadstring(librarySource,"Feather WindUI"))
+        local nativeMake=makefolder
+        local environment=setmetatable({gethui=function()return parent end,makefolder=function(path)
+            if type(isfolder)=="function"and isfolder(path)then return end
+            assert(type(nativeMake)=="function","Executor filesystem is unavailable")
+            nativeMake(path)
+        end},{__index=getfenv()})
+        setfenv(chunk,environment)
+        return chunk()
+    end
+    local ok,result=pcall(function()
+        state.WindUIStartedAt=os.clock();library=loadLibrary();uiMemory=makeMemory(library.Creator)
+        roots(function(root)root.DisplayOrder=gui.DisplayOrder+1 end)
+        pcall(installFeather)
+        local size=viewport()
+        state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
+        state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        uiMemory=makeMemory(library.Creator)
-        local controller=make({Memory=uiMemory,State=state,WindUI=library,PlaceId=game.PlaceId,Defer=task.defer,
+        local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,
+            Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
+            MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
+            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,
             DestroyRoots=function()roots(function(root)root:Destroy()end)end,
             FriendPresent=function(name)
                 if name==""then return false end
-                for _,person in ipairs(Players:GetPlayers())do
-                    if person~=player and person.Name:lower()==name:lower()then return true end
-                end
+                local wanted=name:lower()
+                for _,person in ipairs(Players:GetPlayers())do if person~=player and person.Name:lower()==wanted then return true end end
                 return false
-            end,
-            Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
-            MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
-            AddWhitelistClear=function(control,clear)
-                local main=control.InputFrame.UIElements.Main
-                local title=main:FindFirstChild("TitleFrame",true)
-                if title then title.Size=UDim2.new(1,-188,title.Size.Y.Scale,title.Size.Y.Offset)end
-                local button=library.Creator.New("TextButton",{
-                    Name="ClearWhitelist",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
-                    BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(28,36),
-                    Position=UDim2.new(1,-158,.5,0),AnchorPoint=Vector2.new(1,.5),
-                    ThemeTag={TextColor3="Text"},ZIndex=main.ZIndex+2},nil)
-                button.Parent=main
-                bind(button.Activated,clear)
-                return button
-            end,
-            MarkAutoHide=function(button,on)
-                local dot=button:FindFirstChild("AutoHideIndicator")
-                if not dot then
-                    dot=create("Frame",{Name="AutoHideIndicator",Size=UDim2.fromOffset(6,6),Position=UDim2.new(1,-8,1,-8),BorderSizePixel=0},button)
-                    corner(dot,3)
-                end
-                dot.BackgroundColor3=on and Color3.fromRGB(51,199,89)or Color3.fromRGB(110,110,115)
-            end,
-            Visibility=function(visible)
-                if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(visible)end
-                if state.Running then showUI.Visible=true else showUI.Visible=false end
-                roots(function(root)root.Enabled=visible end)
             end})
-        state.WindUI=controller
-        state.WindUIMainReadySeconds=os.clock()-state.WindUIStartedAt
-        state.UI.WindWindow=controller.Window;state.UI.WindControls=controller.Controls
-        state.SetUIVisible=controller.SetVisible
+        state.WindUI=controller;state.WindUIMainReadySeconds=os.clock()-state.WindUIStartedAt
+        state.UI.WindWindow=controller.Window;state.UI.WindControls=controller.Controls;state.SetUIVisible=controller.SetVisible
         local frame=controller.Window.UIElements and controller.Window.UIElements.Main
-        local saved=state.WindUIPosition
-        if frame then
-            if type(saved)=="table"and #saved==4 then
-                local valid=true
-                for _,value in ipairs(saved)do if type(value)~="number"or value~=value or math.abs(value)>100000 then valid=false end end
-                if valid then
-                    local x=saved[1]*size.X+saved[2]
-                    local y=saved[3]*size.Y+saved[4]
-                    frame.Position=UDim2.fromOffset(math.clamp(x,math.min(150,size.X/2),math.max(size.X-150,size.X/2)),
-                        math.clamp(y,math.min(100,size.Y/2),math.max(size.Y-100,size.Y/2)))
-                end
-            end
-            bind(frame:GetPropertyChangedSignal("Position"),function()
-                if not state.Running then return end
-                local p=frame.Position
-                state.WindUIPosition={p.X.Scale,p.X.Offset,p.Y.Scale,p.Y.Offset};requestSave()
-            end)
-        end
+        if frame then positionWindow(frame,size)end
         controller.SetVisible(not state.AutoHideUI and not state.UIHidden)
         task.spawn(function()
-            while state.Running do
-                local updated,reason=pcall(controller.Update,os.clock())
-                if not updated then state.WindUIError=tostring(reason)end
+            while state.Running and state.WindUI==controller do
+                local painted,reason=pcall(controller.Update,os.clock())
+                if not painted then state.WindUIError=tostring(reason)end
                 task.wait(.25)
             end
         end)
@@ -28288,25 +27383,28 @@ end
     end
     -- END MODERN UI FAILURE
 end
--- Independent status overlay; hiding WindUI leaves this under the runtime root.
+-- Compact overlay and independent background projections.
 do
-    local make=(function()
+    local attach=(function()
 -- BEGIN BUNDLED MULTI SPOT HUD
--- Status only; no gameplay work or world scans.
+-- A passive HUD projection never owns world state or movement.
 return function(ctx)
-    local disposed,nextUpdate=false,0
+    local nextPaint=0
+    local alive=true
     local api={}
-    function api.Update(now)
-        if disposed or now<nextUpdate then return end
-        nextUpdate=now+.2
-        local visible=ctx.State.Running and ctx.State.MultiSpot==true
-        ctx.Visible(visible==true)
-        if visible then ctx.Text(ctx.State.MultiSpotStatus or "Starting arena rotation...")end
+    function api.Update(stamp)
+        if not alive or stamp<nextPaint then return end
+        nextPaint=stamp+.2
+        local show=ctx.State.Running==true and ctx.State.MultiSpot==true
+        ctx.Visible(show)
+        if show then ctx.Text(ctx.State.MultiSpotStatus or "Starting arena rotation...")end
     end
-    local connection=ctx.Pulse:Connect(function()api.Update(ctx.Now())end)
+    local subscription=ctx.Pulse:Connect(function()api.Update(ctx.Now())end)
     function api.Destroy()
-        if disposed then return end
-        disposed=true;connection:Disconnect();ctx.Destroy()
+        if not alive then return end
+        alive=false
+        subscription:Disconnect();subscription=nil
+        ctx.Destroy()
     end
     api.Update(ctx.Now())
     return api
@@ -28314,86 +27412,84 @@ end
 
 -- END BUNDLED MULTI SPOT HUD
     end)()
-    local root=create("Frame",{Name="MultiSpotHUD",Visible=false,Size=UDim2.fromOffset(280,70),
-        Position=UDim2.new(.5,0,.5,0),AnchorPoint=Vector2.new(.5,.5),Active=true,BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0},gui)
-    corner(root,14)
-    create("UIStroke",{Color=Color3.new(1,1,1),Transparency=.92,Thickness=1},root)
-    create("TextLabel",{Name="Heading",Text="Multi Spot",BackgroundTransparency=1,Position=UDim2.fromOffset(12,8),
-        Size=UDim2.new(1,-24,0,18),Font=Enum.Font.GothamBold,TextSize=12,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left},root)
-    local label=create("TextLabel",{Name="Status",Text="",BackgroundTransparency=1,Position=UDim2.fromOffset(12,28),
-        Size=UDim2.new(1,-24,0,34),TextWrapped=true,Font=Enum.Font.Gotham,TextSize=11,
-        TextColor3=Color3.fromRGB(161,161,170),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},root)
-    local drag,startPoint,startPosition
-    bind(root.InputBegan,function(input)
-        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-            drag=input;startPoint=input.Position;startPosition=root.Position
-        end
+    local frame=create("Frame",{Name="MultiSpotHUD",Size=UDim2.fromOffset(280,70),Visible=false,
+        Position=UDim2.fromScale(.5,.5),AnchorPoint=Vector2.new(.5,.5),Active=true,
+        BackgroundColor3=Color3.fromRGB(42,42,44),BorderSizePixel=0},gui)
+    corner(frame,14)
+    create("UIStroke",{Color=Color3.new(1,1,1),Transparency=.92,Thickness=1},frame)
+    local common={BackgroundTransparency=1,TextXAlignment=Enum.TextXAlignment.Left}
+    local heading=table.clone(common)
+    heading.Name="Heading";heading.Text="Multi Spot";heading.Position=UDim2.fromOffset(12,8)
+    heading.Size=UDim2.new(1,-24,0,18);heading.Font=Enum.Font.GothamBold;heading.TextSize=12;heading.TextColor3=Color3.new(1,1,1)
+    create("TextLabel",heading,frame)
+    local description=table.clone(common)
+    description.Name="Status";description.Text="";description.Position=UDim2.fromOffset(12,28)
+    description.Size=UDim2.new(1,-24,0,34);description.Font=Enum.Font.Gotham;description.TextSize=11
+    description.TextWrapped=true;description.TextColor3=Color3.fromRGB(161,161,170);description.TextYAlignment=Enum.TextYAlignment.Top
+    local label=create("TextLabel",description,frame)
+    local drag
+    bind(frame.InputBegan,function(input)
+        local kind=input.UserInputType
+        if kind==Enum.UserInputType.Touch or kind==Enum.UserInputType.MouseButton1 then drag={Input=input,Start=input.Position,Position=frame.Position}end
     end)
     bind(UserInputService.InputChanged,function(input)
-        if not drag or not root.Visible then return end
-        if input~=drag and input.UserInputType~=Enum.UserInputType.MouseMovement then return end
-        local delta=input.Position-startPoint
-        local size=gui.AbsoluteSize
-        local x=startPosition.X.Scale*size.X+startPosition.X.Offset+delta.X
-        local y=startPosition.Y.Scale*size.Y+startPosition.Y.Offset+delta.Y
-        root.Position=UDim2.fromOffset(math.clamp(x,140,math.max(140,size.X-140)),math.clamp(y,35,math.max(35,size.Y-35)))
+        if not drag or not frame.Visible then return end
+        if input~=drag.Input and input.UserInputType~=Enum.UserInputType.MouseMovement then return end
+        local delta=input.Position-drag.Start;local extent=gui.AbsoluteSize;local origin=drag.Position
+        local x=origin.X.Scale*extent.X+origin.X.Offset+delta.X
+        local y=origin.Y.Scale*extent.Y+origin.Y.Offset+delta.Y
+        frame.Position=UDim2.fromOffset(math.clamp(x,140,math.max(140,extent.X-140)),math.clamp(y,35,math.max(35,extent.Y-35)))
     end)
     bind(UserInputService.InputEnded,function(input)
-        if input==drag or input.UserInputType==Enum.UserInputType.MouseButton1 then drag=nil end
+        if drag and (input==drag.Input or input.UserInputType==Enum.UserInputType.MouseButton1)then drag=nil end
     end)
-    state.MultiSpotHUD=make({State=state,Pulse=RunService.Heartbeat,Now=os.clock,
-        Visible=function(value)if root.Visible~=value then root.Visible=value end end,
-        Text=function(value)if label.Text~=value then label.Text=value end end,
-        Destroy=function()root:Destroy()end})
+    state.MultiSpotHUD=attach({State=state,Pulse=RunService.Heartbeat,Now=os.clock,
+        Visible=function(value)if frame.Visible~=value then frame.Visible=value end end,
+        Text=function(text)if label.Text~=text then label.Text=text end end,
+        Destroy=function()drag=nil;frame:Destroy()end})
 end
-
--- Synchronize the user's selected Safe floor, separately from progression's floor.
-if sharedSettings then
-    task.spawn(function()
-        while state.Running do
-            local ok,id=pcall(sharedSettings.ReadSafeFloor)
-            if ok and id and id~=state.SharedSafeFloorId then
-                if state.AccountProgression then
-                    state.SharedSafeFloorId=id
-                    if state.ProgressionRestore then state.ProgressionRestore.SafeFloorId=id end
-                elseif state.AutomationCatalog and state.AutomationCatalog.FloorById[id]and state.IsAutomationFloorUnlocked(id)then
-                    state.SetSafeFloor(id)
-                else
-                    state.SharedSafeFloorId=id
-                    state.SafeModeStatus="Shared Safe floor is locked on this account"
-                    if state.RefreshAutomationUI then state.RefreshAutomationUI()end
-                end
-            end
-            task.wait(1)
-        end
-    end)
+local function refreshSharedFloor()
+    if not sharedSettings then return end
+    local ok,id=pcall(sharedSettings.ReadSafeFloor)
+    if not ok or not id or id==state.SharedSafeFloorId then return end
+    if state.AccountProgression then
+        state.SharedSafeFloorId=id
+        if state.ProgressionRestore then state.ProgressionRestore.SafeFloorId=id end
+    elseif state.AutomationCatalog and state.AutomationCatalog.FloorById[id]and state.IsAutomationFloorUnlocked(id)then state.SetSafeFloor(id)
+    else
+        state.SharedSafeFloorId=id;state.SafeModeStatus="Shared Safe floor is locked on this account"
+        if state.RefreshAutomationUI then state.RefreshAutomationUI()end
+    end
 end
-
--- Built-in quest reward collection, independent of farming and menu visibility.
+if sharedSettings then task.spawn(function()
+    while state.Running do refreshSharedFloor();task.wait(1)end
+end)end
 do
-    local make=(function()
+    local factory=(function()
 -- BEGIN BUNDLED AUTO QUEST
--- Native completion list only. No progress writes or incomplete-quest requests.
+-- Completion membership is the lifetime of a claim receipt.
 return function(ctx)
     local api={Claims=0}
-    local sent=setmetatable({}, {__mode="k"})
-    local nextUpdate=0
+    local receipts=setmetatable({}, {__mode="k"})
+    local due=0
     function api.Update(now)
-        if not ctx.Active()or now<nextUpdate then return end
-        nextUpdate=now+.5
-        local ready=ctx.Ready()
-        local present={}
-        for _,quest in ipairs(ready)do present[quest]=true end
-        for quest in pairs(sent)do if not present[quest]then sent[quest]=nil end end
-        if ctx.Busy()then return end
-        for _,quest in ipairs(ready)do
-            local record=sent[quest]
-            if (not record or record.Attempts<3 and now>=record.Next)and ctx.Valid(quest)then
-                record=record or {Attempts=0}
-                record.Attempts+=1;record.Next=now+10*record.Attempts;sent[quest]=record
-                local ok,reason=pcall(ctx.Claim,quest)
-                if ok then api.Claims+=1 else api.Error=tostring(reason)end
-                return -- At most one native request per half-second update.
+        if now<due or not ctx.Active() then return end
+        due=now+.5
+        local completed=ctx.Ready()
+        local live={}
+        for index=1,#completed do live[completed[index]]=true end
+        for quest in pairs(receipts)do if not live[quest]then receipts[quest]=nil end end
+        if ctx.Busy() then return end
+        for index=1,#completed do
+            local quest=completed[index]
+            local receipt=receipts[quest]
+            local retry=not receipt or (receipt.count<3 and now>=receipt.retry)
+            if retry and ctx.Valid(quest) then
+                local attempts=receipt and receipt.count+1 or 1
+                receipts[quest]={count=attempts,retry=now+attempts*10}
+                local sent,reason=pcall(ctx.Claim,quest)
+                if sent then api.Claims=api.Claims+1 else api.Error=tostring(reason)end
+                break
             end
         end
     end
@@ -28403,23 +27499,22 @@ end
 -- END BUNDLED AUTO QUEST
     end)()
     local quests=require(services.UI.Quests)
-    local own=ReplicatedStorage.Profiles[player.Name]:FindFirstChild("Quests")
-    local worker=make({Active=function()return state.Running end,
-        Busy=function()return state.StopEverything or state.ModeratorBlocking or state.SafeModePanic
-            or state.AutomationTeleporting or state.AutoTradeBusy end,
+    local function ownFolder()
+        local profile=ReplicatedStorage.Profiles:FindFirstChild(player.Name)
+        return profile and profile:FindFirstChild("Quests")
+    end
+    local function valid(object)
+        local entry=quests.Active and quests.Active[object]
+        return object.Parent==ownFolder()and entry and quests.ToClaim and quests.ToClaim[entry.Entry]==true
+    end
+    local worker=factory({Active=function()return state.Running end,
+        Busy=function()return state.StopEverything or state.SafeModePanic or state.ModeratorBlocking or state.AutomationTeleporting or state.AutoTradeBusy end,
         Ready=function()
-            local result={}
-            for object,entry in pairs(quests.Active or {})do
-                if own and object.Parent==own and quests.ToClaim and quests.ToClaim[entry.Entry]==true then result[#result+1]=object end
-            end
-            table.sort(result,function(a,b)return a.Name<b.Name end)
-            return result
-        end,
-        Valid=function(object)
-            local entry=quests.Active and quests.Active[object]
-            return own and object.Parent==own and entry and quests.ToClaim and quests.ToClaim[entry.Entry]==true
-        end,
-        Claim=function(object)ReplicatedStorage.Event:FireServer("SystemQuests",{"ClaimQuest",object})end})
+            local list={}
+            for object in pairs(quests.Active or {})do if valid(object)then list[#list+1]=object end end
+            table.sort(list,function(a,b)return a.Name<b.Name end)
+            return list
+        end,Valid=valid,Claim=function(object)ReplicatedStorage.Event:FireServer("SystemQuests",{"ClaimQuest",object})end})
     state.AutoQuest=worker
     task.spawn(function()
         while state.Running do
@@ -28429,7 +27524,6 @@ end
         end
     end)
 end
-
 state.StartupComplete=true
 ]============]
 return assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)

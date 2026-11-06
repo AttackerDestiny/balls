@@ -1,430 +1,338 @@
--- WindUI presentation; existing controllers remain the owners of gameplay/settings.
+-- Declarative modern UI: construction, value projection, and user actions are separate.
 return function(ctx)
-    local s=ctx.State
-    local restoreTab=s.UI.ActiveTab or "Main"
-    local api={Controls={},Tabs={},Ready=false,Visible=true}
-    local disposed=false
-    local toggles,dropdowns,paragraphs={},{},{}
-    local syncingInputs={}
-    local nextUpdate,nextChoices=0,0
-    local buildSlice=os.clock()
-    local lastTab
-    local choiceCursor=1
-    local visibilityApplied=false
+    local state=ctx.State
+    local api={Controls={},Tabs={},Ready=false,BackgroundReady=false,Visible=true}
+    local lifetime={Closed=false,VisibilityApplied=false}
+    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local projections={}
+    local cadence={Next=0,Choices=0,Cursor=1,Tab=nil,Build=os.clock()}
     local memory=ctx.Memory or {Pruned=0,Update=function()end}
     api.Memory=memory
-    local function yieldBuild()
-        if disposed or s.Running==false then error("UI initialization cancelled")end
-        if ctx.Yield then ctx.Yield()
-        elseif ctx.Defer and os.clock()-buildSlice>=.002 then task.wait();buildSlice=os.clock()end
-        if disposed or s.Running==false then error("UI initialization cancelled")end
+    local function valid()return not lifetime.Closed and state.Running~=false end
+    local function fail(reason)
+        state.WindUIError=tostring(reason)
+        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=state.WindUIError,Duration=5})end
     end
-    local tabs={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
-    local function report(reason)
-        s.WindUIError=tostring(reason)
-        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Feather",Content=s.WindUIError,Duration=5})end
-    end
-    local function guard(fn)
+    local function safe(fn)
         return function(...)
-            if disposed or s.Running==false then return end
+            if not valid()then return end
             local ok,reason=pcall(fn,...)
-            if not ok then report(reason)end
+            if not ok then fail(reason)end
         end
     end
-    local function signature(value)
+    local function action(name,...)
+        assert(type(state[name])=="function","Control unavailable: "..name)
+        return state[name](...)
+    end
+    local function constructionPoint()
+        assert(valid(),"UI initialization cancelled")
+        if ctx.Yield then ctx.Yield()
+        elseif ctx.Defer and os.clock()-cadence.Build>=.002 then task.wait();cadence.Build=os.clock()end
+        assert(valid(),"UI initialization cancelled")
+    end
+    local function signature(value,ordered)
         if type(value)~="table"then return tostring(value)end
-        local values={};for _,v in ipairs(value)do values[#values+1]=tostring(v)end
-        table.sort(values);return table.concat(values,"\0")
+        local items={};for _,item in ipairs(value)do items[#items+1]=tostring(item)end
+        if not ordered then table.sort(items)end
+        return table.concat(items,"\0")
     end
-    local function bool(key)return function()return s[key]==true end end
-    local function invoke(name,...)
-        assert(type(s[name])=="function","Control unavailable: "..name)
-        return s[name](...)
-    end
-    if not ctx.WindUI:GetThemes()[s.Theme or "Dark"]then s.Theme="Dark"end
-    local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..s.Version,
-        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=s.Theme or "Dark",Transparent=false,
-        Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,HideSearchBar=false,ScrollBarEnabled=true,
-        User={Enabled=false},OpenButton={Title="Feather"}})
-    assert(window,"WindUI window was not created")
-    api.Window=window
-    -- Keep the window at its final size: size tweens invalidate every nested layout.
-    local frame=window.UIElements and window.UIElements.Main
-    if frame then
-        local nativeClose=window.Close
-        local function visibility(visible)
-            if disposed or window.Destroyed then return end
-            window.Closed=not visible;window.CanDropdown=visible
-            window.CanResize=visible and window.Resizable~=false
-            if frame.Size~=window.Size then frame.Size=window.Size end
-            frame.Background.ImageTransparency=0
-            frame.Main.Visible=visible;frame.Visible=visible
-            local callback=visible and window.OnOpenCallback or window.OnCloseCallback
-            if callback then callback()end
-        end
-        window.Open=function()visibility(true)end
-        window.Close=function()
-            visibility(false)
-            -- Preserve the library's native disposal and connection cleanup.
-            return {Destroy=function()return nativeClose(window):Destroy()end}
-        end
-    end
-    -- Use the existing mobile Show UI button so the HUD remains independent.
-    window.IsOpenButtonEnabled=false
-    if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
-    local function buildTabs(first,last)
-        for i=first,last do
-            yieldBuild();local name=tabs[i]
-            api.Tabs[name]=window:Tab({Title=name,Icon=icons[i]})
-        end
-    end
-    buildTabs(1,ctx.Defer and 1 or #tabs)
-    local function button(key,tab,title,fn,desc)
-        yieldBuild()
-        api.Controls[key]=api.Tabs[tab]:Button({Title=title,Desc=desc,Callback=guard(fn)})
-    end
-    local function paragraph(key,tab,title,get)
-        yieldBuild()
-        local text=tostring(get()or "")
-        local control=api.Tabs[tab]:Paragraph({Title=title,Desc=text})
-        api.Controls[key]=control;paragraphs[#paragraphs+1]={Tab=tab,Control=control,Get=get,Text=text}
-    end
-    local function toggle(key,tab,title,get,set,desc)
-        yieldBuild()
-        local entry={Tab=tab,Get=get,Value=get()}
-        local control=api.Tabs[tab]:Toggle({Title=title,Desc=desc,Value=get(),Callback=guard(function(value)
-            if api.Ready and value~=get()then
-                set(value);entry.Value=get();entry.Control:Set(entry.Value,false)
-            end
-        end)})
-        entry.Control=control;api.Controls[key]=control;toggles[#toggles+1]=entry
-    end
-    local function stateToggle(key,tab,title,setter,desc)
-        toggle(key,tab,title,bool(key),function(value)invoke(setter,value)end,desc)
-    end
-    local function dropdown(key,tab,title,build,choose,multi,desc)
-        yieldBuild()
-        local function valueSignature(value)
-            if key=="MultiSpotAreas"and type(value)=="table"then return table.concat(value,"\0")end
-            return signature(value)
-        end
-        local entry={Signature=valueSignature,Tab=tab,Build=build,Choose=choose,Multi=multi,Syncing=true}
-        local view=build();entry.Map=view.Map or {};entry.Current=valueSignature(view.Value);entry.Value=entry.Current
-        entry.Options=signature(view.Options)
-        entry.Control=api.Tabs[tab]:Dropdown({Title=title,Desc=desc,Values=view.Options,Value=view.Value,
-            Multi=multi==true,AllowNone=multi==true,SearchBarEnabled=true,Callback=guard(function(value)
-                if not api.Ready or entry.Syncing or valueSignature(value)==entry.Current then return end
-                entry.Current=valueSignature(value)
-                entry.Value=nil;entry.Choose(value,entry.Map)
-                nextChoices=0
-            end)})
-        entry.Syncing=false
-        api.Controls[key]=entry.Control;dropdowns[#dropdowns+1]=entry
-    end
-    local function input(key,tab,title,value,set,desc)
-        yieldBuild()
-        api.Controls[key]=api.Tabs[tab]:Input({Title=title,Desc=desc,Value=value or "",Type="Input",
-            Placeholder="Enter here...",Callback=guard(function(text)
-                if api.Ready and not syncingInputs[key]then set(text)end
-            end)})
-    end
-    local function selected(options,map,predicate)
-        local result={};for _,label in ipairs(options)do if predicate(map[label])then result[#result+1]=label end end
-        return result
-    end
-    local function option(options,map,label,id)
-        local base,index=label,2
-        while map[label]~=nil do label=base.." ("..index..")";index+=1 end
+    local function mapping(options,label,id,map)
+        local base,suffix=label,2
+        while map[label]~=nil do label=base.." ("..suffix..")";suffix+=1 end
         options[#options+1]=label;map[label]=id
         return label
     end
-    local function status(key,fallback)
-        local item=s.UI and s.UI[key]
-        return item and item.Text or s[key]or fallback or ""
+    local function chosen(options,map,enabled)
+        local result={}
+        for _,label in ipairs(options)do if enabled(map[label])then result[#result+1]=label end end
+        return result
     end
-
-    api.Controls.TeleportSection=api.Tabs.Main:Section({Title="Teleport",TextSize=17})
-    local destination
-    dropdown("TeleportDestination","Main","Spot",function()
-        local list={};for _,area in pairs(s.FloorDestinations or {})do list[#list+1]=area end
-        table.sort(list,function(a,b)
-            if a.Kind~=b.Kind then return a.Kind<b.Kind end
-            if a.Name~=b.Name then return a.Name<b.Name end
-            return a.Id<b.Id
-        end)
-        local options,map,value={},{},nil
-        for _,area in ipairs(list)do
-            local label=option(options,map,area.Kind.." · "..area.Name,area.Id)
-            if destination==area.Id then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)
-        destination=map[label]
-        if destination then invoke("TeleportToDestination",destination)end
-        destination=nil
-    end)
-    button("RefreshDestinations","Main","Refresh List",function()invoke("RefreshTeleportDestinations");nextChoices=0 end)
-    api.Controls.SafeModeSection=api.Tabs.Main:Section({Title="Safe Mode",TextSize=17})
-    stateToggle("SafeMode","Main","Safe Mode","SetSafeMode")
-    dropdown("SafeFloor","Main","Safe floor",function()
-        local options,map,value={},{},nil
-        local catalog=s.AutomationCatalog
-        for _,floor in ipairs(catalog and catalog.Floors or {})do
-            local unlocked=invoke("IsAutomationFloorUnlocked",floor.Id)
-            local label=floor.Label..(unlocked and ""or " · locked")
-            options[#options+1]=label;map[label]=floor.Id
-            if floor.Id==s.SafeFloorId then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)local id=map[label];if id and id~=s.SafeFloorId then invoke("SetSafeFloor",id)end end,
-        false)
-    input("SafeWhitelist","Main","Whitelist",s.SafeWhitelistText,function(text)
-        if text:match("[%w_]")and text~=s.SafeWhitelistText then invoke("SetSafeWhitelist",text)end
-    end,"Input A List Of User")
-    local clearWhitelist=guard(function()
-        -- Clear the editor only; the active/saved list remains until a replacement is submitted.
-        syncingInputs.SafeWhitelist=true
-        local ok,reason=pcall(function()api.Controls.SafeWhitelist:Set("")end)
-        syncingInputs.SafeWhitelist=nil
-        if not ok then error(reason)end
-    end)
-    api.ClearWhitelist=clearWhitelist
-    if ctx.AddWhitelistClear then
-        api.Controls.ClearWhitelist=ctx.AddWhitelistClear(api.Controls.SafeWhitelist,clearWhitelist)
+    local function selection(values)
+        local result={};for _,name in ipairs(values or {})do result[name]=true end;return result
     end
-    paragraph("SafeModeStatus","Main","Status",function()return s.SafeModeStatus end)
-    api.Controls.MultiSpotSection=api.Tabs.Main:Section({Title="Multi Spot",TextSize=17})
-    stateToggle("MultiSpot","Main","Multi Spot","SetMultiSpot")
-    button("SaveSpot","Main","Save Spot",function()invoke("SaveMultiSpot");nextChoices=0 end)
-    dropdown("MultiSpotAreas","Main","Saved Spot",function()
-        local options,map,byId,labels={},{},{},{}
-        local catalog=s.AutomationCatalog
-        if catalog then catalog.AddCurrent(s.FloorDestinations,ctx.PlaceId);catalog.Sort()end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then byId[spot.Id]=spot end end
-        local order,rank={},{}
-        local function add(id)
-            if byId[id]and s.MultiSpotSelected[id]and not rank[id]then order[#order+1]=id;rank[id]=#order end
+    if not ctx.WindUI:GetThemes()[state.Theme or "Dark"]then state.Theme="Dark"end
+    local window=ctx.WindUI:CreateWindow({Title="Feather",Author="Swordburst 2 · v"..state.Version,
+        Folder="SB2Codex/WindUI",Size=ctx.Size,MinSize=ctx.MinSize,Theme=state.Theme or "Dark",Transparent=false,
+        Acrylic=false,Resizable=true,AutoScale=true,SideBarWidth=ctx.SideBarWidth or 155,
+        HideSearchBar=false,ScrollBarEnabled=true,User={Enabled=false},OpenButton={Title="Feather"}})
+    assert(window,"WindUI window was not created")
+    api.Window=window;window.IsOpenButtonEnabled=false
+    if window.OpenButtonMain then window.OpenButtonMain:Visible(false)end
+    local frame=window.UIElements and window.UIElements.Main
+    if frame then
+        local nativeClose=window.Close
+        local function present(show)
+            if lifetime.Closed or window.Destroyed then return end
+            window.Closed=not show;window.CanDropdown=show;window.CanResize=show and window.Resizable~=false
+            if frame.Size~=window.Size then frame.Size=window.Size end
+            frame.Background.ImageTransparency=0;frame.Main.Visible=show;frame.Visible=show
+            local callback=show and window.OnOpenCallback or window.OnCloseCallback
+            if callback then callback()end
         end
-        for _,id in ipairs(s.MultiSpotOrder or {})do add(id)end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do add(spot.Id)end
-        for _,spot in ipairs(catalog and catalog.Spots or {})do
-            if spot.PlaceId==ctx.PlaceId then
-                labels[spot.Id]=option(options,map,(rank[spot.Id]and (rank[spot.Id].." · ")or "")..spot.Kind.." · "..spot.Name,spot.Id)
-            end
+        window.Open=function()present(true)end
+        window.Close=function()
+            present(false)
+            return {Destroy=function()return nativeClose(window):Destroy()end}
         end
-        local value={};for _,id in ipairs(order)do value[#value+1]=labels[id]end
-        return {Options=options,Map=map,Value=value}
-    end,function(values,map)
-        local chosen,order={},{}
-        for _,label in ipairs(values or {})do
-            local id=map[label];if id and not chosen[id]then chosen[id]=true;order[#order+1]=id end
-        end
-        invoke("SetMultiSpotSelections",chosen,order)
-    end,true)
-    api.Controls.FriendJoinerSection=api.Tabs.Main:Section({Title="Friend Joiner",TextSize=17})
-    input("JoinFriendUsername","Main","Friend username",s.JoinFriendUsername,function(text)
-        if text~=s.JoinFriendUsername then invoke("SetJoinFriendUsername",text)end
-    end)
-    stateToggle("AutoJoinFriend","Main","Auto Join Friend","SetAutoJoinFriend")
-    paragraph("AutoJoinFriendStatus","Main","Status",function()
-        local name=tostring(s.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
-        return ctx.FriendPresent and ctx.FriendPresent(name)and "Friend Appeared"or "Friend Unappeared"
-    end)
-    local restart=guard(function()invoke("RestartScript")end)
-    api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",restart,996)
-    api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",guard(function()
-        invoke("SetAutoHideUI",not s.AutoHideUI)
-        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
-    end),995)
-    if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,s.AutoHideUI)end
-
-
-    local function buildOtherTabs()
-    stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
-    stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
-    stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
-    stateToggle("CreditCheck","Combat","Credit Check","SetCreditCheck")
-    input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)
-        if text~=s.CreditWhitelistText then invoke("SetCreditWhitelist",text)end
-    end,"Input A List Of User")
-    paragraph("CreditCheckStatus","Combat","Credit Status",function()
-        return not s.CreditCheck and "Credit Check is off"or s.CreditCheckStatus or "Waiting for a boss or mini-boss"
-    end)
-    stateToggle("AutoEquipBestSword","Combat","Auto Equip Best Gear","SetAutoEquipBestSword")
-    stateToggle("AtheonDodge","Combat","Atheon Dodge","SetAtheonDodge")
-    stateToggle("AutoSwing","Combat","Swing animation","SetAutoSwing")
-    stateToggle("AutoDodge","Challenge Floors","Auto Dodge","SetAutoDodge")
-    api.Controls.SkillAuraSection=api.Tabs["Auto Skill"]:Section({Title="Skill Aura",TextSize=17})
-    stateToggle("SkillAura","Auto Skill","Skill Aura","SetSkillAura")
-    dropdown("SelectedSkill","Auto Skill","Skill",function()
-        return {Options=s.SkillChoices or {},Value=s.SelectedSkill}
-    end,function(name)if name and name~=s.SelectedSkill then invoke("SetSelectedSkill",name)end end)
-    api.Controls.MiscSkillSection=api.Tabs["Auto Skill"]:Section({Title="Misc Skill",TextSize=17})
-    stateToggle("MiscSkillEnabled","Auto Skill","Misc Skill","SetMiscSkillEnabled")
-    dropdown("SelectedMiscSkill","Auto Skill","Skill",function()
-        local options={};for _,item in ipairs(s.MiscSkillChoices or {})do if item.Usable then options[#options+1]=item.Name end end
-        return {Options=options,Value=s.SelectedMiscSkill}
-    end,function(name)if name and name~=s.SelectedMiscSkill then invoke("SetMiscSkill",name)end end)
-    for _,name in ipairs({"Dismantle","Upgrade","The Forge"})do
-        button("Open"..name,"Misc",name,function()invoke("OpenGameMenu",name)end)
     end
-
-    dropdown("SelectedPlayer","Player","Select player",function()
-        local options,map,value={},{},nil
-        for _,person in ipairs(s.PlayerTools.Choices())do
-            local label=person.DisplayName.." (@"..person.Name..")";options[#options+1]=label;map[label]=person.UserId
-            if person.UserId==s.SelectedPlayerId then value=label end
-        end
-        return {Options=options,Map=map,Value=value}
-    end,function(label,map)if map[label]then s.PlayerTools.Select(map[label])end end)
-    button("TeleportPlayer","Player","TP to player",function()s.PlayerTools.Teleport()end)
-    toggle("ViewingPlayer","Player","View player",bool("ViewingPlayer"),function(value)s.PlayerTools.SetViewing(value)end)
-    toggle("ViewingPlayerInventory","Player","View player inventory",bool("ViewingPlayerInventory"),function(value)s.PlayerTools.SetInventoryVisible(value)end)
-
-    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
-    local function applyBoost(values)
-        local picked={};for _,name in ipairs(values or {})do picked[name]=true end
-        for _,name in ipairs(boostNames)do if (s.PerformanceBoosters[name]==true)~=(picked[name]==true)then invoke("SetPerformanceBoost",name,picked[name]==true)end end
+    local function publish(show)
+        api.Visible=show==true;state.UIHidden=not api.Visible;ctx.Visibility(api.Visible)
     end
-    api.Controls.PerformanceBoosterSection=api.Tabs.Utility:Section({Title="Perfromance Booster",TextSize=17})
-    dropdown("PerformanceBoosters","Utility","Performance boosters",function()
-        local value={};for _,name in ipairs(boostNames)do if s.PerformanceBoosters[name]then value[#value+1]=name end end
-        return {Options=boostNames,Value=value}
-    end,applyBoost,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
-    local rarities={"Common","Uncommon","Rare"}
-    api.Controls.AutoDismantleSection=api.Tabs.Utility:Section({Title="Auto Dismantle",TextSize=17})
-    dropdown("AutoDismantle","Utility","Auto Dismantle",function()
-        local value={};for _,name in ipairs(rarities)do if s.AutoDismantle[name]then value[#value+1]=name end end
-        return {Options=rarities,Value=value}
-    end,function(values)
-        local picked={};for _,name in ipairs(values or {})do picked[name]=true end
-        for _,name in ipairs(rarities)do if (s.AutoDismantle[name]==true)~=(picked[name]==true)then invoke("SetAutoDismantle",name,picked[name]==true)end end
-    end,true)
-    api.Controls.AutoCraftSection=api.Tabs.Utility:Section({Title="Auto Craft",TextSize=17})
-    dropdown("AutoCraft","Utility","Auto Craft",function()
-        local options={"Uncommon → Rare","Rare → Legendary"}
-        local map={[options[1]]="Rare Upgrade Crystal",[options[2]]="Legendary Upgrade Crystal"}
-        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.AutoCraft and s.AutoCraft[name]==true end)}
-    end,function(values,map)
-        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
-        invoke("SetAutoCraft",picked)
-    end,true)
-    api.Controls.AutoTradeSection=api.Tabs.Utility:Section({Title="Auto Trade",TextSize=17})
-    stateToggle("AutoTrade","Utility","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
-    dropdown("TradeMode","Utility","Mode",function()
-        return {Options={"Selected items","Legendary+"},Value=s.TradeMode=="Legendary"and "Legendary+"or "Selected items"}
-    end,function(value)invoke("SetTradeMode",value=="Legendary+"and "Legendary"or "Selected")end)
-    dropdown("TradeItems","Utility","Inventory",function()
-        local options,map={},{ }
-        for _,item in ipairs(s.GetTradeItemChoices())do local label=item.Name.." x"..item.Count;options[#options+1]=label;map[label]=item.Name end
-        return {Options=options,Map=map,Value=selected(options,map,function(name)return s.TradeItems[name]==true end)}
-    end,function(values,map)
-        local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end
-        invoke("SetTradeItems",picked)
-    end,true)
-    stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
-    dropdown("Theme","Settings","Theme",function()
-        local options={}
-        for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end
-        table.sort(options)
-        return {Options=options,Value=s.Theme or "Dark"}
-    end,function(name)
-        if ctx.WindUI:SetTheme(name)then s.Theme=name;if s.SaveNow then s.SaveNow()end end
-    end)
-    input("ConfigImport","Settings","Config Import","",function(text)
-        if text:match("%S")then invoke("ImportConfig",text)end
-    end)
-    button("ConfigExport","Settings","Config Export",function()
-        invoke("ExportConfig")
-        if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
-    end)
-
-
+    function api.SetVisible(show)
+        if lifetime.Closed then return end
+        show=show==true
+        if lifetime.VisibilityApplied and api.Visible==show and window.Closed==not show then return end
+        lifetime.VisibilityApplied=true;publish(show)
+        if show then window:Open()else window:Close()end
     end
-
-    function api.SetVisible(value)
-        if disposed then return end
-        value=value==true
-        if visibilityApplied and api.Visible==value and window.Closed==not value then return end
-        visibilityApplied=true
-        api.Visible=value;s.UIHidden=not api.Visible
-        ctx.Visibility(api.Visible)
-        if api.Visible then window:Open()else window:Close()end
-    end
-    window:OnOpen(function()if not disposed then api.Visible=true;s.UIHidden=false;ctx.Visibility(true)end end)
-    window:OnClose(function()if not disposed then api.Visible=false;s.UIHidden=true;ctx.Visibility(false)end end)
-    window:OnDestroy(function()if not disposed and s.Running~=false then invoke("Destroy")end end)
-    function api.Update(now)
-        if disposed or s.Running==false or now<nextUpdate then return end
-        nextUpdate=now+.25
-        memory.Update();s.UIReferencesPruned=memory.Pruned
-        local tab=window.CurrentTab and tabs[window.CurrentTab]
-        if tab then s.UI.ActiveTab=tab end
-        if tab~=lastTab then lastTab=tab;nextChoices=0;choiceCursor=1 end
-        if not api.Visible then return end
-        for _,entry in ipairs(toggles)do
-            if entry.Tab==tab then
-            local value=entry.Get()
-            if value~=entry.Value then entry.Value=value;entry.Control:Set(value,false)end
-            end
-        end
-        for _,entry in ipairs(paragraphs)do
-            if entry.Tab==tab then
-            local text=tostring(entry.Get()or "")
-            if text~=entry.Text then entry.Text=text;entry.Control:SetDesc(text)end
-            end
-        end
-        if now>=nextChoices then
-            local processed=0
-            while choiceCursor<=#dropdowns do
-                local entry=dropdowns[choiceCursor];choiceCursor+=1
-                if entry.Tab==tab then
-                local view=entry.Build();entry.Syncing=true;entry.Map=view.Map or {}
-                local options=signature(view.Options);local value=entry.Signature(view.Value)
-                local changed=options~=entry.Options
-                entry.Current=value
-                if changed then entry.Options=options;entry.Control:Refresh(view.Options)end
-                if changed or value~=entry.Value then entry.Value=value;entry.Control:Select(view.Value)end
-                entry.Syncing=false
-                processed+=1
-                if ctx.Defer and processed>=1 then break end
+    window:OnOpen(function()if valid()then publish(true)end end)
+    window:OnClose(function()if valid()then publish(false)end end)
+    window:OnDestroy(function()if valid()then action("Destroy")end end)
+    local function register(tab,definition)
+        constructionPoint()
+        local key=definition.Key
+        local tabObject=api.Tabs[tab]
+        local kind=definition.Kind
+        if kind=="Section"then api.Controls[key]=tabObject:Section({Title=definition.Title,TextSize=17});return end
+        local projection={Definition=definition,Tab=tab}
+        local options={Title=definition.Title,Desc=definition.Desc}
+        if kind=="Button"then options.Callback=safe(definition.Action)
+        elseif kind=="Paragraph"then projection.Text=tostring(definition.Read()or "");options.Desc=projection.Text
+        elseif kind=="Toggle"then
+            projection.Value=definition.Read();options.Value=projection.Value
+            options.Callback=safe(function(value)
+                if api.Ready and value~=definition.Read()then
+                    definition.Write(value);projection.Value=definition.Read();projection.Control:Set(projection.Value,false)
                 end
-            end
-            if choiceCursor>#dropdowns then choiceCursor=1;nextChoices=now+1
-            else nextChoices=now+.25 end
+            end)
+        elseif kind=="Input"then
+            options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
+            options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Dropdown"then
+            local view=definition.Read()
+            projection.Map=view.Map or {};projection.Options=signature(view.Options)
+            projection.Value=signature(view.Value,definition.Ordered);projection.Current=projection.Value
+            projection.Syncing=true
+            options.Values=view.Options;options.Value=view.Value;options.Multi=definition.Multi==true
+            options.AllowNone=definition.Multi==true;options.SearchBarEnabled=true
+            options.Callback=safe(function(value)
+                local keyValue=signature(value,definition.Ordered)
+                if not api.Ready or projection.Syncing or keyValue==projection.Current then return end
+                projection.Current=keyValue;projection.Value=nil
+                definition.Write(value,projection.Map);cadence.Choices=0;cadence.Cursor=1
+            end)
         end
+        projection.Control=tabObject[kind](tabObject,options)
+        projection.Syncing=false;api.Controls[key]=projection.Control
+        projections[#projections+1]=projection
+        return projection
+    end
+    local function section(tab,key,title)return register(tab,{Kind="Section",Key=key,Title=title})end
+    local function toggle(tab,key,title,setter,desc)
+        return register(tab,{Kind="Toggle",Key=key,Title=title,Desc=desc,Read=function()return state[key]==true end,Write=function(value)action(setter,value)end})
+    end
+    local function dropdown(tab,key,title,read,write,multi,desc)
+        return register(tab,{Kind="Dropdown",Key=key,Title=title,Read=read,Write=write,Multi=multi,Desc=desc,Ordered=key=="MultiSpotAreas"})
+    end
+    local function input(tab,key,title,value,write,desc)return register(tab,{Kind="Input",Key=key,Title=title,Value=value,Write=write,Desc=desc})end
+    local function button(tab,key,title,fn,desc)return register(tab,{Kind="Button",Key=key,Title=title,Action=fn,Desc=desc})end
+    local function paragraph(tab,key,title,read)return register(tab,{Kind="Paragraph",Key=key,Title=title,Read=read})end
+    local function tab(index)
+        constructionPoint();local title=order[index]
+        api.Tabs[title]=window:Tab({Title=title,Icon=icons[index]})
+    end
+    local function destinations()
+        local list={};for _,area in pairs(state.FloorDestinations or {})do list[#list+1]=area end
+        table.sort(list,function(a,b)return a.Kind==b.Kind and (a.Name==b.Name and a.Id<b.Id or a.Name<b.Name)or a.Kind<b.Kind end)
+        local options,map={},{}
+        for _,area in ipairs(list)do mapping(options,area.Kind.." · "..area.Name,area.Id,map)end
+        return {Options=options,Map=map}
+    end
+    local function floors()
+        local options,map,value={},{},nil
+        for _,floor in ipairs(state.AutomationCatalog and state.AutomationCatalog.Floors or {})do
+            local label=floor.Label..(action("IsAutomationFloorUnlocked",floor.Id)and ""or " · locked")
+            options[#options+1]=label;map[label]=floor.Id
+            if floor.Id==state.SafeFloorId then value=label end
+        end
+        return {Options=options,Map=map,Value=value}
+    end
+    local function arenas()
+        local catalog=state.AutomationCatalog
+        if catalog then catalog.AddCurrent(state.FloorDestinations,ctx.PlaceId);catalog.Sort()end
+        local eligible={}
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if spot.PlaceId==ctx.PlaceId then eligible[spot.Id]=spot end end
+        local priority,rank={},{}
+        local function append(id)
+            if eligible[id]and state.MultiSpotSelected[id]and not rank[id]then priority[#priority+1]=id;rank[id]=#priority end
+        end
+        for _,id in ipairs(state.MultiSpotOrder or {})do append(id)end
+        for _,spot in ipairs(catalog and catalog.Spots or {})do append(spot.Id)end
+        local options,map,labels={},{},{}
+        for _,spot in ipairs(catalog and catalog.Spots or {})do if eligible[spot.Id]then
+            local label=(rank[spot.Id]and rank[spot.Id].." · "or "")..spot.Kind.." · "..spot.Name
+            labels[spot.Id]=mapping(options,label,spot.Id,map)
+        end end
+        local values={};for _,id in ipairs(priority)do values[#values+1]=labels[id]end
+        return {Options=options,Map=map,Value=values}
+    end
+    local function main()
+        section("Main","TeleportSection","Teleport")
+        dropdown("Main","TeleportDestination","Spot",destinations,function(label,map)if map[label]then action("TeleportToDestination",map[label])end end)
+        button("Main","RefreshDestinations","Refresh List",function()action("RefreshTeleportDestinations");cadence.Choices=0 end)
+        section("Main","SafeModeSection","Safe Mode");toggle("Main","SafeMode","Safe Mode","SetSafeMode")
+        dropdown("Main","SafeFloor","Safe floor",floors,function(label,map)if map[label]and map[label]~=state.SafeFloorId then action("SetSafeFloor",map[label])end end)
+        local editor=input("Main","SafeWhitelist","Whitelist",state.SafeWhitelistText,function(text)
+            if text:match("[%w_]")and text~=state.SafeWhitelistText then action("SetSafeWhitelist",text)end
+        end,"Input A List Of User")
+        api.ClearWhitelist=safe(function()
+            editor.Syncing=true;local ok,reason=pcall(editor.Control.Set,editor.Control,"");editor.Syncing=false
+            if not ok then error(reason)end
+        end)
+        if ctx.AddWhitelistClear then api.Controls.ClearWhitelist=ctx.AddWhitelistClear(editor.Control,api.ClearWhitelist)end
+        paragraph("Main","SafeModeStatus","Status",function()return state.SafeModeStatus end)
+        section("Main","MultiSpotSection","Multi Spot");toggle("Main","MultiSpot","Multi Spot","SetMultiSpot")
+        button("Main","SaveSpot","Save Spot",function()action("SaveMultiSpot");cadence.Choices=0 end)
+        dropdown("Main","MultiSpotAreas","Saved Spot",arenas,function(values,map)
+            local selected,priority={},{}
+            for _,label in ipairs(values or {})do local id=map[label];if id and not selected[id]then selected[id]=true;priority[#priority+1]=id end end
+            action("SetMultiSpotSelections",selected,priority)
+        end,true)
+        section("Main","FriendJoinerSection","Friend Joiner")
+        input("Main","JoinFriendUsername","Friend username",state.JoinFriendUsername,function(text)if text~=state.JoinFriendUsername then action("SetJoinFriendUsername",text)end end)
+        toggle("Main","AutoJoinFriend","Auto Join Friend","SetAutoJoinFriend")
+        paragraph("Main","AutoJoinFriendStatus","Status",function()
+            local username=tostring(state.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
+            return ctx.FriendPresent and ctx.FriendPresent(username)and "Friend Appeared"or "Friend Unappeared"
+        end)
+        api.Controls.RestartScript=window:CreateTopbarButton("Restart script","rotate-cw",safe(function()action("RestartScript")end),996)
+        api.Controls.AutoHideUI=window:CreateTopbarButton("Auto-hide UI on execute","eye-off",safe(function()
+            action("SetAutoHideUI",not state.AutoHideUI)
+            if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,state.AutoHideUI)end
+        end),995)
+        if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,state.AutoHideUI)end
+    end
+    local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
+    local function rest()
+        for _,row in ipairs({{"Enabled","Kill Aura","SetEnabled"},{"AutoFarm","Auto Farm","SetAutoFarm"},{"BossOnly","Boss Only","SetBossOnly"},{"CreditCheck","Credit Check","SetCreditCheck"}})do toggle("Combat",row[1],row[2],row[3])end
+        input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
+        paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
+        for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AtheonDodge","Atheon Dodge","SetAtheonDodge"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
+        toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
+        section("Auto Skill","SkillAuraSection","Skill Aura");toggle("Auto Skill","SkillAura","Skill Aura","SetSkillAura")
+        dropdown("Auto Skill","SelectedSkill","Skill",function()return {Options=state.SkillChoices or {},Value=state.SelectedSkill}end,function(name)if name and name~=state.SelectedSkill then action("SetSelectedSkill",name)end end)
+        section("Auto Skill","MiscSkillSection","Misc Skill");toggle("Auto Skill","MiscSkillEnabled","Misc Skill","SetMiscSkillEnabled")
+        dropdown("Auto Skill","SelectedMiscSkill","Skill",function()
+            local options={};for _,skill in ipairs(state.MiscSkillChoices or {})do if skill.Usable then options[#options+1]=skill.Name end end
+            return {Options=options,Value=state.SelectedMiscSkill}
+        end,function(name)if name and name~=state.SelectedMiscSkill then action("SetMiscSkill",name)end end)
+        for _,name in ipairs({"Dismantle","Upgrade","The Forge"})do button("Misc","Open"..name,name,function()action("OpenGameMenu",name)end)end
+        dropdown("Player","SelectedPlayer","Select player",function()
+            local options,map,value={},{},nil
+            for _,person in ipairs(state.PlayerTools.Choices())do local label=person.DisplayName.." (@"..person.Name..")";options[#options+1]=label;map[label]=person.UserId;if person.UserId==state.SelectedPlayerId then value=label end end
+            return {Options=options,Map=map,Value=value}
+        end,function(label,map)if map[label]then state.PlayerTools.Select(map[label])end end)
+        button("Player","TeleportPlayer","TP to player",function()state.PlayerTools.Teleport()end)
+        register("Player",{Kind="Toggle",Key="ViewingPlayer",Title="View player",Read=function()return state.ViewingPlayer==true end,Write=function(on)state.PlayerTools.SetViewing(on)end})
+        register("Player",{Kind="Toggle",Key="ViewingPlayerInventory",Title="View player inventory",Read=function()return state.ViewingPlayerInventory==true end,Write=function(on)state.PlayerTools.SetInventoryVisible(on)end})
+        section("Utility","PerformanceBoosterSection","Perfromance Booster")
+        dropdown("Utility","PerformanceBoosters","Performance boosters",function()
+            local values={};for _,name in ipairs(boostNames)do if state.PerformanceBoosters[name]then values[#values+1]=name end end
+            return {Options=boostNames,Value=values}
+        end,function(values)
+            local picked=selection(values)
+            for _,name in ipairs(boostNames)do if (state.PerformanceBoosters[name]==true)~=(picked[name]==true)then action("SetPerformanceBoost",name,picked[name]==true)end end
+        end,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+        section("Utility","AutoDismantleSection","Auto Dismantle")
+        local rarities={"Common","Uncommon","Rare"}
+        dropdown("Utility","AutoDismantle","Auto Dismantle",function()
+            local values={};for _,name in ipairs(rarities)do if state.AutoDismantle[name]then values[#values+1]=name end end
+            return {Options=rarities,Value=values}
+        end,function(values)local picked=selection(values);for _,name in ipairs(rarities)do if (state.AutoDismantle[name]==true)~=(picked[name]==true)then action("SetAutoDismantle",name,picked[name]==true)end end end,true)
+        section("Utility","AutoCraftSection","Auto Craft")
+        local recipes={"Uncommon → Rare","Rare → Legendary"};local recipeMap={[recipes[1]]="Rare Upgrade Crystal",[recipes[2]]="Legendary Upgrade Crystal"}
+        dropdown("Utility","AutoCraft","Auto Craft",function()return {Options=recipes,Map=recipeMap,Value=chosen(recipes,recipeMap,function(name)return state.AutoCraft and state.AutoCraft[name]==true end)}end,
+            function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetAutoCraft",picked)end,true)
+        section("Utility","AutoTradeSection","Auto Trade");toggle("Utility","AutoTrade","Auto Trade","SetAutoTrade","Only Accept Trade From Safe Mod Whitelist List")
+        dropdown("Utility","TradeMode","Mode",function()return {Options={"Selected items","Legendary+"},Value=state.TradeMode=="Legendary"and "Legendary+"or "Selected items"}end,function(label)action("SetTradeMode",label=="Legendary+"and "Legendary"or "Selected")end)
+        dropdown("Utility","TradeItems","Inventory",function()
+            local options,map={},{}
+            for _,item in ipairs(state.GetTradeItemChoices())do local label=item.Name.." x"..item.Count;options[#options+1]=label;map[label]=item.Name end
+            return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
+        end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
+        toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        dropdown("Settings","Theme","Theme",function()
+            local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
+            return {Options=options,Value=state.Theme or "Dark"}
+        end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
+        input("Settings","ConfigImport","Config Import","",function(bytes)if bytes:match("%S")then action("ImportConfig",bytes)end end)
+        button("Settings","ConfigExport","Config Export",function()
+            action("ExportConfig")
+            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+        end)
+    end
+    local function synchronize(projection,choices)
+        local definition=projection.Definition
+        if definition.Kind=="Toggle"then
+            local value=definition.Read();if value~=projection.Value then projection.Value=value;projection.Control:Set(value,false)end
+        elseif definition.Kind=="Paragraph"then
+            local text=tostring(definition.Read()or "");if text~=projection.Text then projection.Text=text;projection.Control:SetDesc(text)end
+        elseif definition.Kind=="Dropdown"and choices then
+            local view=definition.Read();local options=signature(view.Options);local value=signature(view.Value,definition.Ordered)
+            local changed=projection.Options~=options
+            projection.Syncing=true;projection.Map=view.Map or {};projection.Current=value
+            if changed then projection.Options=options;projection.Control:Refresh(view.Options)end
+            if changed or projection.Value~=value then projection.Value=value;projection.Control:Select(view.Value)end
+            projection.Syncing=false
+        end
+    end
+    function api.Update(stamp)
+        if not valid()or stamp<cadence.Next then return end
+        cadence.Next=stamp+.25;memory.Update();state.UIReferencesPruned=memory.Pruned
+        local current=window.CurrentTab and order[window.CurrentTab]
+        if current then state.UI.ActiveTab=current end
+        if current~=cadence.Tab then cadence.Tab=current;cadence.Choices=0;cadence.Cursor=1 end
+        if not api.Visible then return end
+        for _,projection in ipairs(projections)do if projection.Tab==current and projection.Definition.Kind~="Dropdown"then synchronize(projection,false)end end
+        if stamp<cadence.Choices then return end
+        while cadence.Cursor<=#projections do
+            local projection=projections[cadence.Cursor];cadence.Cursor+=1
+            if projection.Tab==current and projection.Definition.Kind=="Dropdown"then
+                synchronize(projection,true)
+                if ctx.Defer then break end
+            end
+        end
+        if cadence.Cursor>#projections then cadence.Cursor=1;cadence.Choices=stamp+1 else cadence.Choices=stamp+.25 end
     end
     function api.Destroy()
-        if disposed then return end
-        disposed=true;api.Ready=false
-        local failures={}
-        local function cleanup(fn,...)
-            local ok,reason=pcall(fn,...)
-            if not ok then failures[#failures+1]=tostring(reason)end
+        if lifetime.Closed then return end
+        lifetime.Closed=true;api.Ready=false;api.BackgroundReady=false
+        local errors={}
+        local function attempt(fn,...)
+            local ok,reason=pcall(fn,...);if not ok then errors[#errors+1]=tostring(reason)end
         end
-        cleanup(ctx.Visibility,false)
-        cleanup(function()window:Destroy()end)
-        if memory.Destroy then cleanup(memory.Destroy)end
-        if ctx.DestroyRoots then cleanup(ctx.DestroyRoots)end
-        if #failures>0 then s.UICleanupErrors=failures end
+        attempt(ctx.Visibility,false);attempt(function()window:Destroy()end)
+        if memory.Destroy then attempt(memory.Destroy)end
+        if ctx.DestroyRoots then attempt(ctx.DestroyRoots)end
+        if #errors>0 then state.UICleanupErrors=errors end
+        table.clear(projections)
     end
-    -- Restore values after all controls exist; initialization never runs actions.
-    if ctx.Defer then
-        ctx.Defer(function()
-            if disposed or s.Running==false then return end
-            local ok,reason=pcall(function()
-                buildTabs(2,#tabs)
-                buildOtherTabs()
-                s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil
-                if window.CurrentTab==1 and api.Tabs[restoreTab]then api.Tabs[restoreTab]:Select()end
-            end)
-            if not ok and not disposed then report(reason)end
+    local savedTab=state.UI.ActiveTab or "Main"
+    tab(1);main()
+    local function background()
+        if not valid()then return end
+        local ok,reason=pcall(function()
+            for index=2,#order do tab(index)end
+            rest();api.BackgroundReady=true
+            state.WindUIReadySeconds=state.WindUIStartedAt and os.clock()-state.WindUIStartedAt or nil
+            if window.CurrentTab==1 and api.Tabs[savedTab]then api.Tabs[savedTab]:Select()end
         end)
-    else buildOtherTabs();s.WindUIReadySeconds=s.WindUIStartedAt and os.clock()-s.WindUIStartedAt or nil end
+        if not ok and valid()then fail(reason)end
+    end
+    if ctx.Defer then ctx.Defer(background)else background()end
     api.Ready=true
-    local activeTab=api.Tabs[s.UI.ActiveTab or "Main"]or api.Tabs.Main
-    activeTab:Select()
+    local active=api.Tabs[state.UI.ActiveTab or "Main"]or api.Tabs.Main;active:Select()
     api.Update(0)
     return api
 end

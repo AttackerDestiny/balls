@@ -1,231 +1,217 @@
--- Native Atheon cast data and LavaGyzer Point geometry; no damage/cooldown edits.
+-- Bounded evasion uses native cast lifecycles, flame assets, and geyser markers.
 return function(ctx)
-    local state=ctx.State
     local api={Moves=0,Seen={},Completed={},ThreatCount=0,MaxStep=112,MaxBossDistance=128,SmashRadius=90}
-    local casts={}
-    local points={}
-    local disposed=false
-    local now=ctx.Now or os.clock
+    local state=ctx.State
+    local clock=ctx.Now or os.clock
+    local casts,markers={},{}
+    local closed=false
+    local route={Point=nil,Due=0}
     local flat=Vector3.new(1,0,1)
-    local known={FireDash=true,LavaSmash=true,LavaGyzer=true}
-    local lastPoint,nextPlan=nil,0
-    local function update(point)
-        local time=now()
-        local closest,distance
-        for _,boss in ipairs(ctx.Bosses()) do
+    local supported={FireDash=true,LavaSmash=true,LavaGyzer=true}
+    local function margin()return math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)end
+    local function registry(boss)
+        local rig=(ctx.Native.RiggedEnemies or {})[boss]
+        return rig and rig.ActiveSkills
+    end
+    local function collectAssets(entry,ended)
+        if entry.Name~="FireDash"then return end
+        entry.Assets=entry.Assets or {}
+        for _,part in pairs(entry.Skill.CreatedAssets or {})do
+            if part.Parent and part:IsA("BasePart")then entry.Assets[part]=true;entry.AssetsKnown=true end
+        end
+        if not ended or entry.AssetQueryDone or not ctx.FireAssets then return end
+        entry.AssetQueryDone=true
+        local ok,parts=pcall(ctx.FireAssets,entry.Skill)
+        if ok and type(parts)=="table"then
+            entry.AssetsKnown=true
+            for _,part in ipairs(parts)do entry.Assets[part]=true end
+        end
+    end
+    local function airborne(entry,time)
+        if entry.Name~="LavaSmash"then return false end
+        if time-entry.Started>=14 then return true end
+        local position=ctx.Position(entry.Boss)
+        local ground=entry.Skill.LastCFrame and entry.Skill.LastCFrame.Position or entry.Skill.SurfacePosition
+        if not position or not ground then return true end
+        local grounded=ctx.Grounded and ctx.Grounded(entry.Boss)or (not ctx.Grounded and math.abs(position.Y-ground.Y)<=6)
+        if not grounded and position.Y>ground.Y+6 then
+            entry.WasAirborne=true;entry.CompletedAt=nil;entry.Until=math.max(entry.Until,time+1.2)
+        elseif grounded and entry.WasAirborne and not entry.LandedAt then
+            entry.LandedAt=time;entry.Until=math.max(entry.Until,time+1.2+(state.PingMs or 0)/1000)
+        end
+        return not grounded
+    end
+    local function settle(entry,time)
+        local active=registry(entry.Boss)
+        local ended=entry.Skill.Destroyed==true or (active and active[entry.Name]~=entry.Skill)
+        collectAssets(entry,ended)
+        if not ended or airborne(entry,time)then return end
+        if not entry.CompletedAt then
+            entry.CompletedAt=time;entry.ReturnMargin=margin()
+            api.LastSkillEndAt=time;api.LastSkillEndName=entry.Name;api.LastReturnMargin=entry.ReturnMargin
+            api.Completed[entry.Name]={At=time,Margin=entry.ReturnMargin}
+        end
+        local ready=entry.CompletedAt+entry.ReturnMargin
+        if entry.Name~="FireDash"then entry.Until=math.min(entry.Until,ready);return end
+        if not entry.AssetsKnown then return end
+        local hasFlames=false
+        for part in pairs(entry.Assets)do if part.Parent then hasFlames=true else entry.Assets[part]=nil end end
+        entry.Until=hasFlames and math.min(entry.CompletedAt+3.2,math.max(ready,time+.2))or ready
+    end
+    local function discover(point,time)
+        local nearest,gap
+        for _,boss in ipairs(ctx.Bosses())do
             local position=ctx.Position(boss)
-            local gap=position and (position-point).Magnitude
-            if gap and (not distance or gap<distance) then closest,distance=position,gap end
-            local rig=(ctx.Native.RiggedEnemies or {})[boss]
-            for name,skill in pairs(rig and rig.ActiveSkills or {}) do
-                if known[name] and not skill.Destroyed then
-                    local record=casts[skill]
-                    if not record then
-                        record={Name=name,Skill=skill,Boss=boss,Started=time}
-                        if name=="LavaSmash" then
-                            record.MinimumUntil=time+math.clamp(tonumber(skill.Lifetime) or 3,1,8)+1.2+(state.PingMs or 0)/1000
-                        end
-                        casts[skill]=record;api.Seen[name]=(api.Seen[name] or 0)+1
+            local distance=position and (position-point).Magnitude
+            if distance and (not gap or distance<gap)then nearest=position;gap=distance end
+            for name,skill in pairs(registry(boss)or {})do
+                if supported[name]and not skill.Destroyed then
+                    local entry=casts[skill]
+                    if not entry then
+                        entry={Name=name,Skill=skill,Boss=boss,Started=time}
+                        if name=="LavaSmash"then entry.MinimumUntil=time+math.clamp(tonumber(skill.Lifetime)or 3,1,8)+1.2+(state.PingMs or 0)/1000 end
+                        casts[skill]=entry;api.Seen[name]=(api.Seen[name]or 0)+1
                     end
-                    record.Until=math.max(record.MinimumUntil or 0,time+(name=="FireDash" and 3.2 or name=="LavaGyzer" and 1 or .8))
+                    local tail=name=="FireDash"and 3.2 or name=="LavaGyzer"and 1 or .8
+                    entry.Until=math.max(entry.MinimumUntil or 0,time+tail)
                 end
+            end
+        end
+        return nearest
+    end
+    local function sampleMarkers(time)
+        for index,part in ipairs(ctx.Collection:GetTagged("LavaGyzer Point"))do
+            if index>48 then break end
+            if part.Parent and part:IsA("BasePart")then
+                local entry=markers[part]
+                if not entry then
+                    entry={Started=time}
+                    local duration=part.GetAttribute and part:GetAttribute("Lifetime")
+                    if type(duration)=="number"and duration>=0 and duration<=15 then entry.Lifetime=duration end
+                    markers[part]=entry
+                end
+                entry.Position=part.Position;entry.Radius=math.max(part.Size.X,part.Size.Z)*.5
+                entry.Until=time+1;entry.SeenAt=time;entry.RemovedAt=nil
             end
         end
         local count=0
-        for skill,record in pairs(casts) do
-            local rig=(ctx.Native.RiggedEnemies or {})[record.Boss]
-            local ended=skill.Destroyed==true or (rig and rig.ActiveSkills and rig.ActiveSkills[record.Name]~=skill)
-            if record.Name=="FireDash" then
-                record.Assets=record.Assets or {}
-                for _,part in pairs(skill.CreatedAssets or {}) do
-                    if part.Parent and part:IsA("BasePart") then record.Assets[part]=true;record.AssetsKnown=true end
-                end
-                if ended and not record.AssetQueryDone and ctx.FireAssets then
-                    record.AssetQueryDone=true
-                    local ok,assets=pcall(ctx.FireAssets,skill)
-                    if ok and type(assets)=="table" then
-                        record.AssetsKnown=true
-                        for _,part in ipairs(assets) do record.Assets[part]=true end
-                    end
-                end
+        for part,entry in pairs(markers)do
+            if entry.SeenAt~=time and entry.Lifetime then
+                entry.RemovedAt=entry.RemovedAt or time
+                local padding=.15+margin()
+                entry.Until=math.max(entry.Started+entry.Lifetime+padding,entry.RemovedAt+padding)
             end
-            local grounded=record.Name~="LavaSmash"
-            if record.Name=="LavaSmash" and time-record.Started<14 then
-                local root=ctx.Position(record.Boss)
-                local ground=skill.LastCFrame and skill.LastCFrame.Position or skill.SurfacePosition
-                if root and ground then
-                    if ctx.Grounded then grounded=ctx.Grounded(record.Boss)
-                    else grounded=math.abs(root.Y-ground.Y)<=6 end
-                    if not grounded and root.Y>ground.Y+6 then
-                        record.WasAirborne=true;record.CompletedAt=nil;record.Until=math.max(record.Until,time+1.2)
-                    elseif grounded and record.WasAirborne and not record.LandedAt then
-                        record.LandedAt=time;record.Until=math.max(record.Until,time+1.2+(state.PingMs or 0)/1000)
-                    end
-                    -- A native Destroy plus the grounded root confirms completion;
-                    -- do not spend the conservative fallback timer after that.
-                end
-            end
-            if ended and grounded then
-                if not record.CompletedAt then
-                    record.CompletedAt=time
-                    record.ReturnMargin=math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)
-                    api.LastSkillEndAt=time;api.LastSkillEndName=record.Name;api.LastReturnMargin=record.ReturnMargin
-                    api.Completed[record.Name]={At=time,Margin=record.ReturnMargin}
-                end
-                local due=record.CompletedAt+record.ReturnMargin
-                if record.Name=="FireDash" then
-                    if record.AssetsKnown then
-                        local alive=false
-                        for part in pairs(record.Assets) do if part.Parent then alive=true else record.Assets[part]=nil end end
-                        record.Until=alive and math.min(record.CompletedAt+3.2,math.max(due,time+.2)) or due
-                    end
-                else record.Until=math.min(record.Until,due) end
-            end
-            if time>record.Until then casts[skill]=nil else count+=1 end
+            if time>entry.Until then markers[part]=nil else count+=1 end
         end
-        local added=0
-        for _,part in ipairs(ctx.Collection:GetTagged("LavaGyzer Point")) do
-            added+=1;if added>48 then break end
-            if part.Parent and part:IsA("BasePart") then
-                local record=points[part]
-                if not record then
-                    record={Started=time}
-                    local lifetime=part.GetAttribute and part:GetAttribute("Lifetime")
-                    if type(lifetime)=="number" and lifetime>=0 and lifetime<=15 then record.Lifetime=lifetime end
-                end
-                record.Position=part.Position;record.Radius=math.max(part.Size.X,part.Size.Z)*.5;record.Until=time+1
-                record.SeenAt=time;record.RemovedAt=nil
-                points[part]=record
-            end
-        end
-        for part,record in pairs(points) do
-            if record.SeenAt~=time and record.Lifetime then
-                record.RemovedAt=record.RemovedAt or time
-                local margin=math.clamp(.1+(state.PingMs or 0)/1000,.15,.35)
-                record.Until=math.max(record.Started+record.Lifetime+.15+margin,record.RemovedAt+.15+margin)
-            end
-            if time>record.Until then points[part]=nil else count+=1 end
-        end
-        api.ThreatCount=count
-        local smashCenter
-        for _,record in pairs(casts) do
-            if record.Name=="LavaSmash" then smashCenter=record.Skill.SurfacePosition or smashCenter end
-        end
-        api.Anchor=smashCenter or closest
-        api.NearBoss=api.Anchor~=nil and (api.Anchor-point).Magnitude<=api.MaxBossDistance
-        return time
+        return count
     end
-    local function danger(point)
-        local margin=8+math.min(4,(state.PingMs or 0)/100)
-        for _,record in pairs(casts) do
-            local skill=record.Skill
-            if record.Name=="LavaSmash" and skill.SurfacePosition then
-                local delta=(point-skill.SurfacePosition)*flat
-                local radius=api.SmashRadius+margin
-                if delta:Dot(delta)<radius*radius then return true,"LavaSmash" end
-            end
-            if record.Name=="FireDash" and skill.SurfacePosition and skill.FocusPosition then
-                if record.CompletedAt and record.AssetsKnown and now()>=record.CompletedAt+record.ReturnMargin then
-                    for part in pairs(record.Assets) do
-                        if part.Parent then
-                            local p=part.CFrame:PointToObjectSpace(Vector3.new(point.X,part.Position.Y,point.Z))
-                            if math.abs(p.X)<part.Size.X*.5+margin and math.abs(p.Z)<part.Size.Z*.5+margin then return true,"FireDash flames" end
-                        end
-                    end
-                    continue
-                end
-                local a=skill.SurfacePosition*flat
-                local line=(skill.FocusPosition-skill.SurfacePosition)*flat
-                local delta=point*flat-a
-                local length=line:Dot(line)
-                local alpha=length>.01 and math.clamp(delta:Dot(line)/length,0,1) or 0
-                local width=(tonumber(skill.Width) or 0)*.5+10+margin
-                local offset=delta-line*alpha
-                if offset:Dot(offset)<width*width then return true,"FireDash" end
-            end
+    local function refresh(point,time)
+        local nearest=discover(point,time)
+        local count=sampleMarkers(time)
+        local impact
+        for skill,entry in pairs(casts)do
+            -- Grounded state must be tracked even while the skill remains active.
+            if entry.Name=="LavaSmash"then airborne(entry,time)end
+            settle(entry,time)
+            if time>entry.Until then casts[skill]=nil
+            else count+=1;if entry.Name=="LavaSmash"then impact=entry.Skill.SurfacePosition or impact end end
         end
-        for _,record in pairs(points) do
-            local delta=(point-record.Position)*flat
-            local radius=record.Radius+margin
-            if delta:Dot(delta)<radius*radius then return true,"LavaGyzer" end
-        end
-        if api.ThreatCount>0 and ctx.Warnings then
-            local unsafe,reason=ctx.Warnings.IsThreatened(point)
-            if unsafe then return true,reason end
+        api.Anchor=impact or nearest;api.ThreatCount=count
+        api.NearBoss=api.Anchor~=nil and (api.Anchor-point).Magnitude<=api.MaxBossDistance
+    end
+    local function flameThreat(entry,point,padding)
+        for part in pairs(entry.Assets)do
+            if part.Parent then
+                local localPoint=part.CFrame:PointToObjectSpace(Vector3.new(point.X,part.Position.Y,point.Z))
+                if math.abs(localPoint.X)<part.Size.X*.5+padding and math.abs(localPoint.Z)<part.Size.Z*.5+padding then return true end
+            end
         end
         return false
     end
-    function api.Reset()table.clear(casts);table.clear(points);lastPoint=nil;nextPlan=0;api.ThreatCount=0;api.Active=false;api.NearBoss=false end
+    local function castThreat(entry,point,padding)
+        local skill=entry.Skill
+        if entry.Name=="LavaSmash"and skill.SurfacePosition then
+            local delta=(point-skill.SurfacePosition)*flat
+            return delta:Dot(delta)<(api.SmashRadius+padding)^2,"LavaSmash"
+        end
+        if entry.Name~="FireDash"or not skill.SurfacePosition or not skill.FocusPosition then return false end
+        if entry.CompletedAt and entry.AssetsKnown and clock()>=entry.CompletedAt+entry.ReturnMargin then return flameThreat(entry,point,padding),"FireDash flames"end
+        local segment=(skill.FocusPosition-skill.SurfacePosition)*flat
+        local delta=(point-skill.SurfacePosition)*flat
+        local length=segment:Dot(segment)
+        local alpha=length>.01 and math.clamp(delta:Dot(segment)/length,0,1)or 0
+        local offset=delta-segment*alpha
+        local width=(tonumber(skill.Width)or 0)*.5+10+padding
+        return offset:Dot(offset)<width*width,"FireDash"
+    end
+    local function threatened(point)
+        local padding=8+math.min(4,(state.PingMs or 0)/100)
+        for _,entry in pairs(casts)do local hit,reason=castThreat(entry,point,padding);if hit then return true,reason end end
+        for _,entry in pairs(markers)do
+            local delta=(point-entry.Position)*flat
+            if delta:Dot(delta)<(entry.Radius+padding)^2 then return true,"LavaGyzer"end
+        end
+        if api.ThreatCount>0 and ctx.Warnings then return ctx.Warnings.IsThreatened(point)end
+        return false
+    end
+    function api.Reset()
+        table.clear(casts);table.clear(markers);route.Point=nil;route.Due=0
+        api.ThreatCount=0;api.Active=false;api.NearBoss=false
+    end
     function api.Plan(point,desired,floorY)
-        if disposed or not state.AtheonDodge or not state.Running or state.SafeModePanic or state.TravelBusy or state.Recovering then
-            api.Reset();return nil
-        end
-        local time=update(point)
-        if api.ThreatCount==0 then
-            api.Active=false;lastPoint=nil
-            return nil
-        end
+        if closed or not state.Running or not state.AtheonDodge or state.SafeModePanic or state.TravelBusy or state.Recovering then api.Reset();return nil end
+        local time=clock();refresh(point,time)
+        if api.ThreatCount==0 then api.Active=false;route.Point=nil;return nil end
+        if ctx.Warnings then ctx.Warnings.RefreshThreats()end
+        local danger,reason=threatened(point)
+        local targetDanger,targetReason=threatened(desired or point)
+        if not danger and not targetDanger then api.Active=false;route.Point=nil;return nil end
         local function valid(candidate)
-            return candidate and ctx.Valid(candidate) and (candidate-point).Magnitude<=api.MaxStep
-                and api.Anchor and (candidate-api.Anchor).Magnitude<=api.MaxBossDistance
+            return candidate and api.Anchor and ctx.Valid(candidate)and (candidate-point).Magnitude<=api.MaxStep
+                and (candidate-api.Anchor).Magnitude<=api.MaxBossDistance
         end
-        local function shallow()
-            local floor=floorY and floorY(point)
-            local candidate=type(floor)=="number" and Vector3.new(point.X,floor-20,point.Z) or nil
-            return valid(candidate) and candidate or nil
-        end
-        if ctx.Warnings and api.ThreatCount>0 then ctx.Warnings.RefreshThreats() end
-        -- Evade the impact laterally; going only 20 below its center still gets hit.
-        local unsafe,reason=danger(point)
-        local wanted,wantedReason=danger(desired or point)
-        if not unsafe and not wanted then api.Active=false;lastPoint=nil;return nil end
-        if lastPoint and valid(lastPoint) and not danger(lastPoint) then api.Active=true;return lastPoint,api.LastReason end
-        if time<nextPlan then return nil end
-        nextPlan=time+.1
-        lastPoint=nil
-        if not unsafe and valid(point) then lastPoint=point
-        elseif reason=="LavaSmash" and api.Anchor then
-            -- Search one ring around the impact, not hundreds of floor raycasts.
-            local floor=floorY and floorY(point)
-            local y=type(floor)=="number" and floor-20 or point.Y
-            local radius=api.SmashRadius+8+math.min(4,(state.PingMs or 0)/100)+6
+        local function safe(candidate)return valid(candidate)and not threatened(candidate)end
+        if route.Point and safe(route.Point)then api.Active=true;return route.Point,api.LastReason end
+        if time<route.Due then return nil end
+        route.Due=time+.1
+        local chosen
+        if not danger and valid(point)then chosen=point
+        elseif reason=="LavaSmash"and api.Anchor then
+            local ground=floorY and floorY(point)
+            local y=type(ground)=="number"and ground-20 or point.Y
+            local radius=api.SmashRadius+14+math.min(4,(state.PingMs or 0)/100)
             if state.FarmAbove then
                 local vertical=math.sqrt(math.max(0,api.MaxBossDistance^2-radius^2))-1
                 y=math.clamp(point.Y,api.Anchor.Y-vertical,api.Anchor.Y+vertical)
             end
             local best
-            for i=1,16 do
-                local angle=i*math.pi/8
+            for direction=1,16 do
+                local angle=direction*math.pi/8
                 local candidate=Vector3.new(api.Anchor.X+math.cos(angle)*radius,y,api.Anchor.Z+math.sin(angle)*radius)
                 local distance=(candidate-point).Magnitude
-                if valid(candidate) and not danger(candidate) and (not best or distance<best) then lastPoint,best=candidate,distance end
+                if safe(candidate)and (not best or distance<best)then chosen=candidate;best=distance end
             end
         else
-            local floor
-            if reason=="LavaSmash" or wantedReason=="LavaSmash" then floor=floorY and floorY(point) end
+            local smash=reason=="LavaSmash"or targetReason=="LavaSmash"
+            local ground=smash and floorY and floorY(point)
             for radius=8,api.MaxStep,8 do
-                for i=1,16 do
-                    local angle=i*math.pi/8
+                if chosen then break end
+                for direction=1,16 do
+                    local angle=direction*math.pi/8
                     local candidate=point+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
-                    if reason=="LavaSmash" or wantedReason=="LavaSmash" then
-                        if type(floor)=="number" then candidate=Vector3.new(candidate.X,floor-20,candidate.Z) end
-                    end
-                    if valid(candidate) and not danger(candidate) then lastPoint=candidate;break end
+                    if type(ground)=="number"then candidate=Vector3.new(candidate.X,ground-20,candidate.Z)end
+                    if safe(candidate)then chosen=candidate;break end
                 end
-                if lastPoint then break end
             end
         end
-        if not lastPoint then
-            local fallback=shallow()
-            if fallback and not danger(fallback) then lastPoint=fallback end
+        if not chosen then
+            local floor=floorY and floorY(point)
+            local shallow=type(floor)=="number"and Vector3.new(point.X,floor-20,point.Z)
+            if safe(shallow)then chosen=shallow end
         end
-        if lastPoint then
-            api.Active=true;api.LastReason=reason or wantedReason or "Atheon warning"
-            api.Moves+=1
-            return lastPoint,api.LastReason
-        end
-        api.Active=false;return nil
+        route.Point=chosen;api.Active=chosen~=nil
+        if chosen then api.LastReason=reason or targetReason or "Atheon warning";api.Moves+=1;return chosen,api.LastReason end
     end
-    function api.Destroy()disposed=true;api.Reset()end
+    function api.Destroy()closed=true;api.Reset()end
     return api
 end

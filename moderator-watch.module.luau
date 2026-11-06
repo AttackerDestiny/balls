@@ -116,45 +116,50 @@ return function(ctx)
         [1560324163]=true,
     }
     local api={Enabled=true,Count=113}
-    local stopped,fired=false,false
-    local function status(message)
-        api.Status=message;ctx.State.ModeratorStatus=message
+    local lifecycle={closed=false,claimed=false}
+    local function publish(message)
+        api.Status=message
+        ctx.State.ModeratorStatus=message
         if ctx.Notify then pcall(ctx.Notify,message)end
     end
-    local function active()
-        return not stopped and ctx.State.Running~=false and not ctx.State.StopEverything
+    local function current()
+        return not lifecycle.closed and ctx.State.Running~=false and not ctx.State.StopEverything
     end
-    local function check(player)
-        if ctx.State.StopEverything or stopped or fired or player.UserId==ctx.Players.LocalPlayer.UserId or not ids[player.UserId] then return end
-        fired=true
-        ctx.State.ModeratorDetected={Name=player.Name,UserId=player.UserId,At=os.time()}
-        ctx.State.ModeratorBlocking=true
-        status("Moderator detected · blocking @"..player.Name.." before disconnect")
-        if ctx.Pause then pcall(ctx.Pause,player)end
-        if ctx.Save then pcall(ctx.Save) end
-        task.defer(function()
-            if not active()then return end
-            local ok,confirmed=pcall(function()
-                assert(type(ctx.Block)=="function","Native block handler is unavailable")
-                return ctx.Block(player,active)
-            end)
-            if not active()then return end
-            if not ok or confirmed~=true then
-                api.Failed=true
-                ctx.State.ModeratorBlockError=not ok and tostring(confirmed)or"Roblox did not confirm the moderator block"
-                status("Moderator block failed · automation paused · "..ctx.State.ModeratorBlockError)
-                return
-            end
-            ctx.State.ModeratorBlockConfirmed=true;ctx.State.ModeratorBlockError=nil
-            status("Moderator blocked · disconnecting")
-            if ctx.Save then pcall(ctx.Save)end
-            if active()then
-                ctx.Kick("Blocked moderator "..player.Name.." ("..player.UserId.."). Disconnected automatically.")
-            end
+    local function confirmedExit(person)
+        if not current()then return end
+        local ok,receipt=pcall(function()
+            assert(type(ctx.Block)=="function","Native block handler is unavailable")
+            return ctx.Block(person,current)
         end)
+        if not current()then return end
+        if not ok or receipt~=true then
+            api.Failed=true
+            ctx.State.ModeratorBlockError=ok and "Roblox did not confirm the moderator block"or tostring(receipt)
+            publish("Moderator block failed · automation paused · "..ctx.State.ModeratorBlockError)
+            return
+        end
+        ctx.State.ModeratorBlockConfirmed=true
+        ctx.State.ModeratorBlockError=nil
+        publish("Moderator blocked · disconnecting")
+        if ctx.Save then pcall(ctx.Save)end
+        if current()then ctx.Kick("Blocked moderator "..person.Name.." ("..person.UserId.."). Disconnected automatically.")end
     end
-    local connection=ctx.Players.PlayerAdded:Connect(check)
-    for _,player in ipairs(ctx.Players:GetPlayers()) do task.defer(check,player) end
-    function api.Destroy() stopped=true; api.Enabled=false; connection:Disconnect() end
+    local function observe(person)
+        if not current()or lifecycle.claimed or person.UserId==ctx.Players.LocalPlayer.UserId or not ids[person.UserId]then return end
+        lifecycle.claimed=true
+        ctx.State.ModeratorDetected={Name=person.Name,UserId=person.UserId,At=os.time()}
+        ctx.State.ModeratorBlocking=true
+        publish("Moderator detected · blocking @"..person.Name.." before disconnect")
+        if ctx.Pause then pcall(ctx.Pause,person)end
+        if ctx.Save then pcall(ctx.Save)end
+        task.defer(confirmedExit,person)
+    end
+    local subscription=ctx.Players.PlayerAdded:Connect(observe)
+    local population=ctx.Players:GetPlayers()
+    for index=1,#population do task.defer(observe,population[index])end
+    function api.Destroy()
+        if lifecycle.closed then return end
+        lifecycle.closed=true;api.Enabled=false;subscription:Disconnect()
+    end
     return api
 end

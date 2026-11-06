@@ -1,41 +1,44 @@
--- Stop local animation playback without retaining tracks or destroying rigs.
+-- Animator subscriptions are scoped to one enabled session and never retain tracks.
 return function(ctx)
     local api={Stopped=0}
-    local enabled,disposed=false,false
-    local added,removed
-    local connections={}
+    local session=nil
+    local closed=false
     local function stop(track)
-        if not enabled or disposed or ctx.State.StopEverything then return end
-        local ok=pcall(function()track:Stop(0)end)
-        if ok then api.Stopped+=1 end
+        if closed or not session or ctx.State.StopEverything then return end
+        if pcall(function()track:Stop(0)end)then api.Stopped+=1 end
     end
-    local function attach(animator)
-        if not enabled or not animator:IsA("Animator")or connections[animator]then return end
-        connections[animator]=animator.AnimationPlayed:Connect(stop)
+    local function forget(animator)
+        if not session then return end
+        local connection=session.Animators[animator]
+        if connection then connection:Disconnect();session.Animators[animator]=nil end
+    end
+    local function watch(animator)
+        if not session or not animator:IsA("Animator")or session.Animators[animator]then return end
+        session.Animators[animator]=animator.AnimationPlayed:Connect(stop)
         for _,track in ipairs(animator:GetPlayingAnimationTracks())do stop(track)end
     end
-    local function detach(animator)
-        local connection=connections[animator]
-        if connection then connection:Disconnect();connections[animator]=nil end
+    local function release()
+        if not session then return end
+        for _,connection in ipairs(session.Roots)do connection:Disconnect()end
+        for animator in pairs(session.Animators)do forget(animator)end
+        session=nil
     end
-    function api.Set(value)
-        if disposed then return false end
-        value=value==true
-        if enabled==value then return true end
-        enabled=value;ctx.State.RemovingAnimations=enabled
-        if added then added:Disconnect();added=nil end
-        if removed then removed:Disconnect();removed=nil end
-        for animator in pairs(connections)do detach(animator)end
+    function api.Set(enabled)
+        if closed then return false end
+        enabled=enabled==true
+        if enabled==(session~=nil)then return true end
+        release();ctx.State.RemovingAnimations=enabled
         if enabled then
-            added=ctx.Root.DescendantAdded:Connect(attach)
-            removed=ctx.Root.DescendantRemoving:Connect(detach)
-            for _,animator in ipairs(ctx.Root:QueryDescendants("Animator"))do attach(animator)end
+            session={Animators={},Roots={}}
+            session.Roots[1]=ctx.Root.DescendantAdded:Connect(watch)
+            session.Roots[2]=ctx.Root.DescendantRemoving:Connect(forget)
+            for _,animator in ipairs(ctx.Root:QueryDescendants("Animator"))do watch(animator)end
         end
         return true
     end
     function api.Destroy()
-        if disposed then return end
-        api.Set(false);disposed=true
+        if closed then return end
+        api.Set(false);closed=true
     end
     return api
 end

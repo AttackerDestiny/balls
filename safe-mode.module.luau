@@ -1,99 +1,98 @@
+-- Safe-floor protection and retry ownership are independent from the search worker.
 return function(ctx)
     local state,search=ctx.State,ctx.Search
     local api={Seeking=false}
-    local started=false
-    local retries,retryAt=0,nil
+    local session={adopted=false,retries=0,retryAt=nil,protectedAt=nil}
     local clock=ctx.Clock or os.clock
-    local function targetFloor()return ctx.TargetFloor and ctx.TargetFloor() or state.SafeFloorId end
-    local protectedSince
-    function api.AdoptSearch()started=true end
-    function api.ObserveProtected()
-        if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
-            or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
-        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
-        protectedSince=protectedSince or clock()
-        if clock()-protectedSince<.6 then return end
-        if search.Active then search.Stop("Protected · only you and whitelisted players","Safe")end
-        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
+    local protectedMessage="Protected · only you and whitelisted players"
+    local function destination()
+        return ctx.TargetFloor and ctx.TargetFloor()or state.SafeFloorId
+    end
+    local function populationSafe()
+        if ctx.CurrentFloor()~=destination()then return false end
+        for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then return false end end
+        return true
+    end
+    local function panic()
+        api.Seeking=true
+        if ctx.Panic then ctx.Panic()end
+    end
+    local function protected()
+        session.adopted=false;session.retries=0;session.retryAt=nil;session.protectedAt=nil
+        api.Seeking=false;api.Paused=false;api.PauseReason=nil
         if ctx.ReleasePanic then ctx.ReleasePanic()end
-        ctx.Status("Protected · only you and whitelisted players")
+        ctx.Status(protectedMessage)
+    end
+    function api.AdoptSearch()session.adopted=true end
+    function api.Pause(reason)
+        api.Paused=true;api.PauseReason=reason;session.retryAt=nil
+        panic();ctx.Status("Holding position · "..tostring(reason))
+    end
+    function api.ObserveProtected()
+        local canObserve=state.SafeMode and state.Running and not state.StopEverything and not state.ModeratorBlocking
+            and not state.SafeWhitelistResolving and not ctx.Travelling()
+        if not canObserve or not populationSafe()then session.protectedAt=nil;return end
+        local now=clock()
+        session.protectedAt=session.protectedAt or now
+        if now-session.protectedAt<.6 then return end
+        if search.Active then search.Stop(protectedMessage,"Safe")end
+        protected()
+    end
+    local function recover()
+        if populationSafe()then protected();return false end
+        panic()
+        if not(search.Retryable and type(search.Retry)=="function"and session.retries<3)then
+            ctx.Status("Holding position · "..tostring(api.PauseReason)..(session.retries>=3 and " · retries exhausted"or ""))
+            return true
+        end
+        local now=clock()
+        session.retryAt=session.retryAt or now+math.min(2,.5*2^session.retries)
+        if now<session.retryAt then
+            ctx.Status("Safe Mode retry "..(session.retries+1).."/3 in "..math.max(0,math.ceil(session.retryAt-now)).."s · "..tostring(api.PauseReason))
+            return true
+        end
+        session.retries=session.retries+1;session.retryAt=nil;api.Paused=false
+        session.adopted=search.Retry()==true
+        if not session.adopted then api.Pause(search.Status)end
+        return true
     end
     function api.Update()
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
-        if api.Paused then
-            local protected=ctx.CurrentFloor()==targetFloor()
-            for _,person in ipairs(ctx.Players()) do if not ctx.Allowed(person) then protected=false;break end end
-            if protected then api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
-            else
-                api.Seeking=true;if ctx.Panic then ctx.Panic() end
-                if search.Retryable and type(search.Retry)=="function"and retries<3 then
-                    retryAt=retryAt or clock()+math.min(2,.5*2^retries)
-                    if clock()>=retryAt then
-                        retries=retries+1;retryAt=nil
-                        api.Paused=false;started=search.Retry()==true
-                        if not started then api.Pause(search.Status)end
-                        return
-                    end
-                    ctx.Status("Safe Mode retry "..(retries+1).."/3 in "..math.max(0,math.ceil(retryAt-clock())).."s · "..tostring(api.PauseReason))
-                else ctx.Status("Holding position · "..tostring(api.PauseReason)..(retries>=3 and " · retries exhausted"or ""))end
-                return
-            end
-        end
+        if api.Paused and recover()then return end
         if state.SafeWhitelistResolving then
             api.Seeking=true
-            for _,person in ipairs(ctx.Players()) do
-                if not ctx.Allowed(person) then if ctx.Panic then ctx.Panic() end;break end
-            end
-            ctx.Status("Checking whitelist entries...");return
+            for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then panic();break end end
+            ctx.Status("Checking whitelist entries...")
+            return
         end
-        if ctx.CurrentFloor()~=targetFloor() then
-            api.Seeking=true
-            if ctx.Panic then ctx.Panic() end
-            if not ctx.Travelling() then ctx.ChangeFloor(targetFloor()) end
+        local floor=destination()
+        if ctx.CurrentFloor()~=floor then
+            panic()
+            if not ctx.Travelling()then ctx.ChangeFloor(floor)end
             return
         end
         if search.Active then
-            started=true;api.Seeking=true
-            if ctx.Panic then ctx.Panic() end
-            search.Update();return
+            session.adopted=true;panic();search.Update();return
         end
-        if started and search.Outcome~="Safe" then
-            started=false;api.Pause(search.Status);ctx.Save();return
+        if session.adopted and search.Outcome~="Safe"then
+            session.adopted=false;api.Pause(search.Status);ctx.Save();return
         end
-        started=false
-        local outsiders={}
-        for _,person in ipairs(ctx.Players()) do
-            if not ctx.Allowed(person) then outsiders[#outsiders+1]=person end
-        end
-        if #outsiders==0 then
-            api.Seeking=false
-            if ctx.ReleasePanic then ctx.ReleasePanic() end
-            ctx.Status("Protected · only you and whitelisted players")
-            return
-        end
-        api.Seeking=true
-        if ctx.Panic then ctx.Panic() end
-        started=search.Start()==true
-        if not started then api.Pause(search.Status);ctx.Save()
-        else search.Update()end
-    end
-    function api.Pause(reason)
-        api.Paused=true;api.PauseReason=reason;api.Seeking=true;retryAt=nil
-        if ctx.Panic then ctx.Panic() end
-        ctx.Status("Holding position · "..tostring(reason))
+        session.adopted=false
+        if populationSafe()then protected();return end
+        panic()
+        session.adopted=search.Start()==true
+        if session.adopted then search.Update()else api.Pause(search.Status);ctx.Save()end
     end
     function api.Joined(person)
-        if state.SafeMode and not ctx.Allowed(person) then
-            state.SafePendingUserId=person.UserId
-            if ctx.Panic then ctx.Panic() end
-        end
+        if state.SafeMode and not ctx.Allowed(person)then state.SafePendingUserId=person.UserId;panic()end
     end
     function api.Reset()
-        protectedSince=nil;started=false;api.Seeking=false;api.Paused=false;api.PauseReason=nil;retries=0;retryAt=nil
-        if search.Active then search.Stop("Safe Mode settings changed") end
-        if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic() end
+        session={adopted=false,retries=0}
+        api.Seeking=false;api.Paused=false;api.PauseReason=nil
+        if search.Active then search.Stop("Safe Mode settings changed")end
+        if not state.SafeMode and ctx.ReleasePanic then ctx.ReleasePanic()end
     end
-    function api.Destroy() api.Reset() end
+    function api.Destroy()api.Reset()end
     return api
 end
