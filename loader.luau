@@ -1,6 +1,7 @@
--- Fetch the current standalone entry; it installs its own rejoin source locally.
-local url="https://raw.githubusercontent.com/AttackerDestiny/balls/main/kill-aura.luau"
-local source=game:HttpGet(url.."?t="..tostring(os.time()))
-local run,reason=loadstring(source,"balls")
-assert(run,reason)
-return run()
+-- The public entry remains one executor-side Lua fetch and compilation.
+local address="https://raw.githubusercontent.com/AttackerDestiny/balls/main/kill-aura.luau"
+local bytes=game:HttpGet(address.."?t="..os.time())
+assert(type(bytes)=="string"and #bytes>0,"Feather source download was empty")
+local execute,diagnostic=loadstring(bytes,"Feather")
+assert(execute,diagnostic)
+return execute()

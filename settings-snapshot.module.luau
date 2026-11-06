@@ -3,7 +3,7 @@ return function(previous,userId)
     if type(previous)~="table"or previous.UserId~=userId then return nil end
     local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
-        "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
+        "AutomationResumeFeatures","AutomationRunId","BossOnly","NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
         "MultiSpotPending","MultiSpotSelected","OffsetProfiles","PerformanceBoosters","ProgressionBossCleared",
         "ProgressionBossClearedName","ProgressionComplete","ProgressionFloor","ProgressionRestore","ResumeFeatures",

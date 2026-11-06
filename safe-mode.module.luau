@@ -29,6 +29,7 @@ return function(ctx)
         panic();ctx.Status("Holding position · "..tostring(reason))
     end
     function api.ObserveProtected()
+        if ctx.Suspended and ctx.Suspended()then return end
         local canObserve=state.SafeMode and state.Running and not state.StopEverything and not state.ModeratorBlocking
             and not state.SafeWhitelistResolving and not ctx.Travelling()
         if not canObserve or not populationSafe()then session.protectedAt=nil;return end
@@ -57,6 +58,7 @@ return function(ctx)
         return true
     end
     function api.Update()
+        if ctx.Suspended and ctx.Suspended()then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
         if api.Paused and recover()then return end
@@ -85,6 +87,7 @@ return function(ctx)
         if session.adopted then search.Update()else api.Pause(search.Status);ctx.Save()end
     end
     function api.Joined(person)
+        if ctx.Suspended and ctx.Suspended()then return end
         if state.SafeMode and not ctx.Allowed(person)then state.SafePendingUserId=person.UserId;panic()end
     end
     function api.Reset()

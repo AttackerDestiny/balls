@@ -4,7 +4,7 @@ Feather is the Swordburst 2 Luau script distributed through this repository's st
 
 This guide describes **v2.0.0**. Saved settings can override fresh-install defaults.
 
-Version 2 reorganizes runtime assembly into `src/` and replaces enemy detection, frame scheduling, movement ownership, settings snapshots, and teardown. The game-specific feature modules and their regression coverage remain the compatibility layer for combat, credit, progression, trading, and safety. Existing loader URLs and account settings continue to work.
+Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
 The distributed entry is one standalone Luau file (Roblox's Lua). It uses the executor's Roblox/Lua capabilities only; Python, Node and MCP are development tools, not runtime dependencies.
 
@@ -19,6 +19,7 @@ The distributed entry is one standalone Luau file (Roblox's Lua). It uses the ex
 - [Misc and Player](#misc-and-player)
 - [Utility](#utility)
 - [Speacial](#speacial)
+- [Dodge](#dodge)
 - [Settings](#settings)
 - [Built-in background features](#built-in-background-features)
 - [Default Multi Spot arenas](#default-multi-spot-arenas)
@@ -55,7 +56,7 @@ Use the header's **Restart script** icon or re-execute the loader to update. Upd
 
 ## Interface
 
-Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Settings**.
+Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Dodge · Settings**.
 
 `Speacial` and `Perfromance Booster` retain their current UI spelling. The interface uses bundled **WindUI 1.6.66**, searchable dropdowns, and multi-select controls.
 
@@ -87,7 +88,7 @@ Runtime recovery cancels a main update that remains suspended for eight seconds 
 - **Refresh List:** refreshes destinations on the current floor.
 - Normal destination travel arrives at the source position **minus 20 studs in Y**. Automatic arena travel checks streaming and actual arrival.
 
-At startup, the floor runtime makes a one-time placement at the current character's X/Z and detected ground minus 20 studs, then lets the normal controllers take over. It waits a bounded time for a living character and uses a standing-height estimate if ground geometry is unavailable. The native login-place Play helper runs before floor-only behavior.
+At startup, the floor runtime holds the character at the current X/Z and detected ground minus 20 studs until a movement controller takes over. Walking or jumping manually releases the startup hold and returns the character above ground. It waits a bounded time for a living character and uses a standing-height estimate if ground geometry is unavailable. The native login-place Play helper runs before floor-only behavior.
 
 ### Safe Mode
 
@@ -96,12 +97,14 @@ At startup, the floor runtime makes a one-time placement at the current characte
 - Detects unlisted arrivals and pauses ordinary farming/movement during protection.
 - Uses native block confirmation before requesting another server.
 - Same-floor rejoining uses the place ID without a teleport-pad detour. Native floor changes still use their required pad staging.
-- After dispatching the rejoin, moves the waiting character 10,000 studs horizontally away at the same height. This changes the waiting position, not Roblox's loading time.
-- If an outsider remains and the search has not rejoined after eight seconds, the fallback confirms blocking, prepares recovery, then kicks and attempts rejoining. It does not intentionally kick through this fallback without confirmed blocking.
+- Startup still places the character 20 studs below ground once. Same-floor searches and outsider arrivals then block and dispatch rejoin from the current position, without pad staging or the old 10,000-stud escape.
+- After a confirmed-block rejoin request, the fallback checks on the next scheduler turn. If Roblox has not reported teleport starting, it re-verifies blocking and queued recovery before kicking the local account and retrying rejoin. The old eight-second wait is removed. Native teleport-start events cancel the fallback; retries remain bounded and use elapsed time rather than frame counts.
 - Uses bounded transient retries, **12-hop / 15-minute** search limits, and bounded same-server return recovery.
 - Continues monitoring after reaching a protected server. Status exposes failed/unverified operations.
 
 **Safe floor** supports the normal floor catalog, Atheon, and Atlantis, subject to native unlocks. Profile unlock changes refresh the available labels. During Account Progression, Safe Mode protects the current progression floor instead of travelling back to the manually selected floor.
+
+Native block confirmations run with the blocking modal's visuals transparent while its controls remain active. The script still requires Roblox's blocked-user acknowledgment before rejoining or moderator disconnects. Only the blocking modal is masked, and visual properties/listeners are restored after each attempt or shutdown. This approach was live-tested on the connected desktop executor; other executors still need device-specific verification.
 
 **Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 
@@ -127,14 +130,16 @@ Rotation uses the supplied **90s/45s respawn times** for the timed built-in aren
 
 Timers begin at the observed boss death, not at arrival or after clearing adds. Actual living spawns override predictions. An already-dead body or streaming disappearance does not fabricate a new kill. Timers belong to the current runtime/server; a rejoin does not import another server's spawn predictions. Untimed/custom spots receive periodic spawn checks instead of an invented timer.
 
-Higher-priority loaded enemies can interrupt lower-priority fights: main boss → mini-boss → regular mob. Same-rank fights remain locked. An active complete Credit Check group converges on a common loaded boss order, overriding conflicting locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must still be cleared before normal arena rotation leaves; boss priority can temporarily interrupt that clearing. With Boss Only ON, ordinary adds are excluded.
+While Multi Spot is ON, Auto Farm only targets encounters selected in Saved Spot, plus normal adds inside those selected arenas. Unselected bosses cannot interrupt, even if they have higher priority; deselecting an encounter releases its old target lock. Empty current-floor selections do not fall back to global farming. Custom saved spots accept nearby enemies. Account Progression retains its own boss restriction.
+
+Within the selected encounters, higher-priority loaded enemies can interrupt lower-priority fights: main boss → mini-boss → regular mob. Same-rank fights remain locked. An active complete Credit Check group converges on a common eligible boss order, overriding conflicting locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must still be cleared before normal arena rotation leaves; selected boss priority can temporarily interrupt that clearing. With Boss Only ON, ordinary adds are excluded.
 
 After five seconds without a target, empty arenas can return to their selected anchor. Travel failures automatically retry with increasing cooldowns capped at 60 seconds; success clears the backoff. Explicit protection/controller pauses are separate from travel-retry cooldowns.
 
 ### Friend Joiner
 
 - **Friend username:** Roblox username to join.
-- **Auto Join Friend:** uses the native friend-teleport route with paced attempts and stays when the entered user appears.
+- **Auto Join Friend:** uses the native friend-teleport route with paced attempts and stays when the entered user appears. Accounts use deterministic positions across the pad's local surface instead of stacking at its center, with character-footprint margins and spacing. Separate positions are limited by the pad's available area.
 - **Status:** `Friend Appeared` if the user is in the server, otherwise `Friend Unappeared`. This label reports presence rather than the complete teleport-error history.
 
 Offline users, full servers, locked floors, and native join permissions can prevent travel. Protection and Account Progression can pause it. When used with Safe Mode, the friend must also be allowed by the Safe Mode whitelist.
@@ -144,18 +149,17 @@ Offline users, full servers, locked floors, and native join permissions can prev
 | Feature | Behavior and fresh default |
 | --- | --- |
 | **Kill Aura** | Scripted normal damage against eligible nearby enemies. Damage-only: manual walking/jumping works without Auto Farm. OFF. |
-| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. Does not automatically enable Kill Aura. OFF. |
+| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. Uses the default Below position with adaptive clearance. Does not automatically enable Kill Aura. OFF. |
 | **Boss Only** | Restricts Auto Farm and arena-clear checks to main bosses/mini-bosses, ignoring regular mobs. OFF. |
 | **Credit Check** | Coordinates the user-specified 5% boss-credit target with a separate group. OFF. |
 | **Credit Whitelist** | Independent usernames/user IDs for credit coordination |
 | **Credit Status** | Shows missing accounts/counters, required damage, current plan, or finishing status |
 | **Auto Equip Best Gear** | Equips the best owned usable weapon, armor, and accessories. ON. |
-| **Atheon Dodge** | Bounded evasions based on supported native Atheon attack/hazard state, followed by returning to farm. OFF. |
 | **Swing animation** | Normal-speed visible swings, independent of damage-request pacing. ON. |
 
 ### Target selection and movement
 
-Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank fights stay locked. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
+Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank boss fights converge on the common selected-scope order. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
@@ -195,9 +199,13 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 ## Challenge Floors
 
-**Auto Dodge** reads supported native challenge-floor hazards and temporarily takes movement priority. Default ON, relevant only where supported hazards exist. It does not guarantee immunity, especially when low FPS delays observations.
+**The Between → Auto Create Room** creates a room and starts the challenge once the game confirms the selected access mode (Private, Friends, or Game Party) and difficulty (Normal, Hard, or Elite). A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
 
-**Transparent map** runs by default; its former toggle is removed. Characters, mobs, and identified hazards/effects are excluded from ordinary map treatment. Extended camera zoom is also applied while the runtime owns it.
+The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, Auto Create Room attempts another room from inside The Between.
+
+**Auto Dodge** holds at `(10, -19, -5)` during survival special waves and `(14, 73, 2)` during Blackout. Kill objectives keep combat active. If Blackout reports a kill objective, Auto Farm waits for an enemy within the white orb's light and fights from above it. Default ON.
+
+Extended camera zoom is applied while the runtime owns it.
 
 ## Auto Skill
 
@@ -232,6 +240,14 @@ Choices are filtered from usable native skills. Skill-effect suppression retains
 Inventory viewing does not transfer items or ownership. It requires compatible native/debug access and replicated profile data. Turning it off, losing the player, or cleanup restores the original reference when the runtime still owns the change.
 
 ## Utility
+
+### Atheon Unlock
+
+The **Main → Teleport → Spot** dropdown also includes **Portal · Atheon Portal** whenever `workspace.AtheonPortal` is present as a Part or Model. Select it for manual travel using the normal teleport depth; **Refresh List** updates its availability and position.
+
+Automatic portal travel supports Parts, Models, Attachments, and Folder-wrapped touch parts. It verifies arrival after one second and retries if the server corrected the character's position instead of treating a local movement call as confirmed arrival.
+
+**Atheon Unlock** (OFF by default) teleports to `workspace.AtheonPortal` when enabled, only if Atheon is still locked for the current account. Accounts with Atheon unlocked, including characters already on that floor, skip the portal. It waits for the portal and a living character, retries failed moves, and makes one placement per enable, character, or replacement portal rather than holding the character there. Farming and arena travel pause briefly after arrival. Safety, trading, travel, and dodge activity take precedence. The toggle is saved and included in config export/import; native unlock requirements still apply.
 
 ### Perfromance Booster
 
@@ -305,6 +321,10 @@ Trading pauses conflicting farming, attacks, gear changes, and crafting/dismantl
 
 Streaming loss, an unrelated miniboss, or an uncredited corpse is not a completed main-boss kill. The script cannot grant a floor unlock the server has not awarded. **F12 is the endpoint**; Atheon and Atlantis are not additional progression stages.
 
+## Dodge
+
+**Atheon Dodge** evades supported Atheon attacks and hazards, then returns to farming. OFF by default.
+
 ## Settings
 
 | Control | Behavior |
@@ -359,7 +379,9 @@ These are embedded **source positions**, before the normal Multi Spot **Y − 20
 | F12 | C-618 Uriotol, The Forgotten Hunter | `1685, 288, 3749` | 45s |
 | F12 | Warlord | `1031, 108, 5474` | 45s |
 | Atheon | Atheon arena | `840, 798, 336` | No supplied timer |
-| Atlantis | Leviathan | `15.89453125, 1320.01953125, -797.10546875` | No supplied timer |
+| Atlantis | Aeganatos, The Sunken Sovereign | `1500, 792, 127` | ~60s; server delays may increase it |
+| Atlantis | Leviathan | `12, 1313, -823` | 45s |
+| Atlantis | Kraken | `353, -319, 120` | 45s |
 
 DA/RA/KA share one selected arena but track observed member death clocks; the arena can become due at the earliest member respawn. Suspended Unborn's separate **farming** exception is `-2439, 70, 5389`. Custom spots do not automatically receive a guessed respawn duration.
 
@@ -486,3 +508,15 @@ Never use real account blocks, kicks, trades, crafting spends or floor progressi
 ### UI attribution
 
 WindUI comes from [Footagesus/WindUI](https://github.com/Footagesus/WindUI). Release **1.6.66** is bundled so queued recovery does not download a separate UI library. Its embedded banner differs from the release tag; provenance/checksum are in [vendor/README.md](vendor/README.md). See [vendor/WindUI-LICENSE.txt](vendor/WindUI-LICENSE.txt) for its MIT license. The library may still fetch normal visual assets.
+
+Auto Farm Position has been removed. Saved Above/Below selections are ignored; ordinary farming uses Below.
+
+Common boss choice is independent of credit-roster presence. Conflicting same-rank locks converge using the selected-scope order, and owned skill casts yield when that focus changes. Enemies must still be streamed to the client. Account Progression, selected-arena limits, native invulnerability and safety checks remain authoritative.
+
+Aeganatos Dodge (Dodge tab, default OFF) reads native OmegaWave FireWave and OceanGyzer CreateGyzer phase events for Aeganatos, The Sunken Sovereign. It plans outside the swept wave envelope or geyser footprint, expires records and yields to safety/trade/travel. Hidden VFX do not determine whether a phase is dangerous. Live cast coverage is limited to phases replicated to that client; this does not guarantee every attack is avoided.
+
+No Self Damage (enemy skills), in Dodge, defaults OFF. It intercepts the native EnemySkills.Base.DamageLocalPlayer reporting path used by client-side enemy-skill touch damage. It does not block unrelated requests or server-applied damage. OFF/cleanup restores the prior native handler when owned; retired wrappers forward normally.
+
+Aeganatos avoidance holds one validated shelter while the intended farming destination remains inside a live hazard, then hands movement back to Auto Farm. Offensive scripted casts are cancelled on dodge handoff so movement skills cannot drag the character back into danger. OceanGyzer windup and active phases are observed separately; the real phase replaces its speculative footprint. The local danger margin is conservative and does not imply knowledge of server hit validation.
+
+MCP live validation on VanguardSlasher confirmed Aeganatos health reached zero. The final recorded delayed-windup segment observed 44,909,576 → 0 boss HP in 193 seconds, zero player deaths, with NoSelfDamage OFF. This validates the observed attack cycle and Auto Farm handoff, not immunity to every server condition. Geyser onset can still cause damage.

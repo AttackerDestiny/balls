@@ -253,8 +253,10 @@ test("Atlantis featured floor appears in Safe Mode with native unlock status",fu
         local c=factory({Floors={{PlaceId=134019705603409,Name="Atlantis",Category="Featured"}},Unlocked=function()return unlocked end})
         local floor=c.FloorById[134019705603409]
         assert(#c.Floors==1 and floor.Label=="Atlantis"and floor.Unlocked==unlocked)
-        assert(#c.Spots==1 and c.Spots[1].Name=="Leviathan" and c.Spots[1].Kind=="Boss")
-        assert(c.Spots[1].Position.Y==1320.01953125 and c.Spots[1].EncounterNames.Leviathan)
+        assert(#c.Spots==3)
+        local leviathan=c.SpotById[tostring(134019705603409).."/Leviathan"]
+        assert(leviathan.Name=="Leviathan"and leviathan.Kind=="Boss")
+        assert(leviathan.Position.Y==1313 and leviathan.RespawnSeconds==45 and leviathan.EncounterNames.Leviathan)
     end
     Vector3=oldVector
 end)

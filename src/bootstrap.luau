@@ -1,5 +1,5 @@
 local embeddedSource=...
-local BUILD="2026-11-05.complete-source-v3.0.0"
+local BUILD="2026-11-06.complete-source-v3.0.0"
 local VERSION="3.0.0"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
@@ -135,13 +135,13 @@ local function numericPreference(key,fallback,minimum,maximum)
     if not number or number~=number or math.abs(number)==math.huge then number=fallback end
     return math.clamp(number,minimum,maximum)
 end
-local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3,TransparentMap=true}
+local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
 local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
-    AutoExplore=true,AutoDodge=true,AtheonDodge=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
+    AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
     AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false}
 for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
-local textDefaults={TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
+local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
 for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
 for _,key in ipairs({"TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
     local value=preference(key,{})
@@ -164,34 +164,69 @@ previousRuntime=nil
 runtimeOwner.Retire()
 local recoveryUntil=env.SB2FarmRecoveryUntil
 if type(recoveryUntil)=="number"and recoveryUntil>os.clock()then task.wait(math.min(3,recoveryUntil-os.clock()))end
-local placeBelow=(function()
+local releaseStartupHold
+if game.PlaceId~=78945654064532 then
+    local moveBelow=(function()
 -- BEGIN BUNDLED STARTUP BELOW
 -- END BUNDLED STARTUP BELOW
-end)()
-local ok,moved,reason=pcall(placeBelow,{Now=os.clock,Sleep=task.wait,Alive=startupCurrent,
-    Root=function()
-        local character=player.Character
-        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid and humanoid.Health>0 then return character:FindFirstChild("HumanoidRootPart")end
-    end,
-    Position=function(root)return root.Position end,
-    Surface=function(root,point)
-        local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
-        local excluded={root.Parent}
-        for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","MobSpawnEffects"})do
-            local object=workspace:FindFirstChild(name);if object then excluded[#excluded+1]=object end
-        end
-        params.FilterDescendantsInstances=excluded
-        local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
-        if hit then return hit.Position.Y end
-        local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
-        return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
-    end,
-    Move=function(root,x,y,z)
-        root.CFrame=CFrame.new(x,y,z)*root.CFrame.Rotation
-        root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
-    end})
-env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or(not moved and reason or nil)}
+    end)()
+    local ok,moved,reason=pcall(moveBelow,{Now=os.clock,Sleep=task.wait,
+        Alive=function()return env.SB2LoadToken==loadToken and runtimeOwner.Alive()end,
+        Root=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            return humanoid and humanoid.Health>0 and character:FindFirstChild("HumanoidRootPart")or nil
+        end,
+        Position=function(root)return root.Position end,
+        Surface=function(root,point)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+            local excluded={root.Parent}
+            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","MobSpawnEffects"})do
+                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            end
+            params.FilterDescendantsInstances=excluded
+            local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
+            if not hit then
+                hit=workspace:Raycast(point+Vector3.new(0,192,0),Vector3.new(0,-384,0),params)
+            end
+            if hit then return hit.Position.Y end
+            local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
+            return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
+        end,
+        Move=function(root,x,y,z,floor)
+            local character=root.Parent
+            local humanoid=character:FindFirstChildOfClass("Humanoid")
+            local destination=Vector3.new(x,y,z)
+            local standing=Vector3.new(x,math.max(root.Position.Y,floor+humanoid.HipHeight+root.Size.Y/2+.5),z)
+            local pin=Instance.new("Attachment");pin.Name="SB2StartupAttachment"
+            local hold=Instance.new("AlignPosition")
+            hold.Name="SB2StartupPosition";hold.Mode=Enum.PositionAlignmentMode.OneAttachment
+            hold.Attachment0=pin;hold.Position=destination;hold.ApplyAtCenterOfMass=true;hold.RigidityEnabled=true
+            local observers={};local released=false
+            local function release(restore)
+                if released then return end
+                released=true;releaseStartupHold=nil
+                for index=#observers,1,-1 do observers[index]:Disconnect();observers[index]=nil end
+                hold:Destroy();pin:Destroy()
+                if restore and root.Parent==character and player.Character==character and humanoid.Health>0
+                    and(root.Position-destination).Magnitude<8 then
+                    root.CFrame=CFrame.new(standing)*root.CFrame.Rotation;root.AssemblyLinearVelocity=Vector3.zero
+                end
+            end
+            releaseStartupHold=release
+            local function manualMotion()if humanoid.MoveDirection.Magnitude>.05 or humanoid.Jump then release(true)end end
+            for _,property in ipairs({"MoveDirection","Jump"})do observers[#observers+1]=humanoid:GetPropertyChangedSignal(property):Connect(manualMotion)end
+            observers[#observers+1]=player.CharacterRemoving:Connect(function(removing)if removing==character then release(false)end end)
+            observers[#observers+1]=runtimeOwner.Root.Destroying:Connect(function()release(true)end)
+            pin.Parent=root;hold.Parent=root
+            if(root.Position-destination).Magnitude>.01 then root.CFrame=CFrame.new(destination)*root.CFrame.Rotation end
+            root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+        end})
+    if not ok and releaseStartupHold then releaseStartupHold(true)end
+    env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
+else
+    env.SB2StartupBelowResult={Build=BUILD,Moved=false,Reason="The Between"}
+end
 if not startupCurrent()then return end
 local profile=ReplicatedStorage:WaitForChild("Profiles"):WaitForChild(player.Name)
 for _,name in ipairs({"Inventory","Locations"})do profile:WaitForChild(name)end

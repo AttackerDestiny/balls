@@ -66,6 +66,10 @@ local jobs={
     {"Skill",0,function()updateSkillAura()end},
     {"Combat",.03,function()return scan()end},
 }
+local frameOrder={}
+local function taskController(name,interval,callback)
+    workScheduler.Add(name,interval,callback)
+end
 for _,job in ipairs(jobs)do workScheduler.Add(job[1],job[2],job[3])end
 local function priorityOnly()
     if state.ModeratorBlocking or state.AutoJoinFriendHolding then
@@ -82,6 +86,7 @@ local function runFrame()
     local at=os.clock()
     workScheduler.Step("TradeHold",at);workScheduler.Step("AuraTouch",at)
     if state.StopEverything or priorityOnly()then return end
+    for _,name in ipairs(frameOrder)do if state.Running then workScheduler.Step(name,at)end end
     for index=3,#jobs do
         if not state.Running then return end
         local name=jobs[index][1]

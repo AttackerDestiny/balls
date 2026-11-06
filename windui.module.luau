@@ -3,8 +3,8 @@ return function(ctx)
     local state=ctx.State
     local api={Controls={},Tabs={},Ready=false,BackgroundReady=false,Visible=true}
     local lifetime={Closed=false,VisibilityApplied=false}
-    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Settings"}
-    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","sliders-horizontal"}
+    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
+    local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","shield","sliders-horizontal"}
     local projections={}
     local cadence={Next=0,Choices=0,Cursor=1,Tab=nil,Build=os.clock()}
     local memory=ctx.Memory or {Pruned=0,Update=function()end}
@@ -218,8 +218,13 @@ return function(ctx)
         for _,row in ipairs({{"Enabled","Kill Aura","SetEnabled"},{"AutoFarm","Auto Farm","SetAutoFarm"},{"BossOnly","Boss Only","SetBossOnly"},{"CreditCheck","Credit Check","SetCreditCheck"}})do toggle("Combat",row[1],row[2],row[3])end
         input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
         paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
-        for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AtheonDodge","Atheon Dodge","SetAtheonDodge"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
+        for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
         toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
+        section("Challenge Floors","BetweenSection","The Between")
+        toggle("Challenge Floors","AutoCreateBetween","Auto Create Room","SetAutoCreateBetween")
+        dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
+        dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
+        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create Room is off"end)
         section("Auto Skill","SkillAuraSection","Skill Aura");toggle("Auto Skill","SkillAura","Skill Aura","SetSkillAura")
         dropdown("Auto Skill","SelectedSkill","Skill",function()return {Options=state.SkillChoices or {},Value=state.SelectedSkill}end,function(name)if name and name~=state.SelectedSkill then action("SetSelectedSkill",name)end end)
         section("Auto Skill","MiscSkillSection","Misc Skill");toggle("Auto Skill","MiscSkillEnabled","Misc Skill","SetMiscSkillEnabled")
@@ -236,6 +241,7 @@ return function(ctx)
         button("Player","TeleportPlayer","TP to player",function()state.PlayerTools.Teleport()end)
         register("Player",{Kind="Toggle",Key="ViewingPlayer",Title="View player",Read=function()return state.ViewingPlayer==true end,Write=function(on)state.PlayerTools.SetViewing(on)end})
         register("Player",{Kind="Toggle",Key="ViewingPlayerInventory",Title="View player inventory",Read=function()return state.ViewingPlayerInventory==true end,Write=function(on)state.PlayerTools.SetInventoryVisible(on)end})
+        toggle("Utility","AtheonUnlock","Atheon Unlock","SetAtheonUnlock")
         section("Utility","PerformanceBoosterSection","Perfromance Booster")
         dropdown("Utility","PerformanceBoosters","Performance boosters",function()
             local values={};for _,name in ipairs(boostNames)do if state.PerformanceBoosters[name]then values[#values+1]=name end end
@@ -243,7 +249,7 @@ return function(ctx)
         end,function(values)
             local picked=selection(values)
             for _,name in ipairs(boostNames)do if (state.PerformanceBoosters[name]==true)~=(picked[name]==true)then action("SetPerformanceBoost",name,picked[name]==true)end end
-        end,true,"Delete map clears scenery, floors and terrain; rejoin to restore. Remove everything also stops animations and disables 3D rendering. UI and combat remain active.")
+        end,true)
         section("Utility","AutoDismantleSection","Auto Dismantle")
         local rarities={"Common","Uncommon","Rare"}
         dropdown("Utility","AutoDismantle","Auto Dismantle",function()
@@ -262,6 +268,9 @@ return function(ctx)
             return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
         end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
         toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        toggle("Dodge","NoSelfDamage","No Self Damage (enemy skills)","SetNoSelfDamage","Blocks the native client-reported enemy-skill DamageSelf path. Server-applied damage can still occur.")
+        toggle("Dodge","AeganatosDodge","Aeganatos Dodge","SetAeganatosDodge")
+        toggle("Dodge","AtheonDodge","Atheon Dodge","SetAtheonDodge")
         dropdown("Settings","Theme","Theme",function()
             local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
             return {Options=options,Value=state.Theme or "Dark"}

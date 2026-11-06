@@ -40,15 +40,15 @@ function state.SetUIVisible(requested)
     if requested and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
-local persistedFields={"AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
+local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
     "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
     "UnsafeOffsetProfiles","Threat","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion","SelectedMiscSkill",
-    "AutoExplore","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
+    "AutoExplore","AutoDodge","AtheonDodge","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
 local function settingsPayload()
-    local payload={Version=1,StopEverything=false,AutoOffset=true,PanelPosition={0,0,0,0}}
+    local payload={Version=1,StopEverything=false,PanelPosition={0,0,0,0}}
     for _,field in ipairs(persistedFields)do payload[field]=state[field]end
     payload.SafeFloorId=state.SharedSafeFloorId or state.SafeFloorId
     payload.ActiveTab=state.UI and state.UI.ActiveTab

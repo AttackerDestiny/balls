@@ -22,7 +22,7 @@ end
 function state.SetTeleportOffset(value)
     if type(value)~="number"or value~=value or math.abs(value)==math.huge then return end
     local sign=state.OffsetMode=="Above"and 1 or -1
-    local offset=sign*math.max(1,math.floor(math.abs(value)*10+.5)/10)
+    local offset=sign*math.clamp(math.floor(math.abs(value)*10+.5)/10,1,sign>0 and 200 or 60)
     if offsetInitialized and offset==state.TeleportOffset then return end
     offsetInitialized=true;state.TeleportOffset=offset
     teleportTarget=nil;lastTeleportPosition=nil;lastTeleportTime=0;nextMovementUpdate=0
@@ -186,14 +186,26 @@ local function attackRadiusFor(mob)
     if not data then return 20 end
     return state.AutoRanges and state.AutoRanges.Range("Kill",data)or math.min(120,math.max(data.Root.Size.X,data.Root.Size.Z)*.5+20)
 end
+local farmTween
+local farmTweenInfo=TweenInfo.new(0,Enum.EasingStyle.Linear)
+local function clearFarmTween()
+    if farmTween then farmTween:Cancel();farmTween:Destroy();farmTween=nil end
+end
+local function rootFrameAt(root,point)
+    local direction=root.CFrame.LookVector*Vector3.new(1,0,1)
+    if direction.Magnitude<.001 then direction=Vector3.new(0,0,-1)end
+    return CFrame.lookAt(point,point+direction.Unit,Vector3.yAxis)
+end
 local function pivotRoot(root,position)
-    local model=root.Parent
-    local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
-    if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1)end
-    local frame=CFrame.lookAt(position,position+facing.Unit,Vector3.yAxis)
-    local relative=root.CFrame:ToObjectSpace(model:GetPivot())
-    model:PivotTo(frame*relative)
+    clearFarmTween();if releaseStartupHold then releaseStartupHold(false)end
+    local character=root.Parent
+    character:PivotTo(rootFrameAt(root,position)*root.CFrame:ToObjectSpace(character:GetPivot()))
     root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+end
+local function tweenFarmRoot(root,position)
+    clearFarmTween();if releaseStartupHold then releaseStartupHold(false)end
+    root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+    farmTween=TweenService:Create(root,farmTweenInfo,{CFrame=rootFrameAt(root,position)});farmTween:Play()
 end
 stopMovement = function(message,keepPosition)
     local floated=state.ArenaFloat and state.ArenaFloat.Root
@@ -284,12 +296,26 @@ end
 bind(farmToggle.Activated,function()state.SetAutoFarm(not state.AutoFarm,"UI toggle")end)
 state.SetAutoFarm(false)
 refreshMobIndex()
+function state.SetBossOnly(on)
+    state.BossOnly=on==true;state.FarmTargetLock=nil;state.FollowTarget=nil;state.FarmPriorityScanAt=0;nextAcquisition=0;requestSave()
+end
+local selectedFarmSpot=(function()
+-- BEGIN BUNDLED SELECTED FARM SPOTS
+-- END BUNDLED SELECTED FARM SPOTS
+end)()
+function state.IsSelectedFarmMob(mob,data)
+    if not state.MultiSpot or state.AccountProgression then return true end
+    local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+    return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
+end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
+    if state.BlackoutTarget and mob~=state.BlackoutTarget then return nil end
     local rank=targetPriority.Rank(mob)
     if state.AutoFarm and state.BossOnly and rank>2 then return nil end
     if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
     local data=getMobData(mob)
+    if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
     if not data then return nil end
     local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
     if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
@@ -301,16 +327,13 @@ function state.IsFarmEnemyAlive()
     local target=state.FarmTargetLock or state.FollowTarget
     if not target or target.Parent~=refreshMobIndex()then return false end
     local data=getMobData(target)
+    if state.MultiSpot and not state.IsSelectedFarmMob(target,data)then return false end
     return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
 end
 function state.GetFarmPriorityTarget(now)
     if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
     local folder=refreshMobIndex()
     if not folder then return nil end
-    if state.CreditController and state.CreditCheck then
-        local shared=state.CreditController.FarmTarget(nil,trackedMobs,function(mob)return validMob(mob,folder)end,targetPriority.FarmLess)
-        if shared then return shared end
-    end
     local cached=state.FarmPriorityTarget
     if now<(state.FarmPriorityScanAt or 0)and (not cached or validMob(cached,folder))then return cached end
     state.FarmPriorityScanAt=now+.15
@@ -318,9 +341,7 @@ function state.GetFarmPriorityTarget(now)
     for mob in pairs(trackedMobs)do
         if targetPriority.Rank(mob)<=2 and validMob(mob,folder)and (not candidate or targetPriority.FarmLess(mob,candidate))then candidate=mob end
     end
-    local locked=state.IsFarmEnemyAlive()and (state.FarmTargetLock or state.FollowTarget)
-    if locked and targetPriority.Rank(locked)<=2 and (not candidate or targetPriority.Rank(locked)<=targetPriority.Rank(candidate))then candidate=locked end
-    if cached and cached.Parent==folder and targetPriority.Rank(cached)<=2 then
+    if cached and cached.Parent==folder and targetPriority.Rank(cached)<=2 and (not state.MultiSpot or state.IsSelectedFarmMob(cached))then
         local data=getMobData(cached)
         local living=not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
         if living and (not candidate or targetPriority.Rank(cached)<targetPriority.Rank(candidate))then candidate=cached end
@@ -350,6 +371,7 @@ local function clearStaleFarmControllers(root)
     for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
+    if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
     if movementRoot==root and positionAlign and positionAlign.Parent then return end
     clearStaleFarmControllers(root)
@@ -454,11 +476,52 @@ do
         Position=function(boss)local root=boss:FindFirstChild("HumanoidRootPart")or boss.PrimaryPart;return root and root.Position end,
         Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
 end
+do
+    local factory=(function()
+-- BEGIN BUNDLED AEGANATOS DODGE
+-- END BUNDLED AEGANATOS DODGE
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local catalog=enemy and enemy:FindFirstChild("Skills")
+    local floors=catalog and catalog:FindFirstChild("Floors")
+    local ocean=floors and floors:FindFirstChild("Ocean Floor")
+    local boss=ocean and ocean:FindFirstChild("Aeganatos, The Sunken Sovereign")
+    local wave=boss and boss:FindFirstChild("OmegaWave")
+    local template=wave and wave:FindFirstChild("Wave")
+    local plane=template and template:FindFirstChild("Plane")
+    local replicate=ReplicatedStorage:FindFirstChild("ReplicateSkill")
+    state.AeganatosDodgeController=factory({State=state,Replicate=replicate and replicate.OnClientEvent,
+        WaveSize=plane and plane.Size or Vector3.new(96,38,101),GyzerRadius=145,
+        PlayerPosition=function()local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart");return root and root.Position end,
+        IsBoss=function(mob)return typeof(mob)=="Instance"and mob.Name=="Aeganatos, The Sunken Sovereign"end,
+        Frame=function(mob)local root=mob:FindFirstChild("HumanoidRootPart");return root and root.CFrame end,
+        Valid=function(point)return point.Y>workspace.FallenPartsDestroyHeight+35 and point.Magnitude<1000000 end})
+    function state.SetAeganatosDodge(value)
+        state.AeganatosDodge=value==true
+        if not value then state.AeganatosDodgeController.Reset()end
+        requestSave()
+    end
+end
+do
+    local create=(function()
+-- BEGIN BUNDLED SELF DAMAGE PROTECTION
+-- END BUNDLED SELF DAMAGE PROTECTION
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local base=enemy and enemy:FindFirstChild("Base")
+    state.SelfDamageProtection=create({State=state,Native=base and require(base)or {}})
+    function state.SetNoSelfDamage(value)
+        local ok=state.SelfDamageProtection.Set(value)
+        if ok then requestSave()end
+        return ok
+    end
+    state.SetNoSelfDamage(state.NoSelfDamage)
+end
 local waveDodge=(function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
-end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,
-    Hold=function(point)
+end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,Mobs=trackedMobs,MobData=getMobData,
+    Hold=function(point,farmIdle)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
         local human=character and character:FindFirstChildOfClass("Humanoid")
@@ -466,7 +529,10 @@ end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeContr
         if movementRoot and movementRoot~=root then stopMovement(nil,true)end
         ensureMovementController(character,root,human,point)
         positionAlign.Enabled=true;orientationAlign.Enabled=true;positionAlign.Position=point
-        if (root.Position-point).Magnitude>1.25 then pivotRoot(root,point);state.TeleportsSent+=1 end
+        if (root.Position-point).Magnitude>1.25 then
+            if farmIdle and state.AutoFarm then tweenFarmRoot(root,point)else pivotRoot(root,point)end
+            state.TeleportsSent+=1
+        end
     end,
     Release=function()
         teleportTarget=nil;correctionTarget=nil;correctionStrikes=0;nextMovementUpdate=0;nextAcquisition=0
@@ -495,7 +561,6 @@ state.SetAutoDodge(restore.AutoDodge)
 do
     local savedZoom=player.CameraMaxZoomDistance
     local restoringZoom=false
-    local original={}
     local roots={}
     local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
     local function zoom()
@@ -512,83 +577,7 @@ do
         for _,root in pairs(roots)do if part:IsDescendantOf(root)then return false end end
         return not waveDodge.IsHazardPart(part)
     end
-    function state.ExcludeMapPart(part)
-        local before=original[part]
-        if before==nil then return end
-        original[part]=nil;part.LocalTransparencyModifier=before
-    end
-    local function applyPart(part)
-        if not mapPart(part)then return end
-        if state.TransparentMap and not state.StopEverything then
-            if original[part]==nil then
-                local value=part.LocalTransparencyModifier
-                original[part]=math.abs(value-.7)<.0001 and 0 or value
-            end
-            part.LocalTransparencyModifier=.7
-        else state.ExcludeMapPart(part)end
-    end
-    local scanGeneration=0
-    function state.SetTransparentMap(enabled)
-        if enabled==true and state.StopEverything then return false end
-        state.TransparentMap=enabled==true;scanGeneration+=1
-        local token=scanGeneration
-        if state.TransparentMap then
-            task.defer(function()
-                local slice=os.clock()
-                for _,part in ipairs(workspace:QueryDescendants("BasePart"))do
-                    if token~=scanGeneration or not state.Running then return end
-                    if part.Parent then pcall(applyPart,part)end
-                    if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
-                end
-            end)
-        else
-            for part,value in pairs(original)do
-                original[part]=nil
-                if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
-            end
-        end
-        requestSave();return true
-    end
-    local pendingParts,queuedParts=setmetatable({}, {__mode="v"}),setmetatable({}, {__mode="k"})
-    local pendingHead,pendingTail=1,0
-    local streamWorker=false
-    bind(workspace.DescendantAdded,function(part)
-        if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
-        if pendingTail-pendingHead>=8192 then return end
-        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=pendingTail
-        if streamWorker then return end
-        streamWorker=true
-        task.defer(function()
-            while state.Running and not restoringZoom and pendingHead<=pendingTail do
-                local count=0
-                local expires=os.clock()+.001
-                while pendingHead<=pendingTail and count<48 and os.clock()<expires do
-                    local current=pendingParts[pendingHead]
-                    pendingParts[pendingHead]=nil;pendingHead+=1;count+=1
-                    if current then
-                        queuedParts[current]=nil
-                        if current.Parent and state.TransparentMap then pcall(applyPart,current)end
-                    end
-                end
-                task.wait()
-            end
-            table.clear(pendingParts);table.clear(queuedParts);pendingHead=1;pendingTail=0;streamWorker=false
-        end)
-    end)
-    bind(workspace.DescendantRemoving,function(part)
-        local slot=queuedParts[part]
-        if slot then pendingParts[slot]=nil;queuedParts[part]=nil end
-        if original[part]~=nil then pcall(state.ExcludeMapPart,part)end
-    end)
-    function state.RestoreWorldVisuals()
-        scanGeneration+=1;restoringZoom=true
-        player.CameraMaxZoomDistance=savedZoom
-        for part,value in pairs(original)do
-            original[part]=nil
-            if part.Parent then pcall(function()part.LocalTransparencyModifier=value end)end
-        end
-        table.clear(pendingParts);table.clear(queuedParts)
-    end
+    function state.RestoreWorldVisuals()restoringZoom=true;player.CameraMaxZoomDistance=savedZoom end
     local makeDeletion=(function()
 -- BEGIN BUNDLED MAP DELETION
 -- END BUNDLED MAP DELETION
@@ -603,7 +592,6 @@ do
     local all=state.PerformanceBoosters["Remove everything"]==true
     state.MapDeletion.Set(all or state.PerformanceBoosters["Delete map"]==true)
     state.AnimationRemoval.Set(all or state.PerformanceBoosters["Remove animations"]==true)
-    state.SetTransparentMap(restore.TransparentMap)
 end
 
 do
@@ -617,7 +605,7 @@ do
     end)()
     state.VisualPendingQueue=makeQueue(8192)
     state.SkillVisuals=create({Queue=state.VisualPendingQueue,
-        State=state,Services=services,Actions=Actions,SkillState=Skills,ExcludeMapPart=state.ExcludeMapPart,
+        State=state,Services=services,Actions=Actions,SkillState=Skills,
         DynamicHazards=function() return waveDodge.Event=="Lava" or waveDodge.Event=="Tempest" or (state.BossDodge and state.BossDodge.HasHazards) end,
         Preserve=function(instance)
             local node=instance
@@ -781,6 +769,9 @@ local function discoverDestinations(onlyMobs)
         if marker and stage:lower():find("rift",1,true)then rememberDestination("wave:rift","Rift boss spawn","Boss",marker.Position)end
     end
     if not onlyMobs then
+    local portal=workspace:FindFirstChild("AtheonPortal")
+    if portal and (portal:IsA("BasePart")or portal:IsA("Model"))then rememberDestination("map:AtheonPortal","Atheon Portal","Portal",portal:GetPivot().Position)
+    elseif destinations["map:AtheonPortal"]then destinations["map:AtheonPortal"]=nil;destinationsDirty=true end
         local containers={workspace}
         for _,name in ipairs({"Models","OptimizedGame"})do local folder=workspace:FindFirstChild(name);if folder then containers[#containers+1]=folder end end
         local kinds={bossroom="Boss",bossarena="Boss",bossspawn="Boss",aspawnboss="Boss",minibossroom="Mini boss",minibossarena="Mini boss",
@@ -1037,6 +1028,7 @@ local function updateMovement(now)
     if now<nextMovementUpdate then return end
     nextMovementUpdate=now+.08
     if not state.MovementOwnership.CanFarm(now)then return end
+    if state.BlackoutTarget then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
@@ -1050,7 +1042,21 @@ local function updateMovement(now)
     local mobs=refreshMobIndex()
     if not root or not humanoid or humanoid.Health<=0 or (health and health.Value<=0)or not mobs then state.FollowTarget=nil;stopMovement("Waiting for a living character");return end
     if movementRoot and movementRoot~=root then stopMovement();return end
-    if (state.SkillCastRunning or Skills.usingSkill~="none")and not(state.SkillCastRunning and state.SuppressSkillMotion)then
+    local previous=state.FarmTargetLock or state.FollowTarget
+    local previousData=previous and getMobData(previous)
+    local targetDefeated=previousData and (previousData.Health.Value<=0 or previousData.HitLives and previousData.HitLives.Value<=0)
+    if not state.AccountProgression then
+        local common=state.GetFarmPriorityTarget(now)
+        if common and common~=previous and (not previous or targetPriority.FarmLess(common,previous))then
+            if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Synchronizing farm target")end
+            state.FarmTargetLock=common;state.FollowTarget=common;state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob;nextAcquisition=0
+        end
+    end
+    if state.SkillCastRunning then
+        if not targetDefeated then return end
+        state.CancelSkillAura("Farm target defeated")
+    end
+    if Skills.usingSkill~="none"then
         if positionAlign then positionAlign.Enabled=false end
         if orientationAlign then orientationAlign.Enabled=false end
         state.SkillMovementSuspended=true;movementStatus("Casting "..tostring(state.SelectedSkill));return
@@ -1063,9 +1069,11 @@ local function updateMovement(now)
     local targetRoot=validMob(state.FollowTarget,mobs)
     if targetRoot and (targetRoot.Position-root.Position).Magnitude>state.FarmRange+math.abs(state.TeleportOffset)+4 then targetRoot=nil end
     -- BEGIN TEST FARM SELECTION
-    if now>=nextAcquisition and (not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
+    if targetDefeated then nextAcquisition=0 end
+    if now>=nextAcquisition and (targetDefeated or not state.FarmCoordination or state.FarmCoordination.Ready("target"))then
         nextAcquisition=now+.15
         local locked=state.FarmTargetLock
+        if locked and state.MultiSpot and not state.IsSelectedFarmMob(locked)then locked=nil end
         local scopeMatches=state.FarmLockArena==state.MultiSpotAnchor and state.FarmLockProgression==state.ProgressionBossMob
         if not scopeMatches or not locked or locked.Parent~=mobs then locked=nil
         else
@@ -1076,7 +1084,7 @@ local function updateMovement(now)
         if not state.AccountProgression and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
         if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
             local higher=state.GetFarmPriorityTarget(now)
-            if higher and targetPriority.Rank(higher)<targetPriority.Rank(locked)then locked=higher end
+            if higher and targetPriority.FarmLess(higher,locked)then locked=higher end
         end
         if not locked then
             state.TargetScans+=1
@@ -1109,7 +1117,7 @@ local function updateMovement(now)
     state.MultiSpotEmptySince=nil;targetMissingSince=nil;state.IdleBelowMap=false;state.Exploring=false;state.LastExploreDestination=nil
     if correctionTarget~=state.FollowTarget then correctionTarget=state.FollowTarget;correctionStrikes=0 end
     -- BEGIN TEST MOVEMENT BUDGET
-    if state.FarmCoordination and not state.DodgeReturnPending and not state.FarmCoordination.Ready("move")then return end
+    if state.FarmCoordination and not state.DodgeReturnPending and not targetDefeated and not state.FarmCoordination.Ready("move")then return end
     local autoOffset=state.ResolveAutoOffset(state.FollowTarget)
     if not autoOffset or not state.AutoFarm or state.TravelBusy then return end
     -- END TEST MOVEMENT BUDGET
@@ -1134,7 +1142,7 @@ local function updateMovement(now)
     positionAlign.Position=destination;positionAlign.Enabled=true;orientationAlign.Enabled=true
     local changed=teleportTarget~=current
     if changed or (now-lastTeleportTime>=state.TeleportInterval and (destination-root.Position).Magnitude>3.5)then
-        pivotRoot(root,destination);teleportTarget=current;lastTeleportTime=now;lastTeleportPosition=destination;state.TeleportsSent+=1
+        tweenFarmRoot(root,destination);teleportTarget=current;lastTeleportTime=now;lastTeleportPosition=destination;state.TeleportsSent+=1
         if changed then state.OffsetGraceUntil=now+.35 end
         if state.DodgeReturnPending then state.LastDodgeReturnDelay=os.clock()-(state.LastDodgeFinishedAt or os.clock());state.DodgeReturnPending=false end
     end

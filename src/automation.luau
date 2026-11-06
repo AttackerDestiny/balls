@@ -268,6 +268,10 @@ end
 
 
 
+local padSlot=(function()
+-- BEGIN BUNDLED PAD SLOT
+-- END BUNDLED PAD SLOT
+end)()
 function state.PanicToSpawn(inPlace)
     local holdHere=inPlace==true
     if state.SafePanicHoldHere~=holdHere then state.SafePanicHerePosition=nil;state.SafePanicHereRoot=nil end
@@ -288,7 +292,7 @@ function state.PanicToSpawn(inPlace)
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local humanoid=character and character:FindFirstChildOfClass("Humanoid")
     if not root or not humanoid or humanoid.Health<=0 then return false end
-    local position=state.AutomationTeleporting and not state.ModeratorBlocking and state.SafeRejoinAway or nil
+    local position
     if not position and holdHere then
         if state.SafePanicHereRoot~=root or not state.SafePanicHerePosition then
             state.SafePanicHereRoot=root;state.SafePanicHerePosition=root.Position
@@ -306,7 +310,13 @@ function state.PanicToSpawn(inPlace)
             end
             state.SafePanicSpawnPart=pad
         end
-        if pad then position=pad.Position+Vector3.new(0,pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5,0)
+        if pad then
+            local height=pad.Size.Y/2+humanoid.HipHeight+root.Size.Y/2+.5
+            if state.AutoJoinFriendHolding then
+                local ids={};for _,person in ipairs(Players:GetPlayers())do ids[#ids+1]=person.UserId end
+                local x,z=padSlot(player.UserId,ids,pad.Size.X,pad.Size.Z,root.Size.X,root.Size.Z)
+                position=pad.CFrame:PointToWorldSpace(Vector3.new(x,height,z))
+            else position=pad.Position+Vector3.new(0,height,0)end
         elseif destinations.spawn then position=destinations.spawn.Position+Vector3.new(0,4,0)end
     end
     if not position then return false end
@@ -318,16 +328,6 @@ function state.PanicToSpawn(inPlace)
     return true
 end
 function state.PanicInPlace()return state.PanicToSpawn(true)end
-function state.EscapeSafeRejoin()
-    if not state.SafeRejoinRequested or not state.AutomationTeleporting or state.StopEverything or state.ModeratorBlocking then return false end
-    if not state.SafeRejoinAway then
-        local c=player.Character;local root=c and c:FindFirstChild("HumanoidRootPart")
-        local origin=state.SafePanicPosition or (root and root.Position)
-        if not origin then return false end
-        state.SafeRejoinAway=origin+Vector3.new(10000,0,0)
-    end
-    return state.PanicToSpawn(state.SafePanicHoldHere==true)
-end
 function state.ReleaseSafePanic()
     state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil
     if not state.SafeModePanic then return end
@@ -369,6 +369,10 @@ do
 -- BEGIN BUNDLED BLOCK CONFIRM
 -- END BUNDLED BLOCK CONFIRM
     end)()
+    local makeBlockMask=(function()
+-- BEGIN BUNDLED BLOCK UI MASK
+-- END BUNDLED BLOCK UI MASK
+    end)()
     local makeFriend=(function()
 -- BEGIN BUNDLED AUTO JOIN FRIEND
 -- END BUNDLED AUTO JOIN FRIEND
@@ -377,7 +381,7 @@ do
 -- BEGIN BUNDLED SAFE KICK FALLBACK
 -- END BUNDLED SAFE KICK FALLBACK
     end)()
-    attach({MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end

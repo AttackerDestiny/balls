@@ -11,7 +11,10 @@ return function(source)
         {5287433115,"Miniboss",5129,1614,2104,45},{5287433115,"Boss",5187,2343,6239,90},
         {6144637080,"Limor the Devourer",450,-337,7912,45},{6144637080,"Radioactive Experiment",-3754,167,3570,90},
         {6144637080,"Suspended Unborn",-2439,60,5389,90},{6144637080,"C-618 Uriotol, The Forgotten Hunter",1685,288,3749,45},
-        {6144637080,"Warlord",1031,108,5474,45}}
+        {6144637080,"Warlord",1031,108,5474,45},
+        {134019705603409,"Aeganatos, The Sunken Sovereign",1500,792,127,60},
+        {134019705603409,"Leviathan",12,1313,-823,45},
+        {134019705603409,"Kraken",353,-319,120,45}}
     local floors,seen={},{}
     for _,row in ipairs(expected)do if not seen[row[1]]then seen[row[1]]=true;floors[#floors+1]={PlaceId=row[1],Name="Floor"}end end
     local fn=assert(loadstring(source));setfenv(fn,setmetatable({Vector3={new=function(x,y,z)return {X=x,Y=y,Z=z}end}},{__index=getfenv()}))
@@ -26,5 +29,5 @@ return function(source)
         assert(spot.Position.Y==row[4]and spot.DestinationId=="source:"..row[2],"Discovery cannot move a supplied arena")
     end
     assert(#catalog.Spots==#expected,"Native aliases cannot duplicate supplied defaults")
-    print("PASS All 22 supplied arenas: exact XYZ, respawn metadata, stable IDs, grouped arena and locked discoveries")
+    print("PASS All 25 supplied arenas: exact XYZ, respawn metadata, stable IDs, grouped arena and locked discoveries")
 end

@@ -1,6 +1,7 @@
 -- Native Roblox/executor boundary for safe search, floor travel and arena rotation.
 return function(ctx)
     local state,player,Players=ctx.State,ctx.Player,ctx.Players
+    local inBetween=game.PlaceId==78945654064532
     local farmClock=state.FarmClock or os.clock
     state.SafeWhitelistText=type(state.SafeWhitelistText)=="string"and state.SafeWhitelistText or ""
     state.SafeWhitelistIds=type(state.SafeWhitelistIds)=="table"and state.SafeWhitelistIds or {}
@@ -196,6 +197,8 @@ return function(ctx)
             Settle=function()return 0 end})
     end
     local blockBusy=false
+    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender})
+    state.BlockDialogMask=blockMask
     local function performBlock(target,active)
         local expires=os.clock()+10
         repeat
@@ -205,7 +208,16 @@ return function(ctx)
             task.wait(.04)
         until false
         blockBusy=true
-        local sent,result=pcall(block,target,active)
+        local sent,result=pcall(function()
+            if blockMask then blockMask.Begin()end
+            return block(target,active)
+        end)
+        if blockMask then
+            if not sent or result~=true then pcall(function()local _,cancel=findPrompt(target);if cancel then click(cancel)end end)end
+            task.wait(.1)
+            local restored,reason=pcall(blockMask.End)
+            if not restored then state.LastBlockMaskError=tostring(reason)end
+        end
         blockBusy=false
         if not sent then error(result)end
         return result==true
@@ -232,7 +244,7 @@ while not player do task.wait();player=Players.LocalPlayer end
 local HttpService=game:GetService("HttpService")
 local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
 if valid and type(settings)=="table"and settings.AutomationRunId==%q
-    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression)and game.GameId==%s then
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween)and game.GameId==%s then
     local active=getgenv().SB2KillAura
     if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
@@ -251,11 +263,6 @@ end
     end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
-    end
-    local function escapeAfterRejoin()
-        local canMove=not state.SafeRejoinAway and state.SafeRejoinRequested and state.AutomationTeleporting
-            and state.Running and not state.StopEverything and not state.ModeratorBlocking
-        if canMove and state.EscapeSafeRejoin then state.EscapeSafeRejoin()end
     end
     local function fail(reason)
         clearRejoinAway();state.AutomationTeleporting=false
@@ -296,6 +303,7 @@ end
         if not sent then fail(reason)end
         return sent,state.LastFloorTravelError
     end
+    local kickFallback
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
         Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
@@ -314,11 +322,11 @@ end
         Queue=function()state.QueueAutomation()end,
         Hop=function()
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40;state.SafeRejoinRequested=true
-            local dispatch={};state.SafeRejoinDispatch=dispatch
-            task.defer(function()if state.SafeRejoinDispatch==dispatch then escapeAfterRejoin()end end)
+            state.ServerTeleportStarted=false
+            local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
+            if kickFallback and ticket then kickFallback.Requested(ticket.LastBlockedUserId)end
             local ok,reason=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not ok then clearRejoinAway();error(reason)end
-            escapeAfterRejoin()
         end,
         Notify=function(search)
             state.SoloServerStatus=search.Status
@@ -327,6 +335,7 @@ end
         end})
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
+        Suspended=function()return inBetween end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
         Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,
@@ -345,6 +354,7 @@ end
         end,
         Resume=function()state.MultiSpotPriorityActive=false end,CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
+            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false end
             if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
             if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
             local character=player.Character
@@ -402,7 +412,7 @@ end
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id)then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id
         state.SaveNow();refresh()
-        if state.SafeMode then state.PanicToSpawn();task.defer(function()workerIdentity();safe.Update();refresh()end)end
+        if state.SafeMode and not inBetween then state.PanicToSpawn();task.defer(function()workerIdentity();safe.Update();refresh()end)end
         return true
     end
     local whitelistGeneration=0
@@ -532,7 +542,11 @@ end
         task.defer(function()workerIdentity();if state.Running then safe.Update();refresh()end end)
     end)
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,reason)
-        if who==player then state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)end
+        if who==player then
+            local requested=state.SafeRejoinRequested
+            state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
+            if requested and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     local function fallbackTicket()
         local ticket=api.Ticket
@@ -547,11 +561,11 @@ end
         end
         return ticket
     end
-    local kickFallback
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
             Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
+            Started=function()return state.ServerTeleportStarted==true end,
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true;api.Destroy(true)
                 if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
@@ -562,7 +576,7 @@ end
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
                 assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
-                ticket.Active=true;ticket.Hops=ticket.Hops+1;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
+                ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
             end,
             Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end,
@@ -573,9 +587,12 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            escapeAfterRejoin()
-            if state.SafeMode or state.MultiSpot or state.AccountProgression then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
-        elseif stage==Enum.TeleportState.Failed then clearRejoinAway();state.AutomationTeleporting=false end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
+        elseif stage==Enum.TeleportState.Failed then
+            local requested=state.SafeRejoinRequested
+            clearRejoinAway();state.AutomationTeleporting=false
+            if requested and kickFallback then kickFallback.TeleportFailed()end
+        end
     end)
     state.AutomationLoadedJob=game.JobId
     task.spawn(function()
@@ -584,7 +601,7 @@ end
         if resumeFeatures then restoreFeatures(resumeFeatures)end
         local ok,resume=pcall(readTicket)
         if queuedResume then ok,resume=true,queuedResume end
-        local resumeAllowed=not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId)
+        local resumeAllowed=not inBetween and not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId)
         if resumeAllowed and ok and type(resume)=="table"and resume.Active==true and resume.PlaceId==game.PlaceId then
             api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end
         end
@@ -592,6 +609,7 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
+                if inBetween then return end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
                 friend.Update(os.clock());safe.Update()
                 if state.AccountProgression then

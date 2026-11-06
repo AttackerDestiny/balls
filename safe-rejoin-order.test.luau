@@ -1,10 +1,9 @@
 return function(helpers,hop)
     local function fixture(fail,yields)
-        local state={Running=true}
-        local order,queue={},{}
-        state.EscapeSafeRejoin=function()order[#order+1]="away";state.SafeRejoinAway={}end
+        local state={Running=true,SoloServerSearch={Ticket={LastBlockedUserId=2}}}
+        local order={}
         local env=setmetatable({state=state,os={clock=function()return 0 end},game={PlaceId=10},player={},
-            task={defer=function(fn)queue[#queue+1]=fn end},
+            kickFallback={Requested=function(id)assert(id==2);order[#order+1]="arm"end},
             TeleportService={Teleport=function()
                 order[#order+1]="request"
                 if yields then coroutine.yield()end
@@ -12,19 +11,15 @@ return function(helpers,hop)
                 order[#order+1]="returned"
             end}},{__index=getfenv()})
         local chunk=assert(loadstring(helpers.."\nlocal ctx={"..hop.."}\nreturn ctx.Hop"));setfenv(chunk,env)
-        local run=chunk()
-        local function flush()for _,fn in ipairs(queue)do fn()end;table.clear(queue)end
-        return state,order,run,flush
+        return state,order,chunk()
     end
-    local state,order,run,flush=fixture(false);assert(pcall(run));flush()
-    assert(table.concat(order,",")=="request,returned,away"and state.SafeRejoinRequested)
-    state,order,run,flush=fixture(true);assert(not pcall(run));flush()
-    assert(#order==1 and order[1]=="request"and not state.SafeRejoinRequested and state.SafeRejoinAway==nil)
-    state,order,run,flush=fixture(false,true)
-    local thread=coroutine.create(run);assert(coroutine.resume(thread));assert(#order==1)
-    flush();assert(table.concat(order,",")=="request,away","Move on first scheduler turn even while native Teleport is yielding")
-    assert(coroutine.resume(thread));assert(table.concat(order,",")=="request,away,returned")
-    state,order,run,flush=fixture(false,true);thread=coroutine.create(run);assert(coroutine.resume(thread))
-    state.SafeRejoinDispatch={};flush();assert(#order==1,"Stale dispatch cannot move the character")
-    print("PASS Rejoin dispatch: request-before-move, escape during yield, no duplicate move, refusal cleanup, stale callback rejection")
+    local state,order,run=fixture(false);assert(pcall(run))
+    assert(table.concat(order,",")=="arm,request,returned"and state.SafeRejoinRequested)
+    state,order,run=fixture(true);assert(not pcall(run))
+    assert(table.concat(order,",")=="arm,request"and not state.SafeRejoinRequested)
+    state,order,run=fixture(false,true)
+    local thread=coroutine.create(run);assert(coroutine.resume(thread))
+    assert(table.concat(order,",")=="arm,request","Fallback is ready even if native Teleport yields")
+    assert(coroutine.resume(thread));assert(table.concat(order,",")=="arm,request,returned")
+    print("PASS Direct rejoin: fallback armed before yielding request, confirmed target identity, refusal cleanup and no movement")
 end

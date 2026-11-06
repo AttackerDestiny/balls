@@ -2,7 +2,7 @@ local swingThread
 local swingTrack
 local swingClock={Due=0,Index=0}
 local function swingAllowed()
-    return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations
+    return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations and not state.SkillCastRunning
 end
 local function stopSword(force)
     if not force and swingAllowed()then return end
@@ -138,11 +138,6 @@ local function updateSkillAura()
         RecoveryDeadline=now+math.max(8,(state.SkillActivation.Window(name)or 4)+3)}
     state.ActiveSkillCast=cast;state.AttackingTarget=target;trackHealth(target)
     state.SkillExecution="Source window";state.SkillStatus="Casting "..name
-    local facing=(targetRoot.Position-root.Position)*Vector3.new(1,0,1)
-    if facing.Magnitude>.5 then
-        root.CFrame=CFrame.lookAt(root.Position,root.Position+facing.Unit,Vector3.yAxis)
-        if orientationAlign then orientationAlign.CFrame=root.CFrame.Rotation end
-    end
     local function current()
         if cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
         if not(state.Running and state.SkillAura and weapons.Ready and weapons.Version==cast.Version and state.SelectedSkill==name)then return false end
@@ -220,9 +215,17 @@ local function updateSkillAura()
         end
         local ok,reason=pcall(function()
             if state.FinishSkillObservation then state.FinishSkillObservation()end
+            if not current()then return end
+            local aimRoot=validMob(target,mobs)
+            local currentData=aimRoot and getMobData(target)
+            if not currentData or attackDeltaFor(currentData,root).Magnitude>state.AutoRanges.Range("Skill",currentData,name)then burst.Status="Target moved before skill activation";return end
+            local direction=aimRoot.Position-root.Position
+            if not state.SkillActivation.Profile(name)then direction=direction*Vector3.new(1,0,1)end
+            stopSword(true)
+            if state.AutoFarm and movementRoot==root and positionAlign and positionAlign.Enabled then positionAlign.Position=root.Position end
             local ack,message,lease=state.SkillActivation.Begin(name,definition,entity,root,current,function(window)
                 if current()then beginWindow(window)end
-            end,state.SkillActivation.Profile(name)and targetRoot.Parent and(targetRoot.Position-root.Position)or nil)
+            end,direction)
             burst.ActivationAcknowledged=ack
             if not ack or not current()then
                 if cast.Multi then cast.Multi.Cancel(message or "Cast interrupted")end
@@ -369,6 +372,9 @@ function state.Destroy(replacing,teleportCleanup)
     local function owned(name,object)method(name,object,"Destroy")end
     add("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
     add("Stop",function()state.Running=false;state.Enabled=false;state.AutoFarm=false;state.SkillAura=false end)
+    add("Startup hold",function()if releaseStartupHold then releaseStartupHold(true)end end)
+    owned("Block dialog visuals",state.BlockDialogMask)
+    owned("SelfDamage",state.SelfDamageProtection)
     method("Ownership",runtimeOwner,"Release")
     owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk)
     method("Search",search,"Destroy",preserveSearch)

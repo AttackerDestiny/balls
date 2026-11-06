@@ -4,7 +4,7 @@ local state={
     Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3,OffsetMode="Below",FarmAbove=false,
     AttackInterval=.3,AttackBurstInterval=.3,SkillBurstInterval=.3,EffectiveInterval=.3,
     ThreatCycle=.12,MaxRequestsPerSecond=48,Backoff=1,TeleportInterval=.18,TeleportOffset=-6,
-    AutoOffset=true,HideSkillAnimation=true,SuppressSkillMotion=true,
+    AutoOffset=true,HideSkillAnimation=true,
     OffsetStatus="Waiting for a target",MovementStatus="Auto farm is off",LastTarget="None",
     SkillStatus="Skill aura is off",ProtectionStatus="Retreat on health loss",ProgressionPhase="Loading",
     AverageFrameTime=1/60,AverageLoopCost=0,ConfigPath=configPath,ConfigLoadError=configLoadError,
@@ -18,7 +18,7 @@ local state={
     AutoSaveStatus=filePersistence and "Auto-save · ready"or "Auto-save · file access unavailable",
 }
 for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
-    "AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
+    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
     "SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
     "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
     state[key]=restore[key]

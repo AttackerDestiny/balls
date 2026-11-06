@@ -10,6 +10,13 @@ SOURCE = ROOT / "src/main.luau"
 PREFIX = "local SB2_SOURCE=[============[\n"
 SUFFIX = ']============]\nreturn assert(loadstring(SB2_SOURCE, "SB2"))(SB2_SOURCE)\n'
 MODULES = {
+    "AEGANATOS DODGE": "aeganatos-dodge.module.luau",
+    "SELF DAMAGE PROTECTION": "self-damage-protection.module.luau",
+    "SELECTED FARM SPOTS": "selected-farm-spots.module.luau",
+    "PAD SLOT": "pad-slot.module.luau",
+    "BLOCK UI MASK": "block-ui-mask.module.luau",
+    "BETWEEN ROOM": "between-room.module.luau",
+    "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "INSTANCE QUEUE": "instance-queue.module.luau",
     "SETTINGS SNAPSHOT": "settings-snapshot.module.luau",
     "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",

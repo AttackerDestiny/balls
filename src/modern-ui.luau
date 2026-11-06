@@ -1,3 +1,5 @@
+do
+local function initializeModernUI()
 -- WindUI is bundled at a fixed release; no compatibility window exists.
 -- Executor adapter for the sole modern presentation.
 do
@@ -138,4 +140,7 @@ do
         end
     end
     -- END MODERN UI FAILURE
+end
+end
+initializeModernUI()
 end

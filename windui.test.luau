@@ -66,13 +66,13 @@ return function(source)
     s.AutomationCatalog=catalog
     local function record(name,...)calls[#calls+1]={Name=name,Args={...}}end
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
-        CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
+        NoSelfDamage="SetNoSelfDamage",AeganatosDodge="SetAeganatosDodge",AtheonUnlock="SetAtheonUnlock",AutoCreateBetween="SetAutoCreateBetween",CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
         AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
     end
     for key,method in pairs({CreditWhitelistText="SetCreditWhitelist",SafeWhitelistText="SetSafeWhitelist",JoinFriendUsername="SetJoinFriendUsername",
-        SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
+        BetweenAccess="SetBetweenAccess",BetweenDifficulty="SetBetweenDifficulty",SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
         s[method]=function(value)record(method,value);s[key]=value end
     end
     function s.IsAutomationFloorUnlocked(id)return id==11 or catalog.Floors[2].Unlocked end
@@ -116,7 +116,7 @@ return function(source)
     assert(c.SafeMode.Desc==nil and c.SafeFloor.Desc==nil)
     assert(c.SafeWhitelist.Title=="Whitelist"and c.SafeWhitelist.Desc=="Input A List Of User")
     assert(c.AccountProgression.Desc==nil and c.AutoFarm.Desc==nil and c.AutoEquipBestSword.Desc==nil and c.AutoSwing.Desc==nil)
-    flush();assert(tabCount==9 and #calls==0,"Loading saved ON values must not invoke setters or actions")
+    flush();assert(tabCount==10 and #calls==0,"Loading saved ON values must not invoke setters or actions")
     for _,key in ipairs({"Enabled","AutoFarm","AutoEquipBestSword","AtheonDodge","AutoSwing","AutoDodge",
         "SkillAuraSection","SkillAura","SelectedSkill","MiscSkillSection","MiscSkillEnabled","SelectedMiscSkill","SafeModeSection","SafeMode","SafeFloor","SafeWhitelist",
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
@@ -147,6 +147,13 @@ return function(source)
     c.CreditCheck:Emit(true);assert(s.CreditCheck)
     c.CreditWhitelist:Emit("CreditFriend, 123");assert(s.CreditWhitelistText=="CreditFriend, 123"and s.SafeWhitelistText==safeList,"Credit whitelist must stay separate from Safe Mode")
     assert(c.AutoEquipBestSword.Title=="Auto Equip Best Gear")
+    assert(c.NoSelfDamage and c.AeganatosDodge and c.AtheonDodge and c.AtheonUnlock and c.AutoCreateBetween and c.BetweenAccess and c.BetweenDifficulty and not c.FarmPosition,"Latest Dodge/Between/Atheon controls replace the removed position selector")
+    c.NoSelfDamage:Emit(true);assert(s.NoSelfDamage and calls[#calls].Name=="SetNoSelfDamage")
+    c.AeganatosDodge:Emit(true);assert(s.AeganatosDodge)
+    c.AtheonUnlock:Emit(true);assert(s.AtheonUnlock)
+    c.AutoCreateBetween:Emit(true);assert(s.AutoCreateBetween)
+    c.BetweenAccess:Emit("Friends");assert(s.BetweenAccess=="Friends")
+    c.BetweenDifficulty:Emit("Hard");assert(s.BetweenDifficulty=="Hard")
     c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")

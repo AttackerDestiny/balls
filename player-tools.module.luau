@@ -118,7 +118,7 @@ return function(ctx)
     end
     listen(subscriptions,players.PlayerAdded,function()if ctx.RosterChanged then ctx.RosterChanged()end end)
     listen(subscriptions,players.PlayerRemoving,function(person)
-        if selected==person then
+        if selected and person.UserId==selected.UserId then
             api.SetViewing(false);api.SetInventoryVisible(false)
             if selectedConnection then selectedConnection:Disconnect();selectedConnection=nil end
             selected=nil;state.SelectedPlayerId=nil;notify()

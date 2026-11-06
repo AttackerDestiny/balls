@@ -55,6 +55,13 @@ def main():
         ("CONTROLLER VIEW", "controller-view.module.luau"),
         ("WEAPON SKILLS", "weapon-skills.module.luau"),
         ("ANIMATION REMOVAL", "animation-removal.module.luau"),
+        ("SELF DAMAGE PROTECTION", "self-damage-protection.module.luau"),
+        ("AEGANATOS DODGE", "aeganatos-dodge.module.luau"),
+        ("ATHEON UNLOCK", "atheon-unlock.module.luau"),
+        ("BETWEEN ROOM", "between-room.module.luau"),
+        ("PAD SLOT", "pad-slot.module.luau"),
+        ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
+        ("BLOCK UI MASK", "block-ui-mask.module.luau"),
         ("RUNTIME RECOVERY", "runtime-recovery.module.luau"),
         ("MAP DELETION", "map-deletion.module.luau"),
         ("PERFORMANCE BOOST", "performance-boost.module.luau"),
@@ -119,6 +126,9 @@ def main():
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    for name in ("atheon-unlock", "between-room", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
+        module = "safe-mode" if name == "safe-mode-suspended" else name
+        fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(module + ".module.luau")) + ")\n"
     for name in ("enemy-registry", "work-scheduler", "runtime-scope", "movement-owner", "settings-snapshot", "instance-queue"):
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("mobile-regression.test.luau")) + "))()(sources)\n"
@@ -143,7 +153,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("unborn-position.test.luau")) + "))()(" + quote(fixed) + ")\n"
     encounter_start = script.index("function state.ReadAutomationEncounter(spot)")
     encounter = script[encounter_start:script.index("function state.RegisterAutomationDestination", encounter_start)]
-    valid_start = script.index("local function validMob(mob, mobs)")
+    valid_start = script.index("local selectedFarmSpot=(function()")
     valid = script[valid_start:script.index("local function pauseHold", valid_start)] + "\nreturn validMob"
     fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + ")\n"
     data_start = script.index("local function getMobData(mob)")
@@ -157,6 +167,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("animation-removal.test.luau")) + "))()(" + quote(read("animation-removal.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ui-memory.test.luau")) + "))()(" + quote(read("ui-memory.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("runtime-recovery.test.luau")) + "))()(" + quote(read("runtime-recovery.module.luau")) + ")\n"
+    aeganatos_fixture = 'local vector={}\nlocal mt={}\nlocal function vec(x,y,z)return setmetatable({X=x,Y=y,Z=z},mt)end\nmt.__add=function(a,b)return vec(a.X+b.X,a.Y+b.Y,a.Z+b.Z)end\nmt.__sub=function(a,b)return vec(a.X-b.X,a.Y-b.Y,a.Z-b.Z)end\nmt.__mul=function(a,b)if type(b)=="number"then return vec(a.X*b,a.Y*b,a.Z*b)end;return vec(a.X*b.X,a.Y*b.Y,a.Z*b.Z)end\nmt.__index=function(a,k)if k=="Magnitude"then return math.sqrt(a.X*a.X+a.Y*a.Y+a.Z*a.Z)end end\nlocal function frame(point)return {Position=point,LookVector=vec(0,0,-1),PointToObjectSpace=function(_,p)return p-point end,PointToWorldSpace=function(_,p)return p+point end}end\nlocal test=assert(loadstring(TEST_SOURCE))\nsetfenv(test,setmetatable({Vector3={new=vec,zero=vec(0,0,0)},CFrame={new=function()return frame(vec(0,0,0))end,lookAt=function(p)return frame(p)end},loadstring=function(source)local fn=assert(loadstring(source));setfenv(fn,setmetatable({typeof=function(v)return getmetatable(v)==mt and "Vector3"or type(v)end,Vector3={new=vec},CFrame={lookAt=function(p)return frame(p)end}},{__index=getfenv()}));return fn end},{__index=getfenv()}))\nassert(test()(MODULE_SOURCE).Passed)\nprint("PASS Aeganatos geometry: native wave sweep, geyser clearance, expiry, safety and cleanup")\n'
+    aeganatos_fixture = aeganatos_fixture.replace("TEST_SOURCE", quote(read("aeganatos-dodge.test.luau"))).replace("MODULE_SOURCE", quote(read("aeganatos-dodge.module.luau")))
+    fixture += aeganatos_fixture
     fixture += "assert(loadstring(" + quote(read("atheon-dodge.test.luau")) + "))()(" + quote(read("atheon-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("ground-follow.test.luau")) + "))()(" + quote(read("ground-follow.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("weapon-skills.test.luau")) + "))()(" + quote(read("weapon-skills.module.luau")) + ")\n"
@@ -170,9 +183,7 @@ def main():
     skill_update = script[skill_start:script.index("\n\ndo\n", skill_start)]
     fixture += "assert(loadstring(" + quote(read("source-combat.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("attack-scheduler.module.luau"), read("skill-burst.module.luau"), read("skill-activation.module.luau"), read("skill-damage-budget.module.luau"), skill_update)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("aura-touch.test.luau")) + "))()(" + quote(read("aura-touch.module.luau")) + ")\n"
-    stream_start=script.index("    local pendingParts,queuedParts=")
-    stream_budget=script[stream_start:script.index("    bind(workspace.DescendantRemoving",stream_start)]
-    fixture += "assert(loadstring(" + quote(read("map-stream-budget.test.luau")) + "))()(" + quote(stream_budget) + ")\n"
+    assert 'SetTransparentMap' not in script and 'pendingParts,queuedParts=' not in script, "Removed automatic map transparency cannot return"
     movement_gate = script.split("-- BEGIN TEST MOVEMENT BUDGET\n",1)[1].split("-- END TEST MOVEMENT BUDGET",1)[0]
     fixture += "assert(loadstring(" + quote(read("fps-budget.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(movement_gate) + ")\n"
     move_adapter = read("server-isolation-client.module.luau")
@@ -251,9 +262,6 @@ def main():
     plan_start=script.index("    local function plan()")
     trade_plan=script[plan_start:script.index("    local nativeTrade=",plan_start)]
     fixture += "assert(loadstring(" + quote(read("auto-trade-plan.test.luau")) + "))()(" + quote(trade_plan) + "," + quote(read("auto-trade.module.luau")) + ")\n"
-    away_start=script.index("function state.EscapeSafeRejoin()")
-    away=script[away_start:script.index("function state.ReleaseSafePanic()",away_start)]
-    fixture += "assert(loadstring(" + quote(read("safe-rejoin-away.test.luau")) + "))()(" + quote(away) + ")\n"
     helper_start=adapter.index("    local function clearRejoinAway()")
     away_helpers=adapter[helper_start:adapter.index("    local function fail(",helper_start)]
     hop_start=adapter.index("        Hop=function()")
@@ -294,6 +302,7 @@ def main():
                     "multi-spot.module.luau", "server-isolation-client.module.luau", "runtime-owner.module.luau",
                     "atheon-dodge.module.luau", "wave-dodge.module.luau", "ground-follow.module.luau", "misc-skill.module.luau", "auto-range.module.luau", "auto-offset.module.luau", "arena-float.module.luau", "account-progression.module.luau",
                     "progression-gear.module.luau", "progression-client.module.luau"], check=True)
+    subprocess.run([tool("luau-compile"), "--null", "-O0", "kill-aura.body.luau", "kill-aura.luau"], check=True)
     print("PASS Bundled source consistency and compile")
 
 

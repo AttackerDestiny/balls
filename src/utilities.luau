@@ -241,3 +241,131 @@ do
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
     state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
 end
+
+-- Native floor utilities share the scheduler but retain independent receipts.
+local function livingPlayer(person)
+    local character=person.Character
+    if not character then return false end
+    local humanoid=character:FindFirstChildOfClass("Humanoid")
+    local entity=character:FindFirstChild("Entity")
+    local health=entity and entity:FindFirstChild("Health")
+    return humanoid~=nil and humanoid.Health>0 and(not health or health.Value>0)
+end
+do
+    local create=(function()
+-- BEGIN BUNDLED ATHEON UNLOCK
+-- END BUNDLED ATHEON UNLOCK
+    end)()
+    local function portalPoint(portal)
+        local handlers={BasePart=function(object)return object.Position end,Model=function(object)return object:GetPivot().Position end,
+            Attachment=function(object)return object.WorldPosition end}
+        for class,resolve in pairs(handlers)do if portal:IsA(class)then return resolve(portal)end end
+        local candidates=portal:QueryDescendants("BasePart")
+        for _,part in ipairs(candidates)do if part:FindFirstChildOfClass("TouchTransmitter")then return part.Position end end
+        return candidates[1]and candidates[1].Position
+    end
+    local function busy()
+        for _,flag in ipairs({"StopEverything","ModeratorBlocking","SafeModePanic","AutoTradeBusy","AutomationTeleporting",
+            "TravelBusy","AutoJoinFriendHolding","Dodging","Recovering"})do if state[flag]then return true end end
+        return false
+    end
+    local controller=create({State=state,Busy=busy,Find=function()return workspace:FindFirstChild("AtheonPortal")end,
+        Unlocked=function()return game.PlaceId==13965775911 or(state.IsAutomationFloorUnlocked and state.IsAutomationFloorUnlocked(13965775911))==true end,
+        Root=function()
+            if not livingPlayer(player)then return nil end
+            local root=player.Character:FindFirstChild("HumanoidRootPart")
+            return root and not root.Anchored and root or nil
+        end,Position=portalPoint,Arrived=function(root,point)return root.Parent~=nil and(root.Position-point).Magnitude<=12 end,
+        Move=function(root,point,at)
+            if state.CancelSkillAura then state.CancelSkillAura("Atheon portal teleport")end
+            stopSword(true);finishAttackBurst("Atheon portal teleport");stopMovement("Atheon portal teleport",true)
+            state.FollowTarget=nil;state.FarmTargetLock=nil;state.FarmPauseUntil=at+2;state.AtheonUnlockPauseUntil=at+2
+            pivotRoot(root,point)
+        end})
+    state.AtheonUnlockController=controller
+    function state.SetAtheonUnlock(requested)
+        state.AtheonUnlock=requested==true;controller.Reset()
+        state.AtheonUnlockStatus=state.AtheonUnlock and "Waiting for AtheonPortal"or "Atheon Unlock is off"
+        workScheduler.Wake("AtheonUnlock");requestSave()
+    end
+    taskController("AtheonUnlock",.5,controller.Update)
+    table.insert(frameOrder,1,"AtheonUnlock")
+end
+do
+    local create=(function()
+-- BEGIN BUNDLED BETWEEN ROOM
+-- END BUNDLED BETWEEN ROOM
+    end)()
+    local destination=78945654064532
+    local localFloor=game.PlaceId==destination
+    local native=localFloor and require(services.UI.WaveDefense.Revive)
+    local function prompt()return native and native.Frame and native.Frame.Visible end
+    local function partyDefeated()
+        if not prompt()then return false end
+        for _,person in ipairs(Players:GetPlayers())do
+            local lives=person:GetAttribute("Lives")
+            if livingPlayer(person)or type(lives)~="number"or lives>0 then return false end
+        end
+        return true
+    end
+    if localFloor then
+        local receipt,busy
+        taskController("BetweenRevive",.35,function()
+            if livingPlayer(player)then receipt=nil;return end
+            local lives=player:GetAttribute("Lives")
+            if busy or not prompt()or type(lives)~="number"or lives<=0 or receipt==lives then return end
+            receipt=lives;busy=true
+            task.spawn(function()
+                local permitted=state.Running and not state.StopEverything and prompt()
+                    and player:GetAttribute("Lives")==lives and not livingPlayer(player)
+                if permitted then
+                    local ok,accepted=pcall(ReplicatedStorage.Function.InvokeServer,ReplicatedStorage.Function,
+                        "UniqueFloorTypes",{"WaveDefense","Revive"})
+                    if ok and accepted and native.Hide then native.Hide()end
+                end
+                busy=false
+            end)
+        end)
+        frameOrder[#frameOrder+1]="BetweenRevive"
+    end
+    local allowedAccess={Private=true,Friends=true,["Game Party"]=true}
+    local allowedDifficulty={Normal=true,Hard=true,Elite=true}
+    if not allowedAccess[state.BetweenAccess]then state.BetweenAccess="Private"end
+    if not allowedDifficulty[state.BetweenDifficulty]then state.BetweenDifficulty="Normal"end
+    local index
+    local function roomSnapshot()
+        local id=player:GetAttribute("PartyID")
+        if not id then return nil end
+        local parties=ReplicatedStorage:FindFirstChild("LobbyParties")
+        local party=parties and parties:FindFirstChild(tostring(id))
+        local view={Id=id}
+        if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
+        return view
+    end
+    local function send(action)
+        if action=="CreateParty"and index==nil then
+            for ordinal,floor in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
+                if floor.PlaceId==destination then index=ordinal;break end
+            end
+            assert(index,"The Between is unavailable")
+        end
+        ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or nil})
+    end
+    local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
+        Active=function()return state.Running and state.AutoCreateBetween and(not localFloor or partyDefeated())and not state.AutomationTeleporting and not state.TravelBusy end,
+        Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
+        Status=function(message)state.BetweenRoomStatus=message end,
+        Start=function()
+            if state.QueueAutomation then pcall(state.QueueAutomation)end
+            return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
+        end})
+    state.BetweenRoomController=controller
+    function state.SetAutoCreateBetween(requested)
+        state.AutoCreateBetween=requested==true;controller.Reset()
+        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create Room is off"
+        requestSave()
+    end
+    function state.SetBetweenAccess(value)if allowedAccess[value]then state.BetweenAccess=value;requestSave()end end
+    function state.SetBetweenDifficulty(value)if allowedDifficulty[value]then state.BetweenDifficulty=value;requestSave()end end
+    taskController("BetweenRoom",.35,controller.Update);frameOrder[#frameOrder+1]="BetweenRoom"
+end
