@@ -66,7 +66,7 @@ return function(source)
     s.AutomationCatalog=catalog
     local function record(name,...)calls[#calls+1]={Name=name,Args={...}}end
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
-        CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
+        CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
         AtheonUnlock="SetAtheonUnlock",AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end

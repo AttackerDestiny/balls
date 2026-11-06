@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.between-auto-start-v2.0.14"
-local VERSION="2.0.14"
+local BUILD="2026-11-06.remove-map-transparency-v2.0.15"
+local VERSION="2.0.15"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -282,7 +282,7 @@ return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
     local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters",
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
@@ -401,7 +401,6 @@ local restore = {
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
-    TransparentMap=true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
     SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
@@ -579,7 +578,7 @@ local state = {
     HideSkillAnimation = true, HiddenSkillAnimations = 0,
     SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
-    AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, TransparentMap = restore.TransparentMap, Dodging = false,
+    AutoDodge = restore.AutoDodge, AtheonDodge=restore.AtheonDodge, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
@@ -1543,7 +1542,7 @@ local function settingsPayload()
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
         AutoExplore = state.AutoExplore,
-        AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge, TransparentMap = features.TransparentMap,
+        AutoDodge = features.AutoDodge, AtheonDodge=features.AtheonDodge,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
         WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,
@@ -3898,7 +3897,6 @@ do
     end
     applyZoom()
     bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"), applyZoom)
-    local original = {}
     local excludedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
     local excludedRoots={}
     for name in pairs(excludedNames)do excludedRoots[name]=workspace:FindFirstChild(name)end
@@ -3914,69 +3912,9 @@ do
         end
         return not waveDodge.IsHazardPart(part)
     end
-    state.ExcludeMapPart=function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end
-    local function applyPart(part)
-        if not mapPart(part) then return end
-        if state.TransparentMap and not state.StopEverything then
-            if original[part]==nil then
-                local value=part.LocalTransparencyModifier
-                original[part]=math.abs(value-0.7)<0.0001 and 0 or value
-            end
-            part.LocalTransparencyModifier=0.7
-        elseif original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end
-    local scanGeneration=0
-    function state.SetTransparentMap(enabled)
-    if state.StopEverything and enabled==true then return false end
-        state.TransparentMap=enabled==true
-        scanGeneration+=1
-        local generation=scanGeneration
-        if state.TransparentMap then
-            task.defer(function()
-                local slice=os.clock()
-                for _,part in ipairs(workspace:QueryDescendants("BasePart")) do
-                    if generation~=scanGeneration or not state.Running then return end
-                    if part.Parent then applyPart(part)end
-                    if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
-                end
-            end)
-        end
-        if not state.TransparentMap then
-            for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end; original[part]=nil end
-        end
-        requestSave()
-    end
-    local pendingParts,queuedParts={},setmetatable({}, {__mode="k"})
-    local pendingHead,pendingTail,streamWorker=1,0,false
-    bind(workspace.DescendantAdded,function(part)
-        if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
-        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=true
-        if streamWorker then return end
-        streamWorker=true
-        task.defer(function()
-            while state.Running and not restoringZoom and pendingHead<=pendingTail do
-                local deadline=os.clock()+.001
-                local count=0
-                while pendingHead<=pendingTail and count<48 and os.clock()<deadline do
-                    local current=pendingParts[pendingHead];pendingParts[pendingHead]=nil;pendingHead+=1;queuedParts[current]=nil
-                    if current.Parent and state.TransparentMap then pcall(applyPart,current)end
-                    count+=1
-                end
-                task.wait()
-            end
-            table.clear(pendingParts);table.clear(queuedParts);pendingHead,pendingTail=1,0;streamWorker=false
-        end)
-    end)
-    bind(workspace.DescendantRemoving,function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end)
     state.RestoreWorldVisuals=function()
-        scanGeneration+=1
         restoringZoom=true
         player.CameraMaxZoomDistance=oldZoom
-        for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
     end
     local makeDeletion=(function()
 -- BEGIN BUNDLED MAP DELETION
@@ -4136,7 +4074,6 @@ end
     end)()
     state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
     state.AnimationRemoval.Set(state.PerformanceBoosters["Remove animations"]==true or state.PerformanceBoosters["Remove everything"]==true)
-    state.SetTransparentMap(restore.TransparentMap)
 end
 
 do
@@ -4290,7 +4227,6 @@ return function(ctx)
         if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
         local properties
         if instance:IsA("BasePart") then
-            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
             properties={LocalTransparencyModifier=1,Transparency=1}
         elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
         elseif instance:IsA("Light") then properties={Enabled=false,Brightness=0}
@@ -4500,7 +4436,7 @@ end
     end)()
     state.VisualPendingQueue=makeQueue(8192)
     state.SkillVisuals=create({Queue=state.VisualPendingQueue,
-        State=state,Services=services,Actions=Actions,SkillState=Skills,ExcludeMapPart=state.ExcludeMapPart,
+        State=state,Services=services,Actions=Actions,SkillState=Skills,
         DynamicHazards=function() return waveDodge.Event=="Lava" or waveDodge.Event=="Tempest" or (state.BossDodge and state.BossDodge.HasHazards) end,
         Preserve=function(instance)
             local node=instance
@@ -10369,7 +10305,7 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
     for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end

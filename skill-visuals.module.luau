@@ -107,7 +107,6 @@ return function(ctx)
         if maintenanceTail-maintenanceHead+1+maintenanceNextTail>=8192 then return end
         local properties
         if instance:IsA("BasePart") then
-            if ctx.ExcludeMapPart then ctx.ExcludeMapPart(instance) end
             properties={LocalTransparencyModifier=1,Transparency=1}
         elseif instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then properties={Enabled=false,Transparency=invisible,LocalTransparencyModifier=1}
         elseif instance:IsA("Light") then properties={Enabled=false,Brightness=0}

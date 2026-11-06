@@ -203,7 +203,7 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 **Auto Dodge** reads supported native challenge-floor hazards and temporarily takes movement priority. Default ON, relevant only where supported hazards exist. It does not guarantee immunity, especially when low FPS delays observations.
 
-**Transparent map** runs by default; its former toggle is removed. Characters, mobs, and identified hazards/effects are excluded from ordinary map treatment. Extended camera zoom is also applied while the runtime owns it.
+Extended camera zoom is applied while the runtime owns it.
 
 ## Auto Skill
 

@@ -627,7 +627,6 @@ do
     end
     applyZoom()
     bind(player:GetPropertyChangedSignal("CameraMaxZoomDistance"), applyZoom)
-    local original = {}
     local excludedNames={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
     local excludedRoots={}
     for name in pairs(excludedNames)do excludedRoots[name]=workspace:FindFirstChild(name)end
@@ -643,69 +642,9 @@ do
         end
         return not waveDodge.IsHazardPart(part)
     end
-    state.ExcludeMapPart=function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end
-    local function applyPart(part)
-        if not mapPart(part) then return end
-        if state.TransparentMap and not state.StopEverything then
-            if original[part]==nil then
-                local value=part.LocalTransparencyModifier
-                original[part]=math.abs(value-0.7)<0.0001 and 0 or value
-            end
-            part.LocalTransparencyModifier=0.7
-        elseif original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end
-    local scanGeneration=0
-    function state.SetTransparentMap(enabled)
-    if state.StopEverything and enabled==true then return false end
-        state.TransparentMap=enabled==true
-        scanGeneration+=1
-        local generation=scanGeneration
-        if state.TransparentMap then
-            task.defer(function()
-                local slice=os.clock()
-                for _,part in ipairs(workspace:QueryDescendants("BasePart")) do
-                    if generation~=scanGeneration or not state.Running then return end
-                    if part.Parent then applyPart(part)end
-                    if os.clock()-slice>=.001 then task.wait();slice=os.clock()end
-                end
-            end)
-        end
-        if not state.TransparentMap then
-            for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end; original[part]=nil end
-        end
-        requestSave()
-    end
-    local pendingParts,queuedParts={},setmetatable({}, {__mode="k"})
-    local pendingHead,pendingTail,streamWorker=1,0,false
-    bind(workspace.DescendantAdded,function(part)
-        if not state.TransparentMap or not part:IsA("BasePart")or queuedParts[part]then return end
-        pendingTail+=1;pendingParts[pendingTail]=part;queuedParts[part]=true
-        if streamWorker then return end
-        streamWorker=true
-        task.defer(function()
-            while state.Running and not restoringZoom and pendingHead<=pendingTail do
-                local deadline=os.clock()+.001
-                local count=0
-                while pendingHead<=pendingTail and count<48 and os.clock()<deadline do
-                    local current=pendingParts[pendingHead];pendingParts[pendingHead]=nil;pendingHead+=1;queuedParts[current]=nil
-                    if current.Parent and state.TransparentMap then pcall(applyPart,current)end
-                    count+=1
-                end
-                task.wait()
-            end
-            table.clear(pendingParts);table.clear(queuedParts);pendingHead,pendingTail=1,0;streamWorker=false
-        end)
-    end)
-    bind(workspace.DescendantRemoving,function(part)
-        if original[part]~=nil then part.LocalTransparencyModifier=original[part]; original[part]=nil end
-    end)
     state.RestoreWorldVisuals=function()
-        scanGeneration+=1
         restoringZoom=true
         player.CameraMaxZoomDistance=oldZoom
-        for part,value in pairs(original) do if part.Parent then part.LocalTransparencyModifier=value end end
     end
     local makeDeletion=(function()
 -- BEGIN BUNDLED MAP DELETION
@@ -721,7 +660,6 @@ do
     end)()
     state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
     state.AnimationRemoval.Set(state.PerformanceBoosters["Remove animations"]==true or state.PerformanceBoosters["Remove everything"]==true)
-    state.SetTransparentMap(restore.TransparentMap)
 end
 
 do
@@ -735,7 +673,7 @@ do
     end)()
     state.VisualPendingQueue=makeQueue(8192)
     state.SkillVisuals=create({Queue=state.VisualPendingQueue,
-        State=state,Services=services,Actions=Actions,SkillState=Skills,ExcludeMapPart=state.ExcludeMapPart,
+        State=state,Services=services,Actions=Actions,SkillState=Skills,
         DynamicHazards=function() return waveDodge.Event=="Lava" or waveDodge.Event=="Tempest" or (state.BossDodge and state.BossDodge.HasHazards) end,
         Preserve=function(instance)
             local node=instance

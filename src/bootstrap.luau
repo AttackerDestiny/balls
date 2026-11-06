@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.between-auto-start-v2.0.14"
-local VERSION="2.0.14"
+local BUILD="2026-11-06.remove-map-transparency-v2.0.15"
+local VERSION="2.0.15"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -169,7 +169,6 @@ local restore = {
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
-    TransparentMap=true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
     AutoJoinFriend=preference("AutoJoinFriend",false)==true,JoinFriendUsername=preference("JoinFriendUsername",""),
     SafeMode=preference("SafeMode",false)==true,SafeFloorId=tonumber(preference("SafeFloorId",game.PlaceId)) or game.PlaceId,
