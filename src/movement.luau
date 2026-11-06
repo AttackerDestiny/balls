@@ -231,6 +231,7 @@ local function attackRadiusFor(mob)
     return math.min(120,math.max(size.X,size.Z)*.5+20)
 end
 local function pivotRoot(root, position)
+    if releaseStartupHold then releaseStartupHold(false)end
     local character = root.Parent
     local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
     if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1) end
@@ -450,6 +451,7 @@ local function clearStaleFarmControllers(root)
     end
 end
 local function ensureMovementController(character, root, humanoid, destination)
+    if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release() end
     if movementRoot and positionAlign and positionAlign.Parent then return end
     clearStaleFarmControllers(root)

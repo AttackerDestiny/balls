@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.skill-cast-origin-v2.0.11"
-local VERSION="2.0.11"
+local BUILD="2026-11-06.startup-hold-v2.0.12"
+local VERSION="2.0.12"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -431,10 +431,11 @@ if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
     task.wait(math.min(3, env.SB2FarmRecoveryUntil - os.clock()))
 end
 
+local releaseStartupHold
 do
     local moveBelow=(function()
 -- BEGIN BUNDLED STARTUP BELOW
--- One startup placement, then release movement entirely to the normal controllers.
+-- Resolve the startup position and its surface before handing off to the hold.
 return function(ctx)
     local deadline=ctx.Now()+8
     repeat
@@ -445,7 +446,7 @@ return function(ctx)
             local floor=ctx.Surface(root,point)
             assert(type(floor)=="number"and floor==floor and math.abs(floor)<1e8,"Startup ground height is unavailable")
             if not ctx.Alive()or ctx.Root()~=root then return false,"Character changed during startup"end
-            ctx.Move(root,point.X,floor-20,point.Z)
+            ctx.Move(root,point.X,floor-20,point.Z,floor)
             return true
         end
         if ctx.Now()>=deadline then return false,"Waiting for a living character timed out"end
@@ -475,10 +476,51 @@ end
             local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
             return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
         end,
-        Move=function(root,x,y,z)
-            root.CFrame=CFrame.new(x,y,z)*root.CFrame.Rotation
+        Move=function(root,x,y,z,floor)
+            local character=root.Parent
+            local humanoid=character:FindFirstChildOfClass("Humanoid")
+            local destination=Vector3.new(x,y,z)
+            local standingY=math.max(root.Position.Y,floor+humanoid.HipHeight+root.Size.Y/2+.5)
+            local attachment=Instance.new("Attachment")
+            attachment.Name="SB2StartupAttachment"
+            local hold=Instance.new("AlignPosition")
+            hold.Name="SB2StartupPosition"
+            hold.Mode=Enum.PositionAlignmentMode.OneAttachment
+            hold.Attachment0=attachment
+            hold.Position=destination
+            hold.ApplyAtCenterOfMass=true
+            hold.RigidityEnabled=true
+            local connections={}
+            releaseStartupHold=function(restoreGround)
+                releaseStartupHold=nil
+                for _,connection in ipairs(connections)do connection:Disconnect()end
+                hold:Destroy()
+                attachment:Destroy()
+                if restoreGround and root.Parent==character and player.Character==character
+                    and humanoid.Health>0 and (root.Position-destination).Magnitude<8 then
+                    root.CFrame=CFrame.new(x,standingY,z)*root.CFrame.Rotation
+                    root.AssemblyLinearVelocity=Vector3.zero
+                end
+            end
+            local function releaseForInput()
+                if releaseStartupHold and (humanoid.MoveDirection.Magnitude>.05 or humanoid.Jump)then
+                    releaseStartupHold(true)
+                end
+            end
+            connections[1]=humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(releaseForInput)
+            connections[2]=humanoid:GetPropertyChangedSignal("Jump"):Connect(releaseForInput)
+            connections[3]=player.CharacterRemoving:Connect(function(removing)
+                if removing==character and releaseStartupHold then releaseStartupHold(false)end
+            end)
+            connections[4]=runtimeOwner.Root.Destroying:Connect(function()
+                if releaseStartupHold then releaseStartupHold(true)end
+            end)
+            attachment.Parent=root
+            hold.Parent=root
+            root.CFrame=CFrame.new(destination)*root.CFrame.Rotation
             root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
         end})
+    if not ok and releaseStartupHold then releaseStartupHold(true)end
     env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
 end
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive()then return end
@@ -2499,6 +2541,7 @@ local function attackRadiusFor(mob)
     return math.min(120,math.max(size.X,size.Z)*.5+20)
 end
 local function pivotRoot(root, position)
+    if releaseStartupHold then releaseStartupHold(false)end
     local character = root.Parent
     local facing=root.CFrame.LookVector*Vector3.new(1,0,1)
     if facing.Magnitude<.001 then facing=Vector3.new(0,0,-1) end
@@ -2789,6 +2832,7 @@ local function clearStaleFarmControllers(root)
     end
 end
 local function ensureMovementController(character, root, humanoid, destination)
+    if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release() end
     if movementRoot and positionAlign and positionAlign.Parent then return end
     clearStaleFarmControllers(root)
@@ -6018,6 +6062,7 @@ end
     end
     cleanup("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
     cleanup("Stop",function()state.Enabled=false;state.AutoFarm=false;state.SkillAura=false;state.Running=false end)
+    cleanup("Startup hold",function()if releaseStartupHold then releaseStartupHold(true)end end)
     retire("UI",state.WindUI,"Destroy")
     retire("AntiAFK",state.AntiAfk,"Destroy")
     retire("Ownership",runtimeOwner,"Release")

@@ -88,7 +88,7 @@ Runtime recovery cancels a main update that remains suspended for eight seconds 
 - **Refresh List:** refreshes destinations on the current floor.
 - Normal destination travel arrives at the source position **minus 20 studs in Y**. Automatic arena travel checks streaming and actual arrival.
 
-At startup, the floor runtime makes a one-time placement at the current character's X/Z and detected ground minus 20 studs, then lets the normal controllers take over. It waits a bounded time for a living character and uses a standing-height estimate if ground geometry is unavailable. The native login-place Play helper runs before floor-only behavior.
+At startup, the floor runtime holds the character at the current X/Z and detected ground minus 20 studs until a movement controller takes over. Walking or jumping manually releases the startup hold and returns the character above ground. It waits a bounded time for a living character and uses a standing-height estimate if ground geometry is unavailable. The native login-place Play helper runs before floor-only behavior.
 
 ### Safe Mode
 

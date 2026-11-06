@@ -1,4 +1,4 @@
--- One startup placement, then release movement entirely to the normal controllers.
+-- Resolve the startup position and its surface before handing off to the hold.
 return function(ctx)
     local deadline=ctx.Now()+8
     repeat
@@ -9,7 +9,7 @@ return function(ctx)
             local floor=ctx.Surface(root,point)
             assert(type(floor)=="number"and floor==floor and math.abs(floor)<1e8,"Startup ground height is unavailable")
             if not ctx.Alive()or ctx.Root()~=root then return false,"Character changed during startup"end
-            ctx.Move(root,point.X,floor-20,point.Z)
+            ctx.Move(root,point.X,floor-20,point.Z,floor)
             return true
         end
         if ctx.Now()>=deadline then return false,"Waiting for a living character timed out"end

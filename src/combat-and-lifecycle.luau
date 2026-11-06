@@ -430,6 +430,7 @@ function state.Destroy(replacing, teleportCleanup)
     end
     cleanup("Save",function()if configReady and not preserveSearch then state.SaveNow()end end)
     cleanup("Stop",function()state.Enabled=false;state.AutoFarm=false;state.SkillAura=false;state.Running=false end)
+    cleanup("Startup hold",function()if releaseStartupHold then releaseStartupHold(true)end end)
     retire("UI",state.WindUI,"Destroy")
     retire("AntiAFK",state.AntiAfk,"Destroy")
     retire("Ownership",runtimeOwner,"Release")
