@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.between-wave-recovery-v2.0.16"
-local VERSION="2.0.16"
+local BUILD="2026-11-06.farm-position-v2.0.17"
+local VERSION="2.0.17"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -150,6 +150,7 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AtheonUnlock=preference("AtheonUnlock",false)==true,
+    FarmPosition=preference("FarmPosition","Below")=="Above" and "Above" or "Below",
     AutoCreateBetween=preference("AutoCreateBetween",false)==true,
     BetweenAccess=preference("BetweenAccess","Private"),
     BetweenDifficulty=preference("BetweenDifficulty","Normal"),

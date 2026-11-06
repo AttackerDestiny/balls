@@ -149,7 +149,7 @@ Offline users, full servers, locked floors, and native join permissions can prev
 | Feature | Behavior and fresh default |
 | --- | --- |
 | **Kill Aura** | Scripted normal damage against eligible nearby enemies. Damage-only: manual walking/jumping works without Auto Farm. OFF. |
-| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. Does not automatically enable Kill Aura. OFF. |
+| **Auto Farm** | Moves to eligible loaded enemies and manages farming noclip. **Auto Farm Position** chooses Above or Below (default). Adaptive offsets are capped at +200 and −60 studs. Does not automatically enable Kill Aura. OFF. |
 | **Boss Only** | Restricts Auto Farm and arena-clear checks to main bosses/mini-bosses, ignoring regular mobs. OFF. |
 | **Credit Check** | Coordinates the user-specified 5% boss-credit target with a separate group. OFF. |
 | **Credit Whitelist** | Independent usernames/user IDs for credit coordination |

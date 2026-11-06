@@ -10,8 +10,9 @@ return function(input)
     if input.Mode=="Above" and input.AdaptiveAbove then
         local minimum=(input.PlayerBelow or 3)+1.5
         local center=input.Center or enemy.Position+Vector3.new(0,(playerRoot.Size.Y-size.Y)*.5,0)
-        local offset=math.max(minimum,center.Y-enemy.Position.Y+radius)
-        local distance=offset-(center.Y-enemy.Position.Y)
+        local offset=math.min(200,math.max(minimum,center.Y-enemy.Position.Y+radius))
+        local distance=math.abs(offset-(center.Y-enemy.Position.Y))
+        if offset<minimum then return nil,"Above cap leaves no body clearance" end
         if distance>reach-.2 then return nil,"Above position is outside the learned hit range" end
         local destination=enemy.Position+Vector3.new(0,offset,0)
         if destination.Y<=(input.DestroyHeight or -500)+40 then return nil,"Offset crosses the map kill plane" end
@@ -23,6 +24,13 @@ return function(input)
     local direction=above and 1 or -1
     local destination=center+Vector3.new(0,direction*radius,0)
     local offset=destination.Y-enemy.Position.Y
+    local limited=math.clamp(offset,-60,200)
+    if limited~=offset then
+        offset=limited
+        destination=Vector3.new(destination.X,enemy.Position.Y+offset,destination.Z)
+        radius=math.abs(destination.Y-center.Y)
+        if radius>reach-(input.Margin or 2) then return nil,"Offset cap is outside attack reach" end
+    end
     local body=above and (input.BodyAbove or size.Y*.5) or (input.BodyBelow or size.Y*.5)
     local playerExtent=above and (input.PlayerBelow or 3) or (input.PlayerAbove or 3)
     local minimum=body+playerExtent+1.5

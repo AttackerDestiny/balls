@@ -21,7 +21,8 @@ local function movementStatus(message)
 end
 function state.SetTeleportOffset(value)
     if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return end
-    local newValue = (state.OffsetMode=="Above" and 1 or -1)*math.max(1,math.floor(math.abs(value)*10+0.5)/10)
+    local above=state.OffsetMode=="Above"
+    local newValue=(above and 1 or -1)*math.clamp(math.floor(math.abs(value)*10+.5)/10,1,above and 200 or 60)
     if offsetInitialized and newValue == state.TeleportOffset then return end
     state.TeleportOffset = newValue
     offsetInitialized = true
@@ -32,6 +33,16 @@ function state.SetTeleportOffset(value)
     correctionStrikes, correctionTarget = 0, nil
 end
 local activeOffsetMob, offsetSample
+function state.SetFarmPosition(mode)
+    if mode~="Above" and mode~="Below" then return end
+    if state.OffsetMode==mode then return end
+    state.FarmAbove=mode=="Above"
+    state.OffsetMode=mode
+    state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
+    activeOffsetMob,offsetSample=nil,nil
+    state.SetTeleportOffset(state.TeleportOffset)
+    requestSave()
+end
 state.OffsetAvoidTypes={}
 state.AutoOffsetSolver=(function()
 -- BEGIN BUNDLED AUTO OFFSET
@@ -92,6 +103,7 @@ function state.ResolveAutoOffset(mob)
         state.TeleportOffset=destination.Y-data.Root.Position.Y
         state.OffsetStatus="Suspended Unborn · fixed arena position +10 studs"
         data.LastGroundedFarmDestination=destination
+        data.LastGroundedFarmMode=state.OffsetMode
         return state.TeleportOffset
     end
     local now,mobRoot=os.clock(),data.Root
@@ -125,7 +137,7 @@ function state.ResolveAutoOffset(mob)
     local grounded,airborne=state.GroundFollow.Resolve(mob,data,now)
     state.FarmTargetAirborne=airborne
     if airborne then
-        local destination=data.LastGroundedFarmDestination
+        local destination=(data.LastGroundedFarmMode==state.OffsetMode and data.LastGroundedFarmDestination)
             or (state.FarmAbove and root.Position)
             or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z)) or root.Position
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
@@ -134,8 +146,9 @@ function state.ResolveAutoOffset(mob)
     end
     if state.AutoFarm and state.FarmCoordination then
         local sharedCenter=mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)
+        local reach=state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill)
         local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player={Size=Vector3.new(2,2,1)},Center=sharedCenter,
-            Mode="Below",Reach=state.AutoRanges.BodyRange(data),Margin=3,
+            Mode=state.OffsetMode,AdaptiveAbove=state.FarmAbove,Reach=reach,Margin=3,
             BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=3,PlayerBelow=3,
             DestroyHeight=workspace.FallenPartsDestroyHeight})
         if not plan then
@@ -143,9 +156,11 @@ function state.ResolveAutoOffset(mob)
             state.OffsetStatus=reason
             return nil
         end
-        local destination=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
+        local spread=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
+        local destination=Vector3.new(spread.X,plan.Destination.Y,spread.Z)
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
         data.LastGroundedFarmDestination=destination
+        data.LastGroundedFarmMode=state.OffsetMode
         activeOffsetMob,offsetSample=nil,nil
         state.TeleportOffset=destination.Y-mobRoot.Position.Y
         state.OffsetStatus="Separated farm hold · slot "..tostring(state.FarmCoordination.Slot or 1)
@@ -215,6 +230,7 @@ function state.ResolveAutoOffset(mob)
         BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=offsetSample.Misses,Confirmed=offsetSample.Confirmed}
     state.AutoOffsetTarget,state.AutoOffsetDestination=mob,plan.Destination
     data.LastGroundedFarmDestination=plan.Destination
+    data.LastGroundedFarmMode=state.OffsetMode
     state.SetTeleportOffset(plan.Offset)
     return plan.Offset
 end

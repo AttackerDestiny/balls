@@ -48,13 +48,14 @@ return function(previous,userId)
     local snapshot={}
     for _,key in ipairs(fields)do snapshot[key]=copy(previous[key],0,{})end
     snapshot.ActiveTab=previous.UI and previous.UI.ActiveTab or snapshot.ActiveTab
+    snapshot.FarmPosition=previous.OffsetMode
     return snapshot
 end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.between-wave-recovery-v2.0.16"
-local VERSION="2.0.16"
+local BUILD="2026-11-06.farm-position-v2.0.17"
+local VERSION="2.0.17"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -282,7 +283,7 @@ if filePersistence then
 return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
-    local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local keys={"FarmPosition","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
@@ -383,6 +384,7 @@ local restore = {
     AutoSwing=preference("AutoSwing",true)==true,
     AutoTrade=preference("AutoTrade",false)==true,TradeMode=preference("TradeMode","Selected"),TradeItems=preference("TradeItems",{}),
     AtheonUnlock=preference("AtheonUnlock",false)==true,
+    FarmPosition=preference("FarmPosition","Below")=="Above" and "Above" or "Below",
     AutoCreateBetween=preference("AutoCreateBetween",false)==true,
     BetweenAccess=preference("BetweenAccess","Private"),
     BetweenDifficulty=preference("BetweenDifficulty","Normal"),
@@ -572,7 +574,7 @@ local state = {
     AutoEquipBestSword=restore.AutoEquipBestSword,
     AutoFarm = false, FarmRange = math.huge, Recovering = false,
     TeleportOffset = -6, AutoOffset = true, OffsetStatus = "Waiting for a target",
-    FarmAbove=false,OffsetMode="Below",
+    FarmAbove=restore.FarmPosition=="Above",OffsetMode=restore.FarmPosition,
     OffsetProfiles = {}, UnsafeOffsetProfiles = {}, ProtectionStatus = "Retreat on health loss",
     ProtectionRetreats = 0, TeleportInterval = 0.18, TeleportsSent = 0,
     AverageFrameTime = 1 / 60, AverageLoopCost = 0, TargetScans = 0,
@@ -1546,7 +1548,7 @@ local function settingsPayload()
         AutomationRunId=state.AutomationRunId,AutomationResumeFeatures=state.AutomationResumeFeatures,
         Version = 1, Enabled = features.Enabled, AutoFarm = features.AutoFarm,BossOnly=state.BossOnly,CreditCheck=state.CreditCheck,CreditWhitelistText=state.CreditWhitelistText,
         AutoSwing = features.AutoSwing, Radius = state.Radius, SkillRange=state.SkillRange,
-        AutoOffset = true, OffsetProfiles = state.OffsetProfiles,
+        AutoOffset = true, FarmPosition = state.OffsetMode, OffsetProfiles = state.OffsetProfiles,
         UnsafeOffsetProfiles = state.UnsafeOffsetProfiles, Threat = state.Threat,
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
@@ -2274,7 +2276,8 @@ local function movementStatus(message)
 end
 function state.SetTeleportOffset(value)
     if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return end
-    local newValue = (state.OffsetMode=="Above" and 1 or -1)*math.max(1,math.floor(math.abs(value)*10+0.5)/10)
+    local above=state.OffsetMode=="Above"
+    local newValue=(above and 1 or -1)*math.clamp(math.floor(math.abs(value)*10+.5)/10,1,above and 200 or 60)
     if offsetInitialized and newValue == state.TeleportOffset then return end
     state.TeleportOffset = newValue
     offsetInitialized = true
@@ -2285,6 +2288,16 @@ function state.SetTeleportOffset(value)
     correctionStrikes, correctionTarget = 0, nil
 end
 local activeOffsetMob, offsetSample
+function state.SetFarmPosition(mode)
+    if mode~="Above" and mode~="Below" then return end
+    if state.OffsetMode==mode then return end
+    state.FarmAbove=mode=="Above"
+    state.OffsetMode=mode
+    state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
+    activeOffsetMob,offsetSample=nil,nil
+    state.SetTeleportOffset(state.TeleportOffset)
+    requestSave()
+end
 state.OffsetAvoidTypes={}
 state.AutoOffsetSolver=(function()
 -- BEGIN BUNDLED AUTO OFFSET
@@ -2300,8 +2313,9 @@ return function(input)
     if input.Mode=="Above" and input.AdaptiveAbove then
         local minimum=(input.PlayerBelow or 3)+1.5
         local center=input.Center or enemy.Position+Vector3.new(0,(playerRoot.Size.Y-size.Y)*.5,0)
-        local offset=math.max(minimum,center.Y-enemy.Position.Y+radius)
-        local distance=offset-(center.Y-enemy.Position.Y)
+        local offset=math.min(200,math.max(minimum,center.Y-enemy.Position.Y+radius))
+        local distance=math.abs(offset-(center.Y-enemy.Position.Y))
+        if offset<minimum then return nil,"Above cap leaves no body clearance" end
         if distance>reach-.2 then return nil,"Above position is outside the learned hit range" end
         local destination=enemy.Position+Vector3.new(0,offset,0)
         if destination.Y<=(input.DestroyHeight or -500)+40 then return nil,"Offset crosses the map kill plane" end
@@ -2313,6 +2327,13 @@ return function(input)
     local direction=above and 1 or -1
     local destination=center+Vector3.new(0,direction*radius,0)
     local offset=destination.Y-enemy.Position.Y
+    local limited=math.clamp(offset,-60,200)
+    if limited~=offset then
+        offset=limited
+        destination=Vector3.new(destination.X,enemy.Position.Y+offset,destination.Z)
+        radius=math.abs(destination.Y-center.Y)
+        if radius>reach-(input.Margin or 2) then return nil,"Offset cap is outside attack reach" end
+    end
     local body=above and (input.BodyAbove or size.Y*.5) or (input.BodyBelow or size.Y*.5)
     local playerExtent=above and (input.PlayerBelow or 3) or (input.PlayerAbove or 3)
     local minimum=body+playerExtent+1.5
@@ -2414,6 +2435,7 @@ function state.ResolveAutoOffset(mob)
         state.TeleportOffset=destination.Y-data.Root.Position.Y
         state.OffsetStatus="Suspended Unborn · fixed arena position +10 studs"
         data.LastGroundedFarmDestination=destination
+        data.LastGroundedFarmMode=state.OffsetMode
         return state.TeleportOffset
     end
     local now,mobRoot=os.clock(),data.Root
@@ -2447,7 +2469,7 @@ function state.ResolveAutoOffset(mob)
     local grounded,airborne=state.GroundFollow.Resolve(mob,data,now)
     state.FarmTargetAirborne=airborne
     if airborne then
-        local destination=data.LastGroundedFarmDestination
+        local destination=(data.LastGroundedFarmMode==state.OffsetMode and data.LastGroundedFarmDestination)
             or (state.FarmAbove and root.Position)
             or (grounded and Vector3.new(grounded.X,grounded.Y-data.BodyBelow-20,grounded.Z)) or root.Position
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
@@ -2456,8 +2478,9 @@ function state.ResolveAutoOffset(mob)
     end
     if state.AutoFarm and state.FarmCoordination then
         local sharedCenter=mobRoot.Position+Vector3.new(0,(2-mobRoot.Size.Y)*.5,0)
+        local reach=state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill)
         local plan,reason=state.AutoOffsetSolver({Enemy=mobRoot,Player={Size=Vector3.new(2,2,1)},Center=sharedCenter,
-            Mode="Below",Reach=state.AutoRanges.BodyRange(data),Margin=3,
+            Mode=state.OffsetMode,AdaptiveAbove=state.FarmAbove,Reach=reach,Margin=3,
             BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,PlayerAbove=3,PlayerBelow=3,
             DestroyHeight=workspace.FallenPartsDestroyHeight})
         if not plan then
@@ -2465,9 +2488,11 @@ function state.ResolveAutoOffset(mob)
             state.OffsetStatus=reason
             return nil
         end
-        local destination=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
+        local spread=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
+        local destination=Vector3.new(spread.X,plan.Destination.Y,spread.Z)
         state.AutoOffsetTarget,state.AutoOffsetDestination=mob,destination
         data.LastGroundedFarmDestination=destination
+        data.LastGroundedFarmMode=state.OffsetMode
         activeOffsetMob,offsetSample=nil,nil
         state.TeleportOffset=destination.Y-mobRoot.Position.Y
         state.OffsetStatus="Separated farm hold · slot "..tostring(state.FarmCoordination.Slot or 1)
@@ -2537,6 +2562,7 @@ function state.ResolveAutoOffset(mob)
         BodyBelow=data.BodyBelow,BodyAbove=data.BodyAbove,MissWindows=offsetSample.Misses,Confirmed=offsetSample.Confirmed}
     state.AutoOffsetTarget,state.AutoOffsetDestination=mob,plan.Destination
     data.LastGroundedFarmDestination=plan.Destination
+    data.LastGroundedFarmMode=state.OffsetMode
     state.SetTeleportOffset(plan.Offset)
     return plan.Offset
 end
@@ -10167,7 +10193,7 @@ return function(ctx)
     local kinds={}
     for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
-    for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
+    for _,key in ipairs({"FarmPosition","BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
     local function plain(value,depth)
         assert(depth<=12,"Config nesting is too deep")
@@ -28189,6 +28215,9 @@ return function(ctx)
     local function buildOtherTabs()
     stateToggle("Enabled","Combat","Kill Aura","SetEnabled")
     stateToggle("AutoFarm","Combat","Auto Farm","SetAutoFarm")
+    dropdown("FarmPosition","Combat","Auto Farm Position",function()
+        return {Options={"Above","Below"},Map={Above="Above",Below="Below"},Value=s.OffsetMode or "Below"}
+    end,function(value,map)if map[value] then invoke("SetFarmPosition",map[value]) end end)
     stateToggle("BossOnly","Combat","Boss Only","SetBossOnly")
     stateToggle("CreditCheck","Combat","Credit Check","SetCreditCheck")
     input("CreditWhitelist","Combat","Credit Whitelist",s.CreditWhitelistText,function(text)

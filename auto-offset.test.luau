@@ -21,7 +21,7 @@ return function(moduleSource)
     enemy.Position=Vector3.new(0,100,0); enemy.Size=Vector3.new(400,80,250)
     input.BodyBelow=40; input.Reach=120
     result=assert(solve(input))
-    assert(result.Radius==118 and result.Offset==-157,"Raw offset may exceed 120 when height correction requires it; corrected attack distance cannot")
+    assert(result.Radius==21 and result.Offset==-60,"Clamp raw Below offsets while rechecking corrected attack distance")
     enemy.Size=Vector3.new(8,14,8); input.BodyBelow=7; input.Reach=20
     result=assert(solve(input))
     assert(result.Radius==18 and result.Offset==-24,"Learned reach must recalculate geometry, not discard height correction")
