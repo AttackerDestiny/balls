@@ -155,12 +155,6 @@ function state.ResolveAutoOffset(mob)
         if not plan then
             state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
             state.OffsetStatus=reason
-            if state.FarmAbove then
-                data.FarmAboveRetryAt=now+8
-                state.FarmTargetLock,state.FollowTarget=nil,nil
-                state.FarmPriorityTarget,state.FarmPriorityScanAt=nil,0
-                nextAcquisition=0
-            end
             return nil
         end
         local spread=state.FarmCoordination.Spread(plan.Destination,mob,sharedCenter,plan.Reach)
@@ -182,15 +176,12 @@ function state.ResolveAutoOffset(mob)
     local verifiedReach=state.AutoRanges.Range(state.Enabled and "Kill" or "Skill",data,state.SelectedSkill)
     if plan and plan.Radius>verifiedReach-(state.FarmAbove and .2 or 1) then plan=nil; reason="Outer position exceeds the learned attack reach" end
     if not plan then
-        if state.FarmAbove then data.FarmAboveRetryAt=now+8 else data.SkipUntil=now+8 end
         state.OffsetStatus=reason
         state.LastOffsetRejected={Target=mob.Name,Reason=reason,At=now}
         state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
-        if state.FollowTarget==mob then state.FollowTarget=nil end
-        if state.FarmAbove then
-            state.FarmTargetLock=nil
-            state.FarmPriorityTarget,state.FarmPriorityScanAt=nil,0
-            nextAcquisition=0
+        if not state.FarmAbove then
+            data.SkipUntil=now+8
+            if state.FollowTarget==mob then state.FollowTarget=nil end
         end
         return nil
     end
@@ -226,7 +217,7 @@ function state.ResolveAutoOffset(mob)
             and now>=state.LagPauseUntil and (not state.PingMs or state.PingMs<=500) then
             offsetSample.Misses+=1
             state.OffsetStatus="No damage · holding outer clearance"
-            if offsetSample.Misses>=3 then
+            if offsetSample.Misses>=3 and not state.FarmAbove then
                 data.SkipUntil=now+8
                 state.FollowTarget=nil
                 state.AutoOffsetTarget,state.AutoOffsetDestination=nil,nil
@@ -422,7 +413,6 @@ local function validMob(mob, mobs)
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
         or mob~=state.ProgressionBossMob)then return nil end
     local data = getMobData(mob)
-    if state.AutoFarm and state.FarmAbove and data and os.clock()<(data.FarmAboveRetryAt or 0)then return nil end
     if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
     if state.MultiSpotAnchor and data and not (state.AutoFarm and targetPriority.Rank(mob)<=2) and not (state.MultiSpotEncounter and state.MultiSpotEncounter[mob]) and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
     if data and data.Health.Value > 0 and (not data.HitLives or data.HitLives.Value>0) and os.clock()>=(data.SkipUntil or 0) and not data.Entity:FindFirstChild("Immortal") then return data.Root end
