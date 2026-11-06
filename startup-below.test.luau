@@ -8,6 +8,7 @@ return function(source)
         Sleep=function(dt)now+=dt;if now>=.2 then ready=true end end}
     assert(run(ctx)and #moves==1 and moves[1].X==123 and moves[1].Y==80 and moves[1].Z==-456)
     point.Y=80;assert(run(ctx)and moves[2].Y==80,"Repeated startup must use ground height instead of subtracting another 20")
+    point.Y=65;assert(run(ctx)and moves[3].Y==65,"Startup preserves an already underground character's height")
     moves={};ready=false;now=0;assert(run(ctx)and now>=.2 and #moves==1,"Wait for the first living character")
     moves={};alive=false;assert(not run(ctx)and #moves==0,"Cancelled startup cannot move a character")
     alive=true;ready=false;now=0;ctx.Sleep=function(dt)now+=dt end

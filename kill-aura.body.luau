@@ -52,8 +52,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.remove-map-transparency-v2.0.15"
-local VERSION="2.0.15"
+local BUILD="2026-11-06.between-wave-recovery-v2.0.16"
+local VERSION="2.0.16"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -433,7 +433,7 @@ if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
 end
 
 local releaseStartupHold
-do
+if game.PlaceId~=78945654064532 then
     local moveBelow=(function()
 -- BEGIN BUNDLED STARTUP BELOW
 -- Resolve the startup position and its surface before handing off to the hold.
@@ -447,7 +447,8 @@ return function(ctx)
             local floor=ctx.Surface(root,point)
             assert(type(floor)=="number"and floor==floor and math.abs(floor)<1e8,"Startup ground height is unavailable")
             if not ctx.Alive()or ctx.Root()~=root then return false,"Character changed during startup"end
-            ctx.Move(root,point.X,floor-20,point.Z,floor)
+            local height=point.Y<floor-2 and point.Y or floor-20
+            ctx.Move(root,point.X,height,point.Z,floor)
             return true
         end
         if ctx.Now()>=deadline then return false,"Waiting for a living character timed out"end
@@ -473,6 +474,9 @@ end
             end
             params.FilterDescendantsInstances=excluded
             local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
+            if not hit then
+                hit=workspace:Raycast(point+Vector3.new(0,192,0),Vector3.new(0,-384,0),params)
+            end
             if hit then return hit.Position.Y end
             local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
             return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
@@ -518,11 +522,15 @@ end
             end)
             attachment.Parent=root
             hold.Parent=root
-            root.CFrame=CFrame.new(destination)*root.CFrame.Rotation
+            if (root.Position-destination).Magnitude>.01 then
+                root.CFrame=CFrame.new(destination)*root.CFrame.Rotation
+            end
             root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
         end})
     if not ok and releaseStartupHold then releaseStartupHold(true)end
     env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
+else
+    env.SB2StartupBelowResult={Build=BUILD,Moved=false,Reason="The Between"}
 end
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive()then return end
 
@@ -2752,6 +2760,7 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
+    if state.BlackoutTarget and mob~=state.BlackoutTarget then return nil end
     if not mob or mob.Parent ~= mobs then return nil end
     if state.AutoFarm and state.BossOnly and targetPriority.Rank(mob)>2 then return nil end
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
@@ -3399,7 +3408,7 @@ local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
 return function(ctx)
     local state, player = ctx.State, game.Players.LocalPlayer
-    local api = { Active = false, Seen = {}, History = {}, Moves = 0, RockChanges = 0 }
+    local api = { Active = false, Seen = {}, History = {}, Moves = 0 }
     local names = { "Lava", "Tempest", "Blackout", "Horde", "Rift", "Wisp", "Meme", "Bob" }
     local logPath="SB2Codex/wave-tests_"..player.UserId..".json"
     local audit=getgenv().SB2WaveDodgeAudit
@@ -3423,13 +3432,12 @@ return function(ctx)
             writefile(logPath,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
         end)
     end
-    local rocks, strikes = {}, {}
-    local lastArea, currentRock, rockSince, nextScan = nil, nil, 0, 0
-    local nextUpdate, lastMove, holdUntil = 0, 0, 0
+    local lastArea
+    local nextUpdate, lastMove = 0, 0
+    local shelter=Vector3.new(10,-19,-5)
+    local darknessShelter=Vector3.new(14,73,2)
     local cachedFloor, floorEnvironment, idleXZ
     local blackoutPoint,blackoutEnvironment,blackoutUntil=nil,nil,0
-    local bobUntil,bobDepth,nextBobPlan=0,0,0
-    local bobPoint,bobEnvironment=nil,nil
     local damageBefore, lastHealth, eventRecord
     local function horizontal(a, b)
         local d = (a - b) * Vector3.new(1, 0, 1)
@@ -3438,9 +3446,11 @@ return function(ctx)
     local function currentEvent()
         local a = tostring(workspace:GetAttribute("WaveDefenseArea") or "")
         local b = tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        local text = string.lower(a .. " " .. b .. " " .. tostring(workspace:GetAttribute("SpecialWave") or ""))
+        local special=workspace:GetAttribute("SpecialWave")
+        local text = string.lower(a .. " " .. b .. " " .. tostring(special or ""))
         if string.find(text,"darkness",1,true) then return "Blackout" end
         for _, name in ipairs(names) do if string.find(text, string.lower(name), 1, true) then return name end end
+        if type(special)=="string" and special~="" then return special end
         return nil
     end
     local function isActor(part)
@@ -3516,96 +3526,42 @@ return function(ctx)
         state.BlackoutMapBottom=bottom; state.BlackoutShelter=blackoutPoint
         return blackoutPoint
     end
-    local function bobRefuge(point,now)
-        local environment=tostring(workspace:GetAttribute("WaveDefenseEnvironment") or "")
-        if environment~=bobEnvironment then bobPoint=nil; nextBobPlan=0; bobEnvironment=environment end
-        if bobPoint and now<nextBobPlan then return bobPoint end
-        nextBobPlan=now+.25
-        local shelter=api.BlackoutPoint(point)
-        if not shelter then return nil end
-        local y=math.max(workspace.FallenPartsDestroyHeight+36,shelter.Y-bobDepth)
-        if y>=shelter.Y+1 then return nil end
-        local region,origin=bounds()
-        if not region then return Vector3.new(shelter.X,y,shelter.Z) end
-        if ctx.BossDodge then ctx.BossDodge.RefreshThreats() end
-        local enemies={}
-        local mobs=workspace:FindFirstChild("Mobs")
-        if mobs then for _,mob in ipairs(mobs:GetChildren()) do
-            local entity=mob:FindFirstChild("Entity"); local hp=entity and entity:FindFirstChild("Health")
-            local root=mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-            if root and hp and hp.Value>0 and #enemies<64 then enemies[#enemies+1]=root.Position+root.AssemblyLinearVelocity*math.min(.3,(state.PingMs or 100)/1000+.1) end
-        end end
-        local function clearance(p)
-            if ctx.BossDodge and ctx.BossDodge.IsThreatened(p) then return -1 end
-            local value=math.huge
-            for _,enemy in ipairs(enemies) do value=math.min(value,(p-enemy).Magnitude) end
-            if #enemies==0 then value=math.sqrt(horizontal(p,origin and origin.Position or region.Position)) end
-            return value
-        end
-        local best,bestScore=nil,-1
-        for _,x in ipairs({-.85,0,.85}) do for _,z in ipairs({-.85,0,.85}) do
-            if x~=0 or z~=0 then
-                local raw=region.CFrame:PointToWorldSpace(Vector3.new(region.Size.X*.5*x,0,region.Size.Z*.5*z))
-                local p=Vector3.new(raw.X,y,raw.Z)
-                local score=clearance(p)
-                if score>bestScore then best,bestScore=p,score end
-            end
-        end end
-        if bobPoint then
-            local current=Vector3.new(bobPoint.X,y,bobPoint.Z)
-            local score=clearance(current)
-            if score>=80 and score>=bestScore*.85 then best,bestScore=current,score end
-        end
-        bobPoint=best or Vector3.new(shelter.X,y,shelter.Z)
-        state.BobRefuge=bobPoint; state.BobClearance=bestScore; state.BobExtraDepth=bobDepth
-        return bobPoint
-    end
-    local function classify(part, now)
-        if state.StopEverything then return end
-        if not part:IsA("BasePart") or isActor(part) then return end
-        local region, origin = bounds()
-        if not origin or horizontal(part.Position,origin.Position)>450*450 then return end
-        local name = string.lower(part.Name)
-        local area=currentEvent()
-        if area == "Tempest" then
-            local c, e = part.Color, extent(part)
-            local purple = c.B > 0.45 and c.R > 0.3 and c.G < math.max(c.R,c.B)*0.8
-            if (part.Material==Enum.Material.Neon and purple and e.X>1 and e.Z>1)
-                or (name=="vfx" and part.Size.Y>100 and part.Size.X<35 and part.Size.Z<35) then
-                if not strikes[part] then strikes[part]={ First=now, Last=now }; if eventRecord then eventRecord.Warnings+=1 end end
-                strikes[part].Last=now
-                part.LocalTransparencyModifier=0
-            end
-        elseif area=="Lava" and part:IsDescendantOf(workspace:FindFirstChild("ActiveLavaHazard") or workspace:FindFirstChild("PillarSpawns") or part) then
-            local e=extent(part)
-            local floor=origin.Position.Y
-            local top=part.Position.Y+e.Y
-            local rockName = string.find(name,"rock",1,true) or string.find(name,"pillar",1,true) or string.find(name,"platform",1,true)
-            local inside = not region or (math.abs(region.CFrame:PointToObjectSpace(part.Position).X)<region.Size.X/2-8 and math.abs(region.CFrame:PointToObjectSpace(part.Position).Z)<region.Size.Z/2-8)
-            if inside and top>floor+2 and top<floor+90 and e.X>=2 and e.Z>=2 and e.X<40 and e.Z<40 and (rockName or part.Parent.Name=="PillarSpawns") then
-                if not rocks[part] then rocks[part]={First=now,Last=now,StableAt=now,StablePosition=part.Position,StableSize=part.Size,PeakY=part.Position.Y,LastY=part.Position.Y,LastAlpha=part.Transparency}; if eventRecord then eventRecord.Rocks+=1 end end
-                rocks[part].Last=now
-                rocks[part].HalfHeight=e.Y
-                part.LocalTransparencyModifier=0
-            end
-        end
-    end
-    local added=workspace.DescendantAdded:Connect(function(part)
-        if state.AutoDodge and part:IsA("BasePart") and currentEvent() then
-            classify(part,os.clock())
-            task.delay(0.12,function() if part.Parent and state.Running then classify(part,os.clock()) end end)
-        end
-    end)
     function api.IsHazardPart(part)
-        return rocks[part]~=nil or strikes[part]~=nil or (ctx.BossDodge and ctx.BossDodge.IsHazardPart(part))
+        return ctx.BossDodge and ctx.BossDodge.IsHazardPart(part)
+    end
+    local function requiresKills(area)
+        local note=tostring(workspace:GetAttribute("CountdownNote") or ""):lower()
+        if note:find("survive",1,true) then return false end
+        if (tonumber(workspace:GetAttribute("WaveProgressLeft")) or 0)>0 then return true end
+        if area=="Horde" or area=="Rift" or area=="Wisp" or area=="Meme" or area=="Bob" then return true end
+        return area~="Lava" and area~="Tempest" and area~="Blackout"
+            and (tonumber(workspace:GetAttribute("MobsLeft")) or 0)>0
+    end
+    local function darknessTarget(root,humanoid)
+        if not state.AutoFarm or not (state.Enabled or state.SkillAura) or not ctx.Mobs then return end
+        local orb=workspace:FindFirstChild("DarknerOrb")
+        local part=orb and orb:FindFirstChild("Part")
+        local light=part and part:FindFirstChildOfClass("PointLight")
+        if not light or not light.Enabled or light.Range<=0 then return end
+        local best,position,distance
+        for mob in pairs(ctx.Mobs)do
+            local data=ctx.MobData(mob)
+            if data and data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
+                and not data.Entity:FindFirstChild("Immortal") then
+                local mobPosition=data.Root.Position
+                local above=mobPosition+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
+                if (mobPosition-part.Position).Magnitude<light.Range and (above-part.Position).Magnitude<light.Range then
+                    if mob==state.BlackoutTarget then return mob,above end
+                    local gap=(mobPosition-root.Position).Magnitude
+                    if not distance or gap<distance then best,position,distance=mob,above,gap end
+                end
+            end
+        end
+        return best,position
     end
     local function recordMove(kind, point)
         api.Moves+=1
         if eventRecord then eventRecord.Moves=(eventRecord.Moves or 0)+1 end
-        if string.sub(kind,1,3)=="Bob" and api.Seen.Bob and api.Seen.Bob~=eventRecord then
-            api.Seen.Bob.ResidualMoves=(api.Seen.Bob.ResidualMoves or 0)+1
-        end
-        if eventRecord then eventRecord.Moves+=1 end
         api.History[#api.History+1]={Kind=kind,Position=point,At=os.clock(),Wave=workspace:GetAttribute("Wave")}
         if #api.History>40 then table.remove(api.History,1) end
     end
@@ -3616,16 +3572,6 @@ return function(ctx)
         if now-lastMove>0.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2) then recordMove(kind,point); lastMove=now end
         api.LastPosition=point
         return true
-    end
-    local function threatened(point)
-        for part in pairs(strikes) do
-            if part.Parent then
-                local e=extent(part)
-                local radius=math.max(10,e.X,e.Z)+4
-                if horizontal(point,part.Position)<radius*radius then return true end
-            end
-        end
-        return false
     end
     function api.Update()
         if state.StopEverything then return false end
@@ -3641,13 +3587,11 @@ return function(ctx)
         local humanoid=character and character:FindFirstChildOfClass("Humanoid")
         local entity=character and character:FindFirstChild("Entity")
         local health=entity and entity:FindFirstChild("Health")
-        if area=="Bob" then bobUntil=now+5 end
-        if area=="Bob" and lastArea~="Bob" then bobDepth=40; bobPoint=nil; nextBobPlan=0 end
         if area~=lastArea then
             if eventRecord then eventRecord.EndHealth=health and health.Value; eventRecord.Completed=true; eventRecord.Ended=now; saveAudit() end
             if api.Active then ctx.Release() end
             api.Active, state.Dodging=false,false
-            rocks, strikes, currentRock={}, {}, nil
+            state.BlackoutTarget=nil
             api.LastPosition=nil
             if area then
                 local old=api.Seen[area]
@@ -3658,15 +3602,11 @@ return function(ctx)
                 saveAudit()
             else eventRecord=nil end
             lastArea=area
-            nextScan=0
         end
         if health then
             if lastHealth and health.Value<lastHealth then
                 if eventRecord then eventRecord.Damage+=lastHealth-health.Value end
-                if now<bobUntil and api.Seen.Bob and api.Seen.Bob~=eventRecord then
-                    api.Seen.Bob.ResidualDamage=(api.Seen.Bob.ResidualDamage or 0)+lastHealth-health.Value
-                end
-                if now<bobUntil and health.Value>0 then bobDepth=math.min(80,bobDepth+20); nextBobPlan=0 end
+
             end
             lastHealth=health.Value
         end
@@ -3686,31 +3626,33 @@ return function(ctx)
         if not state.AutoDodge or not root or not humanoid or not health or health.Value<=0 or state.TravelBusy then
             if api.Active then ctx.Release() end
             api.Active,state.Dodging=false,false
+            state.BlackoutTarget=nil
             ctx.Status((state.AutoDodge and "Ready" or "Off").." · events "..seen.."/8")
             return false
         end
-        if area=="Lava" or area=="Tempest" then
-            if now>=nextScan then
-                nextScan=now+3
-                local container=area=="Lava" and workspace:FindFirstChild("ActiveLavaHazard") or workspace
-                if container then for _,part in ipairs(container:QueryDescendants("BasePart")) do classify(part,now) end end
-                for part in pairs(rocks) do if not part.Parent then rocks[part]=nil end end
-                for part in pairs(strikes) do if not part.Parent then strikes[part]=nil end end
+        local killObjective=area and requiresKills(area)
+        if area and (area=="Blackout" or not killObjective) then
+            local mob,above
+            if area=="Blackout" and killObjective then mob,above=darknessTarget(root,humanoid) end
+            state.BlackoutTarget=mob
+            local point=above or (area=="Blackout" and darknessShelter or shelter)
+            if hold(point,area.." shelter",now) then
+                -- Keep the dodge hold in charge of position while allowing hits on this target.
+                if mob and (root.Position-point).Magnitude<=2 then
+                    state.FollowTarget=mob
+                    state.Dodging=false
+                end
+                ctx.Status(area..(mob and " · attacking inside white light" or " · sheltering"))
+                return true
             end
         end
-        if now<bobUntil and area~="Blackout" and area~="Lava" then
-            local point=bobRefuge(root.Position,now)
-            if point then hold(point,area=="Bob" and "Bob refuge" or "Bob residual-attack refuge",now)
-            else hold(root.Position,"Bob waiting for map geometry",now) end
-            ctx.Status(area=="Bob" and "Bob · keeping clear of enemies" or "Bob · waiting for residual attacks to end")
-            return true
-        end
-        if area~="Blackout" and area~="Lava" and ctx.BossDodge and not (state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss) then
+        state.BlackoutTarget=nil
+        if ctx.BossDodge and not (state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss) then
             local region=bounds()
             local target=state.FollowTarget
             local tr=target and target:FindFirstChild("HumanoidRootPart")
             local desired=tr and Vector3.new(tr.Position.X,root.Position.Y,tr.Position.Z) or root.Position
-            local point,reason=ctx.BossDodge.Plan(root.Position,desired,region,area=="Tempest" and threatened or nil)
+            local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
             if point then
                 hold(point,"Boss evade: "..tostring(reason),now)
                 ctx.Status("Boss attack · outside danger zone")
@@ -3718,98 +3660,6 @@ return function(ctx)
             elseif ctx.BossDodge.Blocked then
                 local fallback=api.BlackoutPoint(root.Position)
                 if fallback then hold(fallback,"Boss evade below map bottom",now); return true end
-            end
-        end
-        if area=="Blackout" then
-            local point=api.BlackoutPoint(root.Position)
-            if point then
-                hold(point,"Blackout below map bottom",now)
-                state.IdleBelowMap=true; state.IdleAboveMap=false
-                ctx.Status("Blackout · sheltering below map bottom")
-            else
-                hold(root.Position,"Blackout waiting for map geometry",now)
-                ctx.Status("Blackout · waiting for map bottom geometry")
-            end
-            return true
-        elseif area=="Lava" then
-            local region,origin=bounds()
-            local baseY=region and region.Position.Y or (origin and origin.Position.Y or root.Position.Y)
-            local best,score
-            for part,data in pairs(rocks) do
-                if not part.Parent then rocks[part]=nil
-                else
-                    local position,size,alpha=part.Position,part.Size,part.Transparency
-                    local atSurface=position.Y>=baseY-0.12 and position.Y<=baseY+0.15
-                    data.SurfaceTop=position.Y+(data.HalfHeight or size.Y/2)
-                    local moved=(position-data.StablePosition).Magnitude>0.035 or (size-data.StableSize).Magnitude>0.04
-                    if moved then data.StableAt=now; data.StablePosition=position; data.StableSize=size end
-                    if data.WasReady and (data.SurfaceTop<baseY+2 or alpha>0.1
-                        or not part.CanCollide or size.Magnitude<(data.ReadySize or size.Magnitude)*0.97) then data.Dying=true end
-                    data.Ready=atSurface and part.CanCollide and alpha<0.08 and not data.Dying and now-data.StableAt>=0.24
-                    if data.Ready then
-                        data.WasReady=true; data.ReadySize=math.max(data.ReadySize or 0,size.Magnitude)
-                        data.ReadySince=data.ReadySince or now
-                        local value=horizontal(root.Position,position)
-                        if part~=currentRock and (not score or value<score) then best,score=part,value end
-                    end
-                    data.LastY,data.LastAlpha=position.Y,alpha
-                end
-            end
-            local current= currentRock and rocks[currentRock]
-            local currentSolid=current and currentRock.Parent and currentRock.CanCollide and currentRock.Transparency<0.9 and (current.SurfaceTop or 0)>baseY+0.75
-            local switch=not currentSolid or current.Dying or not current.WasReady
-            local reason=not currentSolid and "Current rock unavailable" or (current and current.Dying and "Current rock disappearing" or "Initial rock")
-            if not switch then best=currentRock
-            elseif not best and currentSolid then best=currentRock end
-            api.RockStatus={Current=currentRock,ReadyReplacement=best~=currentRock and best or nil,CurrentDying=current and current.Dying or false,Reason=reason}
-            if best then
-                if best~=currentRock then
-                    currentRock,rockSince=best,now; api.RockChanges+=1
-                    api.LastRockSwitch={At=now,Reason=reason,ReplacementReady=rocks[best] and rocks[best].Ready,Position=best.Position}
-                    if eventRecord then eventRecord.RockChanges=(eventRecord.RockChanges or 0)+1 end
-                end
-                local e=extent(best)
-                local top=best.Position+Vector3.new(0,e.Y,0)
-                local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Include; params.FilterDescendantsInstances={best}
-                local hit=workspace:Raycast(top+Vector3.new(0,4,0),Vector3.new(0,-e.Y*2-8,0),params)
-                if hit then top=hit.Position end
-                hold(top+Vector3.new(0,humanoid.HipHeight+root.Size.Y/2+0.25,0),"Lava rock",now)
-                ctx.Status("Lava · "..((rocks[best] and rocks[best].Dying) and "waiting for a settled rock" or "holding current rock").." · events "..seen.."/8")
-                return true
-            end
-            -- Do not let auto farm drive into the floor while rocks are loading.
-            local _,origin=bounds()
-            local minimumY=(origin and origin.Position.Y or root.Position.Y)+18
-            local fallback=api.LastPosition and api.LastPosition.Y>=minimumY and api.LastPosition or Vector3.new(root.Position.X,minimumY,root.Position.Z)
-            hold(fallback,"Waiting for rock",now)
-            ctx.Status("Lava · waiting for a solid rock · events "..seen.."/8")
-            return true
-        elseif area=="Tempest" then
-            local target=state.FollowTarget
-            local tr=target and target:FindFirstChild("HumanoidRootPart")
-            local desired=tr and Vector3.new(tr.Position.X,root.Position.Y,tr.Position.Z) or root.Position
-            if threatened(root.Position) or threatened(desired) or now<holdUntil then
-                local point=api.LastPosition or root.Position
-                if threatened(point) then
-                    local best,score
-                    local region,origin=bounds()
-                    for radius=10,60,5 do
-                        for i=1,16 do
-                            local angle=i*math.pi/8
-                            local p=root.Position+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
-                            local inArena=not region or (math.abs(region.CFrame:PointToObjectSpace(p).X)<region.Size.X/2-10 and math.abs(region.CFrame:PointToObjectSpace(p).Z)<region.Size.Z/2-10)
-                            if inArena and not threatened(p) then local value=horizontal(p,root.Position); if not score or value<score then best,score=p,value end end
-                        end
-                        if best then break end
-                    end
-                    if best then point=best; holdUntil=now+0.45 end
-                end
-                if not threatened(point) then
-                    point=Vector3.new(point.X,api.FloorY(point)+(state.AutoFarm and -20 or humanoid.HipHeight+root.Size.Y/2+0.25),point.Z)
-                    hold(point,"Lightning evade",now)
-                    ctx.Status("Tempest · outside strike circles · events "..seen.."/8")
-                    return true
-                end
             end
         end
         if api.Active then ctx.Release() end
@@ -3830,11 +3680,11 @@ return function(ctx)
     end
     function api.Destroy()
         saveAudit()
-        added:Disconnect()
         if ctx.BossDodge then ctx.BossDodge.Destroy() end
         if ctx.AtheonDodge then ctx.AtheonDodge.Destroy() end
         if api.Active then ctx.Release() end
         api.Active=false
+        state.BlackoutTarget=nil
         state.Dodging=false
     end
     return api
@@ -3845,6 +3695,8 @@ end)()({
     State = state,
     BossDodge = state.BossDodge,
     AtheonDodge = state.AtheonDodgeController,
+    Mobs = trackedMobs,
+    MobData = getMobData,
     Hold = function(destination)
         local character = player.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -5158,6 +5010,7 @@ local function updateMovement(now)
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
     if not state.MovementOwnership.CanFarm(now)then return end
+    if state.BlackoutTarget then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
@@ -7709,6 +7562,7 @@ return function(ctx)
     local protectedSince
     function api.AdoptSearch()started=true end
     function api.ObserveProtected()
+        if ctx.Suspended and ctx.Suspended() then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
             or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
         for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
@@ -7720,6 +7574,7 @@ return function(ctx)
         ctx.Status("Protected · only you and whitelisted players")
     end
     function api.Update()
+        if ctx.Suspended and ctx.Suspended() then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
         if api.Paused then
@@ -7785,6 +7640,7 @@ return function(ctx)
         ctx.Status("Holding position · "..tostring(reason))
     end
     function api.Joined(person)
+        if ctx.Suspended and ctx.Suspended() then return end
         if state.SafeMode and not ctx.Allowed(person) then
             state.SafePendingUserId=person.UserId
             if ctx.Panic then ctx.Panic() end
@@ -8287,6 +8143,7 @@ end
 -- Roblox/executor adapter. No credentials, web sessions, or block-list HTTP calls.
 return function(ctx)
     local state, player, Players = ctx.State, ctx.Player, ctx.Players
+    local inBetween=game.PlaceId==78945654064532
     local farmClock=state.FarmClock or os.clock
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
@@ -8543,7 +8400,7 @@ local p=game:GetService("Players").LocalPlayer
 while not p do task.wait();p=game:GetService("Players").LocalPlayer end
 local h=game:GetService("HttpService")
 local ok,c=pcall(function()return h:JSONDecode(readfile(%q))end)
-if ok and type(c)=="table" and c.AutomationRunId==%q and (c.SafeMode==true or c.MultiSpot==true or c.AccountProgression==true)
+if ok and type(c)=="table" and c.AutomationRunId==%q and (c.SafeMode==true or c.MultiSpot==true or c.AccountProgression==true or c.AutoCreateBetween==true)
     and game.GameId==%s then
     local old=getgenv().SB2KillAura
     if not (old and old.Running and old.AutomationLoadedJob==game.JobId and old.AutomationRunId==c.AutomationRunId) then
@@ -8645,6 +8502,7 @@ end
     })
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
+        Suspended=function()return inBetween end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
         Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,ReleasePanic=function()state.ReleaseSafePanic()end,
@@ -8730,7 +8588,7 @@ end
         local floor=catalog.FloorById[tonumber(id)]
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id;state.SaveNow();refresh()
-        if state.SafeMode then
+        if state.SafeMode and not inBetween then
             state.PanicToSpawn()
             task.defer(function()workerIdentity();safe.Update();refresh()end)
         end
@@ -8928,7 +8786,7 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression then
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
         elseif stage==Enum.TeleportState.Failed then
@@ -8944,11 +8802,12 @@ end
         getgenv().SB2AutomationResumeFeatures=nil
         if features then restoreFeatures(features) end
         local ok,resume=pcall(readTicket);if queuedResume then ok,resume=true,queuedResume end
-        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
+        if not inBetween and not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
         state.SaveNow()
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
+                if inBetween then return end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or (kickFallback and kickFallback.Armed)then return end
                 friend.Update(os.clock())
                 safe.Update()
@@ -10576,13 +10435,55 @@ end
 -- END BUNDLED BETWEEN ROOM
     end)()
     local placeId,index=78945654064532,nil
+    local inBetween=game.PlaceId==placeId
+    local reviveUI=inBetween and require(services.UI.WaveDefense.Revive)
+    local function alive(person)
+        local character=person.Character
+        local entity=character and character:FindFirstChild("Entity")
+        local health=entity and entity:FindFirstChild("Health")
+        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        return humanoid and humanoid.Health>0 and (not health or health.Value>0)
+    end
+    local function revivePrompt()
+        return reviveUI and reviveUI.Frame and reviveUI.Frame.Visible
+    end
+    local function wiped()
+        if not revivePrompt() then return false end
+        for _,person in ipairs(Players:GetPlayers())do
+            local lives=person:GetAttribute("Lives")
+            if alive(person) or type(lives)~="number" or lives>0 then return false end
+        end
+        return true
+    end
+    if inBetween then
+        local requestedLives,reviving
+        taskController("BetweenRevive",.35,function()
+            if alive(player) then requestedLives=nil;return end
+            if reviving or not revivePrompt() then return end
+            local lives=player:GetAttribute("Lives")
+            if type(lives)~="number" or lives<=0 or requestedLives==lives then return end
+            requestedLives=lives
+            reviving=true
+            task.spawn(function()
+                if state.Running and not state.StopEverything and revivePrompt()
+                    and player:GetAttribute("Lives")==lives and not alive(player) then
+                    local ok,accepted=pcall(function()
+                        return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"WaveDefense","Revive"})
+                    end)
+                    if ok and accepted and reviveUI.Hide then reviveUI.Hide() end
+                end
+                reviving=false
+            end)
+        end)
+        table.insert(frameOrder,"BetweenRevive")
+    end
     local access={Private=true,Friends=true,["Game Party"]=true}
     local difficulty={Normal=true,Hard=true,Elite=true}
     state.BetweenAccess=access[state.BetweenAccess] and state.BetweenAccess or "Private"
     state.BetweenDifficulty=difficulty[state.BetweenDifficulty] and state.BetweenDifficulty or "Normal"
     local room=make({UserId=player.UserId,PlaceId=placeId,
         Active=function()
-            return state.Running and state.AutoCreateBetween and game.PlaceId~=placeId
+            return state.Running and state.AutoCreateBetween and (not inBetween or wiped())
                 and not state.AutomationTeleporting and not state.TravelBusy
         end,
         Read=function()
@@ -10597,6 +10498,7 @@ end
         Status=function(message)state.BetweenRoomStatus=message end,
         Spawn=task.spawn,
         Start=function()
+            if state.QueueAutomation then pcall(state.QueueAutomation) end
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end,
         Send=function(action)

@@ -368,6 +368,7 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy then return nil end
+    if state.BlackoutTarget and mob~=state.BlackoutTarget then return nil end
     if not mob or mob.Parent ~= mobs then return nil end
     if state.AutoFarm and state.BossOnly and targetPriority.Rank(mob)>2 then return nil end
     if state.AccountProgression and (state.ProgressionPhase~="Fighting" or state.ProgressionEquipping
@@ -575,6 +576,8 @@ end)()({
     State = state,
     BossDodge = state.BossDodge,
     AtheonDodge = state.AtheonDodgeController,
+    Mobs = trackedMobs,
+    MobData = getMobData,
     Hold = function(destination)
         local character = player.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -1241,6 +1244,7 @@ local function updateMovement(now)
     if now < nextMovementUpdate then return end
     nextMovementUpdate = now + 0.08
     if not state.MovementOwnership.CanFarm(now)then return end
+    if state.BlackoutTarget then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return

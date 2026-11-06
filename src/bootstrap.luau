@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.remove-map-transparency-v2.0.15"
-local VERSION="2.0.15"
+local BUILD="2026-11-06.between-wave-recovery-v2.0.16"
+local VERSION="2.0.16"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -201,7 +201,7 @@ if env.SB2FarmRecoveryUntil and env.SB2FarmRecoveryUntil > os.clock() then
 end
 
 local releaseStartupHold
-do
+if game.PlaceId~=78945654064532 then
     local moveBelow=(function()
 -- BEGIN BUNDLED STARTUP BELOW
 -- END BUNDLED STARTUP BELOW
@@ -222,6 +222,9 @@ do
             end
             params.FilterDescendantsInstances=excluded
             local hit=workspace:Raycast(point+Vector3.new(0,64,0),Vector3.new(0,-256,0),params)
+            if not hit then
+                hit=workspace:Raycast(point+Vector3.new(0,192,0),Vector3.new(0,-384,0),params)
+            end
             if hit then return hit.Position.Y end
             local humanoid=root.Parent:FindFirstChildOfClass("Humanoid")
             return point.Y-(humanoid and humanoid.HipHeight or 2)-root.Size.Y/2
@@ -267,11 +270,15 @@ do
             end)
             attachment.Parent=root
             hold.Parent=root
-            root.CFrame=CFrame.new(destination)*root.CFrame.Rotation
+            if (root.Position-destination).Magnitude>.01 then
+                root.CFrame=CFrame.new(destination)*root.CFrame.Rotation
+            end
             root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
         end})
     if not ok and releaseStartupHold then releaseStartupHold(true)end
     env.SB2StartupBelowResult={Build=BUILD,Moved=ok and moved==true,Error=not ok and tostring(moved)or (not moved and reason or nil)}
+else
+    env.SB2StartupBelowResult={Build=BUILD,Moved=false,Reason="The Between"}
 end
 if env.SB2LoadToken~=loadToken or not runtimeOwner.Alive()then return end
 

@@ -8,6 +8,7 @@ return function(ctx)
     local protectedSince
     function api.AdoptSearch()started=true end
     function api.ObserveProtected()
+        if ctx.Suspended and ctx.Suspended() then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking
             or state.SafeWhitelistResolving or ctx.Travelling()or ctx.CurrentFloor()~=targetFloor()then protectedSince=nil;return end
         for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then protectedSince=nil;return end end
@@ -19,6 +20,7 @@ return function(ctx)
         ctx.Status("Protected · only you and whitelisted players")
     end
     function api.Update()
+        if ctx.Suspended and ctx.Suspended() then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
         if api.Paused then
@@ -84,6 +86,7 @@ return function(ctx)
         ctx.Status("Holding position · "..tostring(reason))
     end
     function api.Joined(person)
+        if ctx.Suspended and ctx.Suspended() then return end
         if state.SafeMode and not ctx.Allowed(person) then
             state.SafePendingUserId=person.UserId
             if ctx.Panic then ctx.Panic() end

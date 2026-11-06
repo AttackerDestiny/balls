@@ -378,13 +378,55 @@ do
 -- END BUNDLED BETWEEN ROOM
     end)()
     local placeId,index=78945654064532,nil
+    local inBetween=game.PlaceId==placeId
+    local reviveUI=inBetween and require(services.UI.WaveDefense.Revive)
+    local function alive(person)
+        local character=person.Character
+        local entity=character and character:FindFirstChild("Entity")
+        local health=entity and entity:FindFirstChild("Health")
+        local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+        return humanoid and humanoid.Health>0 and (not health or health.Value>0)
+    end
+    local function revivePrompt()
+        return reviveUI and reviveUI.Frame and reviveUI.Frame.Visible
+    end
+    local function wiped()
+        if not revivePrompt() then return false end
+        for _,person in ipairs(Players:GetPlayers())do
+            local lives=person:GetAttribute("Lives")
+            if alive(person) or type(lives)~="number" or lives>0 then return false end
+        end
+        return true
+    end
+    if inBetween then
+        local requestedLives,reviving
+        taskController("BetweenRevive",.35,function()
+            if alive(player) then requestedLives=nil;return end
+            if reviving or not revivePrompt() then return end
+            local lives=player:GetAttribute("Lives")
+            if type(lives)~="number" or lives<=0 or requestedLives==lives then return end
+            requestedLives=lives
+            reviving=true
+            task.spawn(function()
+                if state.Running and not state.StopEverything and revivePrompt()
+                    and player:GetAttribute("Lives")==lives and not alive(player) then
+                    local ok,accepted=pcall(function()
+                        return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"WaveDefense","Revive"})
+                    end)
+                    if ok and accepted and reviveUI.Hide then reviveUI.Hide() end
+                end
+                reviving=false
+            end)
+        end)
+        table.insert(frameOrder,"BetweenRevive")
+    end
     local access={Private=true,Friends=true,["Game Party"]=true}
     local difficulty={Normal=true,Hard=true,Elite=true}
     state.BetweenAccess=access[state.BetweenAccess] and state.BetweenAccess or "Private"
     state.BetweenDifficulty=difficulty[state.BetweenDifficulty] and state.BetweenDifficulty or "Normal"
     local room=make({UserId=player.UserId,PlaceId=placeId,
         Active=function()
-            return state.Running and state.AutoCreateBetween and game.PlaceId~=placeId
+            return state.Running and state.AutoCreateBetween and (not inBetween or wiped())
                 and not state.AutomationTeleporting and not state.TravelBusy
         end,
         Read=function()
@@ -399,6 +441,7 @@ do
         Status=function(message)state.BetweenRoomStatus=message end,
         Spawn=task.spawn,
         Start=function()
+            if state.QueueAutomation then pcall(state.QueueAutomation) end
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end,
         Send=function(action)

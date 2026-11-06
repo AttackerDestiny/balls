@@ -1,6 +1,7 @@
 -- Roblox/executor adapter. No credentials, web sessions, or block-list HTTP calls.
 return function(ctx)
     local state, player, Players = ctx.State, ctx.Player, ctx.Players
+    local inBetween=game.PlaceId==78945654064532
     local farmClock=state.FarmClock or os.clock
     if type(state.SafeWhitelistText)~="string" then state.SafeWhitelistText="" end
     if type(state.SafeWhitelistIds)~="table" then state.SafeWhitelistIds={} end
@@ -257,7 +258,7 @@ local p=game:GetService("Players").LocalPlayer
 while not p do task.wait();p=game:GetService("Players").LocalPlayer end
 local h=game:GetService("HttpService")
 local ok,c=pcall(function()return h:JSONDecode(readfile(%q))end)
-if ok and type(c)=="table" and c.AutomationRunId==%q and (c.SafeMode==true or c.MultiSpot==true or c.AccountProgression==true)
+if ok and type(c)=="table" and c.AutomationRunId==%q and (c.SafeMode==true or c.MultiSpot==true or c.AccountProgression==true or c.AutoCreateBetween==true)
     and game.GameId==%s then
     local old=getgenv().SB2KillAura
     if not (old and old.Running and old.AutomationLoadedJob==game.JobId and old.AutomationRunId==c.AutomationRunId) then
@@ -359,6 +360,7 @@ end
     })
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
+        Suspended=function()return inBetween end,
         TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
         Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,ReleasePanic=function()state.ReleaseSafePanic()end,
@@ -444,7 +446,7 @@ end
         local floor=catalog.FloorById[tonumber(id)]
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id) then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id;state.SaveNow();refresh()
-        if state.SafeMode then
+        if state.SafeMode and not inBetween then
             state.PanicToSpawn()
             task.defer(function()workerIdentity();safe.Update();refresh()end)
         end
@@ -642,7 +644,7 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression then
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween then
                 local ok,message=pcall(state.QueueAutomation);if not ok then fail(message) end
             end
         elseif stage==Enum.TeleportState.Failed then
@@ -658,11 +660,12 @@ end
         getgenv().SB2AutomationResumeFeatures=nil
         if features then restoreFeatures(features) end
         local ok,resume=pcall(readTicket);if queuedResume then ok,resume=true,queuedResume end
-        if not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
+        if not inBetween and not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId) and ok and type(resume)=="table" and resume.Active==true and resume.PlaceId==game.PlaceId then api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end end
         state.SaveNow()
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out") end
             local updated,message=pcall(function()
+                if inBetween then return end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or (kickFallback and kickFallback.Armed)then return end
                 friend.Update(os.clock())
                 safe.Update()

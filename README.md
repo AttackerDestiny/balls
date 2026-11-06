@@ -201,7 +201,9 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 **The Between → Auto Create Room** creates a room and starts the challenge once the game confirms the selected access mode (Private, Friends, or Game Party) and difficulty (Normal, Hard, or Elite). A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
 
-**Auto Dodge** reads supported native challenge-floor hazards and temporarily takes movement priority. Default ON, relevant only where supported hazards exist. It does not guarantee immunity, especially when low FPS delays observations.
+The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, Auto Create Room attempts another room from inside The Between.
+
+**Auto Dodge** holds at `(10, -19, -5)` during survival special waves and `(14, 73, 2)` during Blackout. Kill objectives keep combat active. If Blackout reports a kill objective, Auto Farm waits for an enemy within the white orb's light and fights from above it. Default ON.
 
 Extended camera zoom is applied while the runtime owns it.
 

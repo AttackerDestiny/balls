@@ -124,6 +124,7 @@ def main():
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    fixture += "assert(loadstring(" + quote(read("rock-switch.test.luau")) + "))()(" + quote(wave) + ")\n"
     fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + quote(read("between-room.module.luau")) + ")\n"
     for name in ("enemy-registry", "work-scheduler", "runtime-scope", "movement-owner", "settings-snapshot", "instance-queue"):
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
