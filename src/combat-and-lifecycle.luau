@@ -34,7 +34,7 @@ local function playBurstSwing()
     state.SwingMode="Continuous visuals"
 end
 local function updateAutoSwing()
-    if not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations then stopSword(true); return end
+    if not state.Enabled or not state.AutoSwing or state.StopEverything or state.RemovingAnimations or state.SkillCastRunning then stopSword(true); return end
     playBurstSwing()
 end
 
@@ -113,14 +113,14 @@ local function updateSkillAura()
     if not gunProfile and not Skills.HasStamina(definition.Cost.Value) then return end
     if not CanRunSkill(player,name) or GameUI.IsMenuOpen() or not state.SkillActivation.CanHandle(name) then return end
     local mobs=refreshMobIndex()
-    local target,targetRoot
+    local target
     local function consider(mob)
         local mobRoot=validMob(mob,mobs)
         if not mobRoot then return end
         local data=getMobData(mob)
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"SkillStart")then return end
         local reach=state.AutoRanges.Range("Skill",data,name)
-        if attackDeltaFor(data,root).Magnitude<=reach and (not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)) then target,targetRoot=mob,mobRoot end
+        if attackDeltaFor(data,root).Magnitude<=reach and (not target or targetPriority.Less(mob,target,root.Position,state.AutoFarm and state.FollowTarget or nil)) then target=mob end
     end
     local primary=state.AutoFarm and state.FollowTarget or nil
     if primary then consider(primary) end
@@ -149,11 +149,6 @@ local function updateSkillAura()
     state.AttackingTarget=target; trackHealth(target)
     state.SkillExecution="Source window"
     state.SkillStatus="Casting "..name
-    local direction=(targetRoot.Position-root.Position)*Vector3.new(1,0,1)
-    if direction.Magnitude>.5 then
-        root.CFrame=CFrame.lookAt(root.Position,root.Position+direction.Unit,Vector3.yAxis)
-        if orientationAlign then orientationAlign.CFrame=root.CFrame.Rotation end
-    end
     local function current()
         return not cast.Cancelled and not cast.CreditFinished and state.ActiveSkillCast==cast and state.Running and not state.StopEverything
             and state.SkillAura and weapons.Version==cast.Version and weapons.Ready and state.SelectedSkill==name
@@ -241,9 +236,22 @@ local function updateSkillAura()
             })
             if not cast.Multi.Start(target,table.pack()) then burst.Status="Target changed before skill damage"; return end
             end
+            if not current() then return end
+            local aimRoot=validMob(target,mobs)
+            local entry=aimRoot and getMobData(target)
+            if not entry or attackDeltaFor(entry,root).Magnitude>state.AutoRanges.Range("Skill",entry,name) then
+                burst.Status="Target moved before skill activation"
+                return
+            end
+            local direction=aimRoot.Position-root.Position
+            if not gunProfile then direction=direction*Vector3.new(1,0,1) end
+            stopSword(true)
+            if state.AutoFarm and movementRoot==root and positionAlign and positionAlign.Enabled then
+                positionAlign.Position=root.Position
+            end
             local acknowledged,reason,lease=state.SkillActivation.Begin(name,definition,entity,root,current,function(window)
                 if current() then startDamage(window) end
-            end, state.SkillActivation.Profile(name) and targetRoot.Parent and (targetRoot.Position-root.Position) or nil)
+            end,direction)
             burst.ActivationAcknowledged=acknowledged
             if not acknowledged or not current() then
                 if cast.Multi then cast.Multi.Cancel(reason or "Cast interrupted") end

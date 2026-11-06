@@ -1325,7 +1325,9 @@ local function updateMovement(now)
         else state.ExploreFailures = 0 end
         state.LastExploreDestination = nil
     end
-    if (state.SkillCastRunning or Skills.usingSkill ~= "none") and not (state.SkillCastRunning and state.SuppressSkillMotion) then
+    -- Let the active aura cast finish at its origin before following a new position.
+    if state.SkillCastRunning then return end
+    if Skills.usingSkill ~= "none" then
         if positionAlign then positionAlign.Enabled = false end
         if orientationAlign then orientationAlign.Enabled = false end
         state.SkillMovementSuspended = true
