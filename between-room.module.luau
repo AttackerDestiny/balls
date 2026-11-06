@@ -2,11 +2,12 @@
 return function(ctx)
     local api={}
     local pending,changes,stopped=nil,0,false
+    local starting,startedRoom=false,nil
     function api.Reset()
         pending=nil;changes=0;stopped=false
     end
     function api.Update(now)
-        if stopped or not ctx.Active() then return end
+        if stopped or starting or not ctx.Active() then return end
         local room=ctx.Read()
         if pending then
             if pending.Field=="Id" and room or room and room[pending.Field]~=pending.Before then
@@ -25,6 +26,7 @@ return function(ctx)
             ctx.Status("Leave your current party to create a Between room")
             return
         end
+        if room and room.Id==startedRoom then return end
         local access,difficulty=ctx.Selection()
         local action,field
         if not room then changes=0;action,field="CreateParty","Id"
@@ -32,8 +34,21 @@ return function(ctx)
         elseif room.Mode~=difficulty then action,field="ToggleMode","Mode"
         elseif room.Status~=access then action,field="ToggleStatus","Status"
         else
-            changes=0
-            ctx.Status("Room ready · "..access.." · "..difficulty)
+            starting=true
+            stopped=true
+            ctx.Status("Starting The Between · "..access.." · "..difficulty)
+            ctx.Spawn(function()
+                local ok,accepted=pcall(ctx.Start)
+                starting=false
+                if ok and accepted==true then
+                    startedRoom=room.Id
+                    stopped=true
+                    if ctx.Active() then ctx.Status("Start accepted · waiting for teleport") end
+                elseif ctx.Active() then
+                    stopped=true
+                    ctx.Status("Start failed. Check the native party menu and toggle Auto Create Room to retry.")
+                end
+            end)
             return
         end
         changes+=1

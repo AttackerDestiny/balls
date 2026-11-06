@@ -199,7 +199,7 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 ## Challenge Floors
 
-**The Between → Auto Create Room** creates a room with the selected access mode (Private, Friends, or Game Party) and difficulty (Normal, Hard, or Elite). Start the challenge from the native party screen. The game cycles access settings through Public while applying some selections.
+**The Between → Auto Create Room** creates a room and starts the challenge once the game confirms the selected access mode (Private, Friends, or Game Party) and difficulty (Normal, Hard, or Elite). A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
 
 **Auto Dodge** reads supported native challenge-floor hazards and temporarily takes movement priority. Default ON, relevant only where supported hazards exist. It does not guarantee immunity, especially when low FPS delays observations.
 

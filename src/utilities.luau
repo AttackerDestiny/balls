@@ -397,6 +397,10 @@ do
         end,
         Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
         Status=function(message)state.BetweenRoomStatus=message end,
+        Spawn=task.spawn,
+        Start=function()
+            return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
+        end,
         Send=function(action)
             if action=="CreateParty" and not index then
                 for i,location in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
