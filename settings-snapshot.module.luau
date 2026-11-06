@@ -1,7 +1,7 @@
 -- A reload retains settings, never the previous runtime's instances or closures.
 return function(previous,userId)
     if not previous or previous.UserId~=userId then return nil end
-    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","AeganatosDodge","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","NoSelfDamage","AeganatosDodge","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",

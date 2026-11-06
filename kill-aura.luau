@@ -20,7 +20,7 @@ local previous=(function()
 -- A reload retains settings, never the previous runtime's instances or closures.
 return function(previous,userId)
     if not previous or previous.UserId~=userId then return nil end
-    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","AeganatosDodge","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
+    local fields={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","AccountProgression","ActiveTab","NoSelfDamage","AeganatosDodge","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
@@ -53,8 +53,8 @@ end
 
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.aeganatos-dodge-v2.0.22"
-local VERSION="2.0.22"
+local BUILD="2026-11-06.self-damage-protection-v2.0.23"
+local VERSION="2.0.23"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- Executor paths are relative to its workspace; never add a second "workspace".
@@ -283,7 +283,7 @@ return function(ctx)
     local api={Values={}}
     local path="SB2Codex/shared-settings.json"
     local keys={"AutoCreateBetween","BetweenAccess","BetweenDifficulty","AtheonUnlock","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AeganatosDodge","AtheonDodge","PerformanceBoosters",
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","PerformanceBoosters",
         "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder",
         "Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function select(value)
@@ -401,6 +401,7 @@ local restore = {
     Skill=preference("SelectedSkill","Piercing Dash"),
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
+    NoSelfDamage=preference("NoSelfDamage",false)==true,
     AeganatosDodge=preference("AeganatosDodge",false)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
@@ -588,7 +589,7 @@ local state = {
     HideSkillAnimation = true, HiddenSkillAnimations = 0,
     SkillBurstInterval = 0.30, SkillHitRequests = 0, LastSkillBurstSize = 0, SkillBurstHistory = {},
     AutoExplore = restore.AutoExplore, ExploreHops = 0, Exploring = false,
-    AutoDodge = restore.AutoDodge, AeganatosDodge=restore.AeganatosDodge,AtheonDodge=restore.AtheonDodge, Dodging = false,
+    AutoDodge = restore.AutoDodge, NoSelfDamage=restore.NoSelfDamage,AeganatosDodge=restore.AeganatosDodge,AtheonDodge=restore.AtheonDodge, Dodging = false,
     PerformanceBoosters=restore.PerformanceBoosters,
     AutoJoinFriend=restore.AutoJoinFriend,JoinFriendUsername=restore.JoinFriendUsername,
     SafeMode=restore.SafeMode,SafeFloorId=restore.SafeFloorId,SharedSafeFloorId=restore.SafeFloorId,SafeWhitelistText=restore.SafeWhitelistText,SafeWhitelistIds=restore.SafeWhitelistIds,
@@ -1551,7 +1552,7 @@ local function settingsPayload()
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
         AutoExplore = state.AutoExplore,
-        AutoDodge = features.AutoDodge, AeganatosDodge=features.AeganatosDodge,AtheonDodge=features.AtheonDodge,
+        AutoDodge = features.AutoDodge, NoSelfDamage=features.NoSelfDamage,AeganatosDodge=features.AeganatosDodge,AtheonDodge=features.AtheonDodge,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
         WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,
@@ -3529,6 +3530,61 @@ end
         if not value then state.AeganatosDodgeController.Reset()end
         requestSave()
     end
+end
+do
+    local create=(function()
+-- BEGIN BUNDLED SELF DAMAGE PROTECTION
+-- Own the native enemy-skill reporting entry point; do not hook arbitrary remotes.
+return function(ctx)
+    local api={Blocked=0}
+    local state=ctx.State
+    local native=ctx.Native
+    local owned,previous
+    local enabled,disposed=false,false
+    local function restore()
+        if owned and native.DamageLocalPlayer==owned then native.DamageLocalPlayer=previous end
+        owned=nil
+    end
+    function api.Set(value)
+        if disposed then return false end
+        value=value==true
+        if value then
+            if not owned or native.DamageLocalPlayer~=owned then
+                local original=native.DamageLocalPlayer
+                if type(original)~="function"then state.LastSelfDamageProtectionError="Native DamageSelf entry point unavailable";return false end
+                previous=original
+                owned=function(...)
+                    if enabled and not disposed and state and state.Running and not state.StopEverything then
+                        api.Blocked+=1
+                        return
+                    end
+                    return original(...)
+                end
+                native.DamageLocalPlayer=owned
+            end
+        else restore()end
+        enabled=value;state.NoSelfDamage=value
+        return true
+    end
+    function api.Destroy()
+        if disposed then return end
+        enabled=false;disposed=true;restore()
+        state=nil;ctx.State=nil
+    end
+    return api
+end
+
+-- END BUNDLED SELF DAMAGE PROTECTION
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local base=enemy and enemy:FindFirstChild("Base")
+    state.SelfDamageProtection=create({State=state,Native=base and require(base)or {}})
+    function state.SetNoSelfDamage(value)
+        local ok=state.SelfDamageProtection.Set(value)
+        if ok then requestSave()end
+        return ok
+    end
+    state.SetNoSelfDamage(state.NoSelfDamage)
 end
 local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
@@ -6028,6 +6084,7 @@ end
     retire("Moderator",state.ModeratorWatch,"Destroy")
     retire("Upright",state.UprightController,"Destroy")
     retire("Dodge",waveDodge,"Destroy")
+    retire("SelfDamage",state.SelfDamageProtection,"Destroy")
     retire("Visuals",state.SkillVisuals,"Destroy")
     cleanup("World",function()if state.RestoreWorldVisuals then state.RestoreWorldVisuals()end end)
     cleanup("DamageHook",function()if state.RestoreSkillDamageHook then state.RestoreSkillDamageHook()end end)
@@ -10311,7 +10368,7 @@ do
 return function(ctx)
     local api={}
     local kinds={}
-    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AeganatosDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
+    for _,key in ipairs({"AutoCreateBetween","AtheonUnlock","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"})do kinds[key]="boolean"end
     for _,key in ipairs({"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"})do kinds[key]="number"end
     for _,key in ipairs({"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"})do kinds[key]="string"end
     for _,key in ipairs({"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"})do kinds[key]="table"end
@@ -28427,6 +28484,7 @@ return function(ctx)
         invoke("SetTradeItems",picked)
     end,true)
     stateToggle("AccountProgression","Speacial","Account Progression","SetAccountProgression")
+    stateToggle("NoSelfDamage","Dodge","No Self Damage (enemy skills)","SetNoSelfDamage","Blocks the native client-reported enemy-skill DamageSelf path. Server-applied damage can still occur.")
     stateToggle("AeganatosDodge","Dodge","Aeganatos Dodge","SetAeganatosDodge")
     stateToggle("AtheonDodge","Dodge","Atheon Dodge","SetAtheonDodge")
     dropdown("Theme","Settings","Theme",function()

@@ -87,7 +87,7 @@ local function settingsPayload()
         SkillAura = features.SkillAura, SelectedSkill = state.SelectedSkill,SkillPerWeapon=state.SkillPerWeapon,SkillPerWeaponVersion=state.SkillPerWeaponVersion,
         MiscSkillEnabled=features.MiscSkillEnabled==true,SelectedMiscSkill=state.SelectedMiscSkill,
         AutoExplore = state.AutoExplore,
-        AutoDodge = features.AutoDodge, AeganatosDodge=features.AeganatosDodge,AtheonDodge=features.AtheonDodge,
+        AutoDodge = features.AutoDodge, NoSelfDamage=features.NoSelfDamage,AeganatosDodge=features.AeganatosDodge,AtheonDodge=features.AtheonDodge,
         PerformanceBoosters=features.PerformanceBoosters,
         PanelPosition = { position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset },
         WindUIPosition=state.WindUIPosition,AutoHideUI=state.AutoHideUI,Theme=state.Theme,ActiveTab=state.UI and state.UI.ActiveTab,

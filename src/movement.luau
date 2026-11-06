@@ -619,6 +619,21 @@ do
         requestSave()
     end
 end
+do
+    local create=(function()
+-- BEGIN BUNDLED SELF DAMAGE PROTECTION
+-- END BUNDLED SELF DAMAGE PROTECTION
+    end)()
+    local enemy=services:FindFirstChild("EnemySkills")
+    local base=enemy and enemy:FindFirstChild("Base")
+    state.SelfDamageProtection=create({State=state,Native=base and require(base)or {}})
+    function state.SetNoSelfDamage(value)
+        local ok=state.SelfDamageProtection.Set(value)
+        if ok then requestSave()end
+        return ok
+    end
+    state.SetNoSelfDamage(state.NoSelfDamage)
+end
 local waveDodge = (function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE

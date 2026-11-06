@@ -17,8 +17,8 @@ local previous=(function()
 -- BEGIN BUNDLED SETTINGS SNAPSHOT
 -- END BUNDLED SETTINGS SNAPSHOT
 end)()(previousRuntime,player.UserId)
-local BUILD="2026-11-06.aeganatos-dodge-v2.0.22"
-local VERSION="2.0.22"
+local BUILD="2026-11-06.self-damage-protection-v2.0.23"
+local VERSION="2.0.23"
 local storageBootstrap=(function()
 -- BEGIN BUNDLED STORAGE BOOTSTRAP
 -- END BUNDLED STORAGE BOOTSTRAP
@@ -168,6 +168,7 @@ local restore = {
     Skill=preference("SelectedSkill","Piercing Dash"),
     AutoExplore=preference("AutoExplore",true)==true,
     AutoDodge=preference("AutoDodge",true)==true,
+    NoSelfDamage=preference("NoSelfDamage",false)==true,
     AeganatosDodge=preference("AeganatosDodge",false)==true,
     AtheonDodge=preference("AtheonDodge",false)==true,
     PerformanceBoosters=preference("PerformanceBoosters",{}),
