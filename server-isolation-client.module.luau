@@ -15,7 +15,7 @@ return function(ctx)
     local StarterGui=game:GetService("StarterGui")
     local TeleportService=game:GetService("TeleportService")
     local GuiService=game:GetService("GuiService")
-    local path="SB2Codex/solo-search_"..player.UserId..".json"
+    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_preset_"..state.PresetId or "")..".json"
     local queuedResume=getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket=nil
     local queue,savedSource,validatedSource,validatedPath,validatedGeneration
@@ -233,9 +233,9 @@ return function(ctx)
         assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic block confirmation input is unavailable")
         return performBlock(target,active)
     end
-    local queuedToken
+    local queuedToken,queuedAutoPreset
     function state.QueueAutomation()
-        if queuedToken==state.AutomationRunId and queuedToken then return end
+        if queuedToken==state.AutomationRunId and queuedToken and queuedAutoPreset==state.AutoPreset then return end
         queuePreflight()
         local runId=state.AutomationRunId or HttpService:GenerateGUID(false)
         state.AutomationRunId=runId;state.AutomationResumeFeatures=snapshot()
@@ -248,12 +248,13 @@ while not player do task.wait();player=Players.LocalPlayer end
 local HttpService=game:GetService("HttpService")
 local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
 if valid and type(settings)=="table"and settings.AutomationRunId==%q
-    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween)and game.GameId==%s then
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or %s)and game.GameId==%s then
     local active=getgenv().SB2KillAura
     if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
         if source:find(%q,1,true)then
             getgenv().SB2AutomationResumeFeatures=settings.AutomationResumeFeatures
+            getgenv().SB2AutomationResumeConfigPath=%q
             local ok,ticket=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
             if ok and type(ticket)=="table"and ticket.Active==true and ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId then
                 getgenv().SB2SoloResumeTicket=ticket
@@ -262,8 +263,8 @@ if valid and type(settings)=="table"and settings.AutomationRunId==%q
         end
     end
 end
-]],state.ConfigPath,runId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
-        queue(code);queuedToken=runId
+]],state.ConfigPath,runId,tostring(state.AutoPreset==true),tostring(game.GameId),state.SavedScriptPath,state.Build,state.ConfigPath,path)
+        queue(code);queuedToken=runId;queuedAutoPreset=state.AutoPreset
     end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
@@ -655,7 +656,7 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
             clearRejoinAway();state.AutomationTeleporting=false

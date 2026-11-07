@@ -61,7 +61,8 @@ return function(source)
         FloorDestinations={A={Id="A",Kind="Boss",Name="Arena"},B={Id="B",Kind="Boss",Name="Arena"}},
         PlayerInventoryRows={{Name="Sword",Upgrade=3,Count=2}},
         BetweenRooms={{Host="Host",Alt="",Mode="Private",Difficulty="Normal",Start=false}},
-        AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60}}
+        AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60},
+        PresetPreferences={Count=0,Manual=0,Outside=0,Between=0}}
     local catalog={Floors={{Id=11,Label="F1",Unlocked=true},{Id=22,Label="F2",Unlocked=false}},
         Spots={{Id="11/Boss",PlaceId=11,Name="Boss arena",Kind="Boss"},{Id="11/Mini",PlaceId=11,Name="Mini arena",Kind="Mini boss"},
             {Id="22/Boss",PlaceId=22,Name="Foreign arena",Kind="Boss"}},AddCurrent=function()end,Sort=function()end}
@@ -79,6 +80,9 @@ return function(source)
     end
     function s.IsBetweenRoomHost(index)return s.BetweenRooms[index].Host=="Host"end
     function s.SetAntiSuspiciousLimit(key,value)s.AntiSuspiciousLimits[key]=value end
+    function s.LoadPreset(id)record("LoadPreset",id)end
+    function s.SetAutoPreset(on)record("SetAutoPreset",on);s.AutoPreset=on end
+    function s.SetPresetRoute(key,id)record("SetPresetRoute",key,id);s.PresetPreferences[key]=id end
     function s.SetBetweenRoomField(index,field,value)
         if field=="AutoRetry" and not s.IsBetweenRoomHost(index)then return end
         if field=="Alt"then value=value:gsub("%s+",", ") end
@@ -266,7 +270,19 @@ return function(source)
     assert(staged.Tabs.Settings and staged.Controls.Theme and staged.Controls.ConfigImport and staged.Controls.ConfigExport)
     staged.Controls.Theme:Emit("Light");assert(s.Theme=="Light")
     staged.Controls.ConfigExport.Callback();assert(calls[#calls].Name=="ExportConfig")
+    function s.ImportConfig(bytes)
+        record("ImportConfig",bytes)
+        s.PresetPreferences.Count+=1
+        return s.PresetPreferences.Count
+    end
     staged.Controls.ConfigImport:Emit("config-text");assert(calls[#calls].Name=="ImportConfig"and calls[#calls].Args[1]=="config-text")
+    assert(staged.Controls.ConfigImport.Value=="","Successful import clears the text field")
+    staged.Tabs.Settings:Select()
+    for i=1,10 do staged.Update(24+i*.3);flush()end
+    assert(staged.Controls.PresetSelection.Value=="Preset 1" and table.find(staged.Controls.PresetBetween.Values,"Preset 1"))
+    staged.Controls.LoadPreset.Callback();assert(calls[#calls].Name=="LoadPreset"and calls[#calls].Args[1]==1)
+    staged.Controls.PresetBetween:Emit("Preset 1");assert(s.PresetPreferences.Between==1 and s.PresetPreferences.Outside==0)
+    staged.Controls.AutoPreset:Emit(true);assert(s.AutoPreset)
     staged.Destroy();s.Running=true;tabCount=0
     local cancelled=make({State=s,WindUI=wind,PlaceId=11,Defer=function(fn)deferred=fn end,Visibility=function()end})
     cancelled.Destroy();deferred()

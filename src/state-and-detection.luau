@@ -9,6 +9,7 @@ local state={
     SkillStatus="Skill aura is off",ProtectionStatus="Retreat on health loss",ProgressionPhase="Loading",
     AverageFrameTime=1/60,AverageLoopCost=0,ConfigPath=configPath,ConfigLoadError=configLoadError,
     ConfigLoadedFromDisk=configData.Version==1,StorageBootstrap=storageBootstrap,
+    PresetId=presetBook.ActiveId,AutoPreset=presetBook.Preferences.Auto,PresetPreferences=presetBook.Preferences,
     SavedScriptPath=storageBootstrap.SourcePath or(configFolder.."/kill-aura.luau"),
     Theme=preference("Theme","Dark"),AutoHideUI=preference("AutoHideUI",false)==true,
     SelectedMiscSkill=type(restore.SelectedMiscSkill)=="string"and restore.SelectedMiscSkill or "Cursed Enhancement",

@@ -62,6 +62,7 @@ def main():
         ("BETWEEN PACE", "between-pace.module.luau"),
         ("BETWEEN RETRY", "between-retry.module.luau"),
         ("ANTI SUSPICIOUS", "anti-suspicious.module.luau"),
+        ("CONFIG PRESETS", "config-presets.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
         ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
         ("BLOCK UI MASK", "block-ui-mask.module.luau"),
@@ -137,6 +138,9 @@ def main():
     fixture += "assert(loadstring(" + quote(read("rubricatus-dodge.test.luau")) + "))()(" + quote(read("boss-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("rubricatus-cover.test.luau")) + "))()(" + quote(read("rubricatus-cover.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("boss-dodge-handoff.test.luau")) + "))()(" + quote(wave) + ")\n"
+    preset_resume_start = script.index("local resumeConfigPath=env.SB2AutomationResumeConfigPath")
+    preset_resume = script[preset_resume_start:script.index("if filePersistence and isfile(configPath)", preset_resume_start)]
+    fixture += "assert(loadstring(" + quote(read("config-presets.test.luau")) + "))()(" + quote(read("config-presets.module.luau")) + "," + quote(preset_resume) + ")\n"
     for name in ("atheon-unlock", "between-retry", "anti-suspicious", "wave-dodge", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
         module = "safe-mode" if name == "safe-mode-suspended" else name
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(module + ".module.luau")) + ")\n"

@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.rubricatus-cover-v3.0.15"
-local VERSION="3.0.15"
+local BUILD="2026-11-07.config-presets-v3.0.16"
+local VERSION="3.0.16"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -276,6 +276,207 @@ local configFolder="SB2Codex"
 local configPath=configFolder.."/settings_"..player.UserId..".json"
 local configData,configLoadError={},nil
 local filePersistence=type(readfile)=="function"and type(writefile)=="function"and type(isfile)=="function"
+local presetBook=(function()
+    local makeTransfer=(function()
+-- BEGIN BUNDLED CONFIG TRANSFER
+-- Strict portable-data schema; imported bytes are decoded only, never executed.
+return function(ctx)
+    local schema={}
+    local groups={
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
+        string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
+        table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+    }
+    for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
+    local function data(value,depth,path)
+        assert(depth<=12,"Config nesting is too deep")
+        local kind=type(value)
+        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number");return end
+        if kind~="table"then assert(kind=="string"or kind=="boolean","Invalid config value");return end
+        assert(not path[value],"Config cannot contain cycles")
+        path[value]=true
+        local total=0
+        for key,child in pairs(value)do
+            total+=1;assert(total<=4096,"Config table is too large")
+            assert(type(key)=="string"or type(key)=="number","Invalid config key")
+            data(child,depth+1,path)
+        end
+        path[value]=nil
+    end
+    local function tuple(value,count,limit)
+        assert(type(value)=="table"and #value==count,"Invalid position")
+        for _,coordinate in ipairs(value)do assert(type(coordinate)=="number"and (not limit or math.abs(coordinate)<=limit),"Invalid coordinate")end
+    end
+    local function settings(value)
+        assert(type(value)=="table"and value.Version==1,"Invalid settings")
+        for key,item in pairs(value)do assert(schema[key]and type(item)==schema[key],"Invalid setting: "..tostring(key))end
+        for _,name in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do if value[name]then tuple(value[name],4)end end
+        for _,name in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
+            for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
+        end
+        for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
+        local rooms=value.BetweenRooms or {}
+        local access={Private=true,Friends=true,["Game Party"]=true}
+        local difficulties={Normal=true,Hard=true,Elite=true}
+        assert(#rooms<=20,"Too many Between rooms")
+        for index,room in pairs(rooms)do
+            assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
+                and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
+                and type(room.Alt)=="string" and #room.Alt<=256
+                and (room.Mode==nil or access[room.Mode])
+                and (room.Difficulty==nil or difficulties[room.Difficulty])
+                and (room.Start==nil or type(room.Start)=="boolean")
+                and (room.AutoRetry==nil or type(room.AutoRetry)=="boolean"),"Invalid Between room")
+        end
+        local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
+        for mode,range in pairs(value.BetweenPace or {})do
+            assert(difficulties[mode] and (minute(range) or (type(range)=="table"
+                and minute(range.Min) and minute(range.Max) and range.Min<=range.Max)),"Invalid Between completion time")
+        end
+        local limits=value.AntiSuspiciousLimits
+        if limits then
+            local function integer(v,max)return type(v)=="number" and v%1==0 and v>=1 and v<=max end
+            assert(integer(limits.Hops,100) and integer(limits.Window,200) and integer(limits.Min,200)
+                and integer(limits.Max,200) and limits.Min<=limits.Max,"Invalid Anti Suspicious limits")
+        end
+    end
+    local function arenas(value)
+        assert(type(value)=="table","Missing custom spots")
+        local count=0
+        for floor,spots in pairs(value)do
+            count+=1;assert(count<=64 and tostring(floor):match("^%d+$"),"Invalid spot floor")
+            assert(type(spots)=="table"and #spots<=20,"Too many custom spots")
+            for _,spot in ipairs(spots)do
+                assert(type(spot)=="table"and type(spot.Id)=="string"and spot.Id:sub(1,16)=="saved:multispot:","Invalid custom spot")
+                assert(type(spot.Name)=="string"and #spot.Name<=200,"Invalid spot name/position")
+                tuple(spot.Position,3,1e7)
+            end
+        end
+    end
+    local api={}
+    function api.Validate(package)
+        assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
+        data(package,0,{})
+        settings(package.Settings);arenas(package.CustomSpots)
+        return package
+    end
+    local function withinStorage(package)
+        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
+    end
+    function api.Export()
+        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        withinStorage(package)
+        local bytes=ctx.Encode(package)
+        assert(#bytes<=262144,"Config exceeds 256 KB")
+        assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
+        ctx.Copy(bytes)
+        return bytes
+    end
+    function api.Import(bytes)
+        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
+        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
+        return ctx.Apply(package)or true
+    end
+    return api
+end
+
+-- END BUNDLED CONFIG TRANSFER
+    end)()
+    local make=(function()
+-- BEGIN BUNDLED CONFIG PRESETS
+-- Keep imported snapshots and active per-account settings in separate files.
+return function(ctx)
+    local prefix=ctx.Folder.."/preset_"..ctx.UserId.."_"
+    local controlPath=prefix.."index.json"
+    local maxSlots=50
+    local function slot(value,count)
+        return type(value)=="number" and value%1==0 and value>=1 and value<=count and value or 0
+    end
+    local function decode(path,limit)
+        local bytes=ctx.Read(path)
+        assert(#bytes<=limit,"Preset file exceeds its size limit")
+        return ctx.Decode(bytes)
+    end
+    local prefs={Version=1,Count=0,Manual=0,Outside=0,Between=0,Auto=false}
+    local api={Preferences=prefs}
+    local function saved(id)return prefix..id..".json"end
+    local function persist(nextPrefs)
+        ctx.Write(controlPath,ctx.Encode(nextPrefs))
+        for key,value in pairs(nextPrefs)do prefs[key]=value end
+    end
+    local ok,reason=pcall(function()
+        if not ctx.Available or not ctx.Exists(controlPath)then return end
+        local raw=decode(controlPath,8192)
+        assert(type(raw)=="table"and raw.Version==1,"Invalid preset index")
+        prefs.Count=slot(raw.Count,maxSlots)
+        for _,key in ipairs({"Manual","Outside","Between"})do prefs[key]=slot(raw[key],prefs.Count)end
+        prefs.Auto=raw.Auto==true
+    end)
+    if not ok then api.Error=tostring(reason)end
+    function api.Resolve(override)
+        if override~=nil and (override==0 or slot(override,prefs.Count)>0)then return override end
+        local selected=prefs[ctx.InBetween and "Between" or "Outside"]
+        if prefs.Auto and selected>0 then return selected end
+        return prefs.Manual
+    end
+    function api.Load(id)
+        assert(ctx.Available and slot(id,prefs.Count)>0,"Preset is unavailable")
+        return ctx.Validate(decode(saved(id),262144))
+    end
+    function api.SavePreset(package)
+        assert(ctx.Available,"Preset storage is unavailable in this executor")
+        assert(not api.Error,api.Error)
+        local id=prefs.Count+1
+        assert(id<=maxSlots,"Preset limit reached (50)")
+        local bytes=ctx.Encode(package)
+        assert(#bytes<=262144,"Config exceeds 256 KB")
+        ctx.Write(saved(id),bytes)
+        local nextPrefs=table.clone(prefs);nextPrefs.Count=id;persist(nextPrefs)
+        return id
+    end
+    function api.Set(key,value)
+        assert(ctx.Available,"Preset storage is unavailable in this executor")
+        assert(not api.Error,api.Error)
+        assert(key=="Auto"or key=="Manual"or key=="Outside"or key=="Between","Invalid preset setting")
+        local nextPrefs=table.clone(prefs)
+        if key=="Auto"then nextPrefs.Auto=value==true else nextPrefs[key]=slot(value,prefs.Count)end
+        if nextPrefs[key]~=prefs[key]then persist(nextPrefs)end
+    end
+    function api.Activate(override)
+        local id=api.Resolve(override)
+        if id==0 then return end
+        local loaded,problem=pcall(function()
+            local path=ctx.Folder.."/settings_"..ctx.UserId.."_preset_"..id..".json"
+            assert(ctx.Exists(saved(id)),"Preset file is missing")
+            if not ctx.Exists(path)then api.Seed=api.Load(id)end
+            api.ActiveId=id
+            api.SettingsPath=path
+            api.SpotPrefix="custom-spots_"..ctx.UserId.."_preset_"..id.."_"
+        end)
+        if not loaded then api.Error=tostring(problem)end
+    end
+    return api
+end
+
+-- END BUNDLED CONFIG PRESETS
+    end)()
+    local book=make({Folder=configFolder,UserId=tostring(player.UserId),InBetween=game.PlaceId==78945654064532,
+        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,Validate=makeTransfer({}).Validate,
+        Encode=function(value)return HttpService:JSONEncode(value)end,Decode=function(bytes)return HttpService:JSONDecode(bytes)end})
+    local manual=env.SB2ManualPreset
+    env.SB2ManualPreset=nil
+    book.Activate(type(manual)=="table"and manual.UserId==player.UserId and manual.Id or nil)
+    book.MakeTransfer=makeTransfer
+    return book
+end)()
+if presetBook.SettingsPath then configPath=presetBook.SettingsPath end
+if previousRuntime and previousRuntime.PresetId~=presetBook.ActiveId then previous=nil end
+local resumeConfigPath=env.SB2AutomationResumeConfigPath
+env.SB2AutomationResumeConfigPath=nil
+if resumeConfigPath and resumeConfigPath~=configPath then
+    env.SB2AutomationResumeFeatures=nil;env.SB2SoloResumeTicket=nil
+end
 if filePersistence and isfile(configPath)then
     local ok,value=pcall(function()
         local text=readfile(configPath)
@@ -288,7 +489,7 @@ if filePersistence and isfile(configPath)then
     if ok then configData=value else configLoadError=tostring(value)end
 end
 local sharedSettings,sharedPreferences=nil,{}
-if filePersistence then
+if filePersistence and not presetBook.ActiveId then
     local attachShared=(function()
 -- BEGIN BUNDLED SHARED SETTINGS
 -- Merge only this account's changed preference fields into the latest shared file.
@@ -368,6 +569,7 @@ end
 local importedConfig=env.SB2ConfigImport
 env.SB2ConfigImport=nil
 if type(importedConfig)~="table"or importedConfig.UserId~=player.UserId then importedConfig=nil end
+importedConfig=importedConfig or presetBook.Seed
 local function preference(key,fallback)
     if importedConfig then local value=importedConfig.Settings[key];if value~=nil then return value end;return fallback end
     local sources={sharedPreferences,previous and previous.StopEverything and previous.ResumeFeatures or {},previous or {},configData}
@@ -515,6 +717,7 @@ local state={
     SkillStatus="Skill aura is off",ProtectionStatus="Retreat on health loss",ProgressionPhase="Loading",
     AverageFrameTime=1/60,AverageLoopCost=0,ConfigPath=configPath,ConfigLoadError=configLoadError,
     ConfigLoadedFromDisk=configData.Version==1,StorageBootstrap=storageBootstrap,
+    PresetId=presetBook.ActiveId,AutoPreset=presetBook.Preferences.Auto,PresetPreferences=presetBook.Preferences,
     SavedScriptPath=storageBootstrap.SourcePath or(configFolder.."/kill-aura.luau"),
     Theme=preference("Theme","Dark"),AutoHideUI=preference("AutoHideUI",false)==true,
     SelectedMiscSkill=type(restore.SelectedMiscSkill)=="string"and restore.SelectedMiscSkill or "Cursed Enhancement",
@@ -4332,12 +4535,13 @@ local function rememberDestination(id,name,kind,point)
     destinations[id]={Id=id,Name=name,Kind=kind,Position=point};destinationsDirty=true
 end
 if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid","Mini boss",Vector3.new(-154.811,1214.301,-758.796))end
+local customSpotPrefix=presetBook.SpotPrefix or "custom-spots_"
 if importedConfig and filePersistence then
     for floor,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/custom-spots_"..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        writefile(configFolder.."/"..customSpotPrefix..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
     end
 end
-local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
+local customSpotPath=configFolder.."/"..customSpotPrefix..tostring(game.PlaceId)..".json"
 local lastCustomSpots
 if filePersistence then
     pcall(function()
@@ -7764,7 +7968,7 @@ return function(ctx)
     local StarterGui=game:GetService("StarterGui")
     local TeleportService=game:GetService("TeleportService")
     local GuiService=game:GetService("GuiService")
-    local path="SB2Codex/solo-search_"..player.UserId..".json"
+    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_preset_"..state.PresetId or "")..".json"
     local queuedResume=getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket=nil
     local queue,savedSource,validatedSource,validatedPath,validatedGeneration
@@ -7982,9 +8186,9 @@ return function(ctx)
         assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic block confirmation input is unavailable")
         return performBlock(target,active)
     end
-    local queuedToken
+    local queuedToken,queuedAutoPreset
     function state.QueueAutomation()
-        if queuedToken==state.AutomationRunId and queuedToken then return end
+        if queuedToken==state.AutomationRunId and queuedToken and queuedAutoPreset==state.AutoPreset then return end
         queuePreflight()
         local runId=state.AutomationRunId or HttpService:GenerateGUID(false)
         state.AutomationRunId=runId;state.AutomationResumeFeatures=snapshot()
@@ -7997,12 +8201,13 @@ while not player do task.wait();player=Players.LocalPlayer end
 local HttpService=game:GetService("HttpService")
 local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
 if valid and type(settings)=="table"and settings.AutomationRunId==%q
-    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween)and game.GameId==%s then
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or %s)and game.GameId==%s then
     local active=getgenv().SB2KillAura
     if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
         if source:find(%q,1,true)then
             getgenv().SB2AutomationResumeFeatures=settings.AutomationResumeFeatures
+            getgenv().SB2AutomationResumeConfigPath=%q
             local ok,ticket=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
             if ok and type(ticket)=="table"and ticket.Active==true and ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId then
                 getgenv().SB2SoloResumeTicket=ticket
@@ -8011,8 +8216,8 @@ if valid and type(settings)=="table"and settings.AutomationRunId==%q
         end
     end
 end
-]],state.ConfigPath,runId,tostring(game.GameId),state.SavedScriptPath,state.Build,path)
-        queue(code);queuedToken=runId
+]],state.ConfigPath,runId,tostring(state.AutoPreset==true),tostring(game.GameId),state.SavedScriptPath,state.Build,state.ConfigPath,path)
+        queue(code);queuedToken=runId;queuedAutoPreset=state.AutoPreset
     end
     local function clearRejoinAway()
         state.SafeRejoinRequested=false;state.SafeRejoinAway=nil;state.SafeRejoinDispatch=nil;state.ServerTeleportStarted=false
@@ -8404,7 +8609,7 @@ end
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
             clearRejoinAway();state.AutomationTeleporting=false
@@ -9858,118 +10063,13 @@ end
 end
 
 do
-    local make=(function()
--- BEGIN BUNDLED CONFIG TRANSFER
--- Strict portable-data schema; imported bytes are decoded only, never executed.
-return function(ctx)
-    local schema={}
-    local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
-        number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
-        string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
-        table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
-    }
-    for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
-    local function data(value,depth,path)
-        assert(depth<=12,"Config nesting is too deep")
-        local kind=type(value)
-        if kind=="number"then assert(value==value and math.abs(value)<1e15,"Invalid config number");return end
-        if kind~="table"then assert(kind=="string"or kind=="boolean","Invalid config value");return end
-        assert(not path[value],"Config cannot contain cycles")
-        path[value]=true
-        local total=0
-        for key,child in pairs(value)do
-            total+=1;assert(total<=4096,"Config table is too large")
-            assert(type(key)=="string"or type(key)=="number","Invalid config key")
-            data(child,depth+1,path)
-        end
-        path[value]=nil
-    end
-    local function tuple(value,count,limit)
-        assert(type(value)=="table"and #value==count,"Invalid position")
-        for _,coordinate in ipairs(value)do assert(type(coordinate)=="number"and (not limit or math.abs(coordinate)<=limit),"Invalid coordinate")end
-    end
-    local function settings(value)
-        assert(type(value)=="table"and value.Version==1,"Invalid settings")
-        for key,item in pairs(value)do assert(schema[key]and type(item)==schema[key],"Invalid setting: "..tostring(key))end
-        for _,name in ipairs({"PanelPosition","HealthHUDPosition","WindUIPosition"})do if value[name]then tuple(value[name],4)end end
-        for _,name in ipairs({"AutoCraft","TradeItems","AutoDismantle","MultiSpotSelected","PerformanceBoosters"})do
-            for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
-        end
-        for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
-        local rooms=value.BetweenRooms or {}
-        local access={Private=true,Friends=true,["Game Party"]=true}
-        local difficulties={Normal=true,Hard=true,Elite=true}
-        assert(#rooms<=20,"Too many Between rooms")
-        for index,room in pairs(rooms)do
-            assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
-                and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
-                and type(room.Alt)=="string" and #room.Alt<=256
-                and (room.Mode==nil or access[room.Mode])
-                and (room.Difficulty==nil or difficulties[room.Difficulty])
-                and (room.Start==nil or type(room.Start)=="boolean")
-                and (room.AutoRetry==nil or type(room.AutoRetry)=="boolean"),"Invalid Between room")
-        end
-        local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
-        for mode,range in pairs(value.BetweenPace or {})do
-            assert(difficulties[mode] and (minute(range) or (type(range)=="table"
-                and minute(range.Min) and minute(range.Max) and range.Min<=range.Max)),"Invalid Between completion time")
-        end
-        local limits=value.AntiSuspiciousLimits
-        if limits then
-            local function integer(v,max)return type(v)=="number" and v%1==0 and v>=1 and v<=max end
-            assert(integer(limits.Hops,100) and integer(limits.Window,200) and integer(limits.Min,200)
-                and integer(limits.Max,200) and limits.Min<=limits.Max,"Invalid Anti Suspicious limits")
-        end
-    end
-    local function arenas(value)
-        assert(type(value)=="table","Missing custom spots")
-        local count=0
-        for floor,spots in pairs(value)do
-            count+=1;assert(count<=64 and tostring(floor):match("^%d+$"),"Invalid spot floor")
-            assert(type(spots)=="table"and #spots<=20,"Too many custom spots")
-            for _,spot in ipairs(spots)do
-                assert(type(spot)=="table"and type(spot.Id)=="string"and spot.Id:sub(1,16)=="saved:multispot:","Invalid custom spot")
-                assert(type(spot.Name)=="string"and #spot.Name<=200,"Invalid spot name/position")
-                tuple(spot.Position,3,1e7)
-            end
-        end
-    end
-    local api={}
-    function api.Validate(package)
-        assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
-        data(package,0,{})
-        settings(package.Settings);arenas(package.CustomSpots)
-        return package
-    end
-    local function withinStorage(package)
-        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
-    end
-    function api.Export()
-        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
-        withinStorage(package)
-        local bytes=ctx.Encode(package)
-        assert(#bytes<=262144,"Config exceeds 256 KB")
-        assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
-        ctx.Copy(bytes)
-        return bytes
-    end
-    function api.Import(bytes)
-        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
-        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
-        ctx.Apply(package)
-        return true
-    end
-    return api
-end
-
--- END BUNDLED CONFIG TRANSFER
-    end)()
     local function exportSpots()
         local floors={}
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
-                local floor=path:match("custom%-spots_(%d+)%.json$")
+                local name=path:match("[^/\\]+$")
+                local floor=name and name:sub(1,#customSpotPrefix)==customSpotPrefix
+                    and name:sub(#customSpotPrefix+1):match("^(%d+)%.json$")
                 if floor then
                     local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
                     local saved=HttpService:JSONDecode(bytes)
@@ -9985,16 +10085,31 @@ end
         floors[tostring(game.PlaceId)]=current
         return floors
     end
-    local function importPackage(package)
-        assert(filePersistence or next(package.CustomSpots)==nil,"Importing saved spots requires executor file access")
-        local launch=assert(loadstring(embeddedSource,"Feather imported configuration"))
-        env.SB2ConfigImport={UserId=player.UserId,Settings=package.Settings,CustomSpots=package.CustomSpots}
-        state.AutoSaveSuspended=true;state.Destroy(true);launch(embeddedSource)
+    local function loadPreset(id)
+        if (state.PresetId or 0)==id then return end
+        if id>0 then presetBook.Load(id)end
+        local launch=assert(loadstring(embeddedSource,"Feather preset"))
+        env.SB2ManualPreset={UserId=player.UserId,Id=id}
+        state.Destroy(true);launch(embeddedSource)
     end
-    local transfer=make({Settings=settingsPayload,Spots=exportSpots,Apply=importPackage,
+    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Apply=presetBook.SavePreset,
         Encode=function(value)return HttpService:JSONEncode(value)end,
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
     state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
+    state.PresetStatus=presetBook.Error
+    function state.LoadPreset(id)
+        presetBook.Set("Manual",id)
+        loadPreset(presetBook.Preferences.Manual)
+    end
+    function state.SetAutoPreset(value)
+        presetBook.Set("Auto",value)
+        state.AutoPreset=presetBook.Preferences.Auto
+        if state.AutoPreset then loadPreset(presetBook.Resolve())end
+    end
+    function state.SetPresetRoute(key,id)
+        presetBook.Set(key,id)
+        if state.AutoPreset then loadPreset(presetBook.Resolve())end
+    end
 end
 
 -- Native floor utilities share the scheduler but retain independent receipts.
@@ -28423,10 +28538,43 @@ return function(ctx)
             local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
-        input("Settings","ConfigImport","Config Import","",function(bytes)if bytes:match("%S")then action("ImportConfig",bytes)end end)
+        local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
+        local pickedPreset=state.PresetId or 0
+        local function presetView(id,empty)
+            local options,map={empty},{[empty]=0}
+            for index=1,prefs.Count do
+                local label="Preset "..index
+                options[#options+1]=label;map[label]=index
+            end
+            return {Options=options,Map=map,Value=id>0 and "Preset "..id or empty}
+        end
+        local configImport
+        configImport=input("Settings","ConfigImport","Config Import","",function(bytes)
+            if not bytes:match("%S")then return end
+            local id=action("ImportConfig",bytes)
+            if type(id)=="number"then
+                pickedPreset=id
+                state.PresetStatus="Saved as Preset "..id
+                cadence.Choices=0;cadence.Cursor=1
+                configImport.Syncing=true;configImport.Control:Set("");configImport.Syncing=false
+            end
+        end)
         button("Settings","ConfigExport","Config Export",function()
             action("ExportConfig")
             if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+        end)
+        section("Settings","PresetSection","Presets")
+        dropdown("Settings","PresetSelection","Preset",function()return presetView(pickedPreset,"Default")end,
+            function(label,map)if map[label]~=nil then pickedPreset=map[label]end end)
+        button("Settings","LoadPreset","Load Preset",function()action("LoadPreset",pickedPreset)end)
+        toggle("Settings","AutoPreset","Auto Preset","SetAutoPreset")
+        for _,option in ipairs({{"Outside","Outside The Between"},{"Between","Inside The Between"}})do
+            local route,title=table.unpack(option)
+            dropdown("Settings","Preset"..route,title,function()return presetView(prefs[route],"None")end,
+                function(label,map)if map[label]~=nil then action("SetPresetRoute",route,map[label])end end)
+        end
+        paragraph("Settings","PresetStatus","Preset Status",function()
+            return state.PresetStatus or (state.PresetId and "Active · Preset "..state.PresetId or "Active · Default")
         end)
     end
     function synchronize(projection,choices)

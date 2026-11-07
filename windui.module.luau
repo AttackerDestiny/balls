@@ -448,10 +448,43 @@ return function(ctx)
             local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
-        input("Settings","ConfigImport","Config Import","",function(bytes)if bytes:match("%S")then action("ImportConfig",bytes)end end)
+        local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
+        local pickedPreset=state.PresetId or 0
+        local function presetView(id,empty)
+            local options,map={empty},{[empty]=0}
+            for index=1,prefs.Count do
+                local label="Preset "..index
+                options[#options+1]=label;map[label]=index
+            end
+            return {Options=options,Map=map,Value=id>0 and "Preset "..id or empty}
+        end
+        local configImport
+        configImport=input("Settings","ConfigImport","Config Import","",function(bytes)
+            if not bytes:match("%S")then return end
+            local id=action("ImportConfig",bytes)
+            if type(id)=="number"then
+                pickedPreset=id
+                state.PresetStatus="Saved as Preset "..id
+                cadence.Choices=0;cadence.Cursor=1
+                configImport.Syncing=true;configImport.Control:Set("");configImport.Syncing=false
+            end
+        end)
         button("Settings","ConfigExport","Config Export",function()
             action("ExportConfig")
             if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+        end)
+        section("Settings","PresetSection","Presets")
+        dropdown("Settings","PresetSelection","Preset",function()return presetView(pickedPreset,"Default")end,
+            function(label,map)if map[label]~=nil then pickedPreset=map[label]end end)
+        button("Settings","LoadPreset","Load Preset",function()action("LoadPreset",pickedPreset)end)
+        toggle("Settings","AutoPreset","Auto Preset","SetAutoPreset")
+        for _,option in ipairs({{"Outside","Outside The Between"},{"Between","Inside The Between"}})do
+            local route,title=table.unpack(option)
+            dropdown("Settings","Preset"..route,title,function()return presetView(prefs[route],"None")end,
+                function(label,map)if map[label]~=nil then action("SetPresetRoute",route,map[label])end end)
+        end
+        paragraph("Settings","PresetStatus","Preset Status",function()
+            return state.PresetStatus or (state.PresetId and "Active · Preset "..state.PresetId or "Active · Default")
         end)
     end
     function synchronize(projection,choices)

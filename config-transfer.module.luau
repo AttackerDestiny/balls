@@ -95,8 +95,7 @@ return function(ctx)
     function api.Import(bytes)
         assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
         local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
-        ctx.Apply(package)
-        return true
+        return ctx.Apply(package)or true
     end
     return api
 end

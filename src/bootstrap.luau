@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.rubricatus-cover-v3.0.15"
-local VERSION="3.0.15"
+local BUILD="2026-11-07.config-presets-v3.0.16"
+local VERSION="3.0.16"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -99,6 +99,31 @@ local configFolder="SB2Codex"
 local configPath=configFolder.."/settings_"..player.UserId..".json"
 local configData,configLoadError={},nil
 local filePersistence=type(readfile)=="function"and type(writefile)=="function"and type(isfile)=="function"
+local presetBook=(function()
+    local makeTransfer=(function()
+-- BEGIN BUNDLED CONFIG TRANSFER
+-- END BUNDLED CONFIG TRANSFER
+    end)()
+    local make=(function()
+-- BEGIN BUNDLED CONFIG PRESETS
+-- END BUNDLED CONFIG PRESETS
+    end)()
+    local book=make({Folder=configFolder,UserId=tostring(player.UserId),InBetween=game.PlaceId==78945654064532,
+        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,Validate=makeTransfer({}).Validate,
+        Encode=function(value)return HttpService:JSONEncode(value)end,Decode=function(bytes)return HttpService:JSONDecode(bytes)end})
+    local manual=env.SB2ManualPreset
+    env.SB2ManualPreset=nil
+    book.Activate(type(manual)=="table"and manual.UserId==player.UserId and manual.Id or nil)
+    book.MakeTransfer=makeTransfer
+    return book
+end)()
+if presetBook.SettingsPath then configPath=presetBook.SettingsPath end
+if previousRuntime and previousRuntime.PresetId~=presetBook.ActiveId then previous=nil end
+local resumeConfigPath=env.SB2AutomationResumeConfigPath
+env.SB2AutomationResumeConfigPath=nil
+if resumeConfigPath and resumeConfigPath~=configPath then
+    env.SB2AutomationResumeFeatures=nil;env.SB2SoloResumeTicket=nil
+end
 if filePersistence and isfile(configPath)then
     local ok,value=pcall(function()
         local text=readfile(configPath)
@@ -111,7 +136,7 @@ if filePersistence and isfile(configPath)then
     if ok then configData=value else configLoadError=tostring(value)end
 end
 local sharedSettings,sharedPreferences=nil,{}
-if filePersistence then
+if filePersistence and not presetBook.ActiveId then
     local attachShared=(function()
 -- BEGIN BUNDLED SHARED SETTINGS
 -- END BUNDLED SHARED SETTINGS
@@ -123,6 +148,7 @@ end
 local importedConfig=env.SB2ConfigImport
 env.SB2ConfigImport=nil
 if type(importedConfig)~="table"or importedConfig.UserId~=player.UserId then importedConfig=nil end
+importedConfig=importedConfig or presetBook.Seed
 local function preference(key,fallback)
     if importedConfig then local value=importedConfig.Settings[key];if value~=nil then return value end;return fallback end
     local sources={sharedPreferences,previous and previous.StopEverything and previous.ResumeFeatures or {},previous or {},configData}

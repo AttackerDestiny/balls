@@ -206,15 +206,13 @@ do
 end
 
 do
-    local make=(function()
--- BEGIN BUNDLED CONFIG TRANSFER
--- END BUNDLED CONFIG TRANSFER
-    end)()
     local function exportSpots()
         local floors={}
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
-                local floor=path:match("custom%-spots_(%d+)%.json$")
+                local name=path:match("[^/\\]+$")
+                local floor=name and name:sub(1,#customSpotPrefix)==customSpotPrefix
+                    and name:sub(#customSpotPrefix+1):match("^(%d+)%.json$")
                 if floor then
                     local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
                     local saved=HttpService:JSONDecode(bytes)
@@ -230,16 +228,31 @@ do
         floors[tostring(game.PlaceId)]=current
         return floors
     end
-    local function importPackage(package)
-        assert(filePersistence or next(package.CustomSpots)==nil,"Importing saved spots requires executor file access")
-        local launch=assert(loadstring(embeddedSource,"Feather imported configuration"))
-        env.SB2ConfigImport={UserId=player.UserId,Settings=package.Settings,CustomSpots=package.CustomSpots}
-        state.AutoSaveSuspended=true;state.Destroy(true);launch(embeddedSource)
+    local function loadPreset(id)
+        if (state.PresetId or 0)==id then return end
+        if id>0 then presetBook.Load(id)end
+        local launch=assert(loadstring(embeddedSource,"Feather preset"))
+        env.SB2ManualPreset={UserId=player.UserId,Id=id}
+        state.Destroy(true);launch(embeddedSource)
     end
-    local transfer=make({Settings=settingsPayload,Spots=exportSpots,Apply=importPackage,
+    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Apply=presetBook.SavePreset,
         Encode=function(value)return HttpService:JSONEncode(value)end,
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
     state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
+    state.PresetStatus=presetBook.Error
+    function state.LoadPreset(id)
+        presetBook.Set("Manual",id)
+        loadPreset(presetBook.Preferences.Manual)
+    end
+    function state.SetAutoPreset(value)
+        presetBook.Set("Auto",value)
+        state.AutoPreset=presetBook.Preferences.Auto
+        if state.AutoPreset then loadPreset(presetBook.Resolve())end
+    end
+    function state.SetPresetRoute(key,id)
+        presetBook.Set(key,id)
+        if state.AutoPreset then loadPreset(presetBook.Resolve())end
+    end
 end
 
 -- Native floor utilities share the scheduler but retain independent receipts.

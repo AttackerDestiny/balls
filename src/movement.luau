@@ -700,12 +700,13 @@ local function rememberDestination(id,name,kind,point)
     destinations[id]={Id=id,Name=name,Kind=kind,Position=point};destinationsDirty=true
 end
 if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid","Mini boss",Vector3.new(-154.811,1214.301,-758.796))end
+local customSpotPrefix=presetBook.SpotPrefix or "custom-spots_"
 if importedConfig and filePersistence then
     for floor,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/custom-spots_"..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        writefile(configFolder.."/"..customSpotPrefix..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
     end
 end
-local customSpotPath=configFolder.."/custom-spots_"..tostring(game.PlaceId)..".json"
+local customSpotPath=configFolder.."/"..customSpotPrefix..tostring(game.PlaceId)..".json"
 local lastCustomSpots
 if filePersistence then
     pcall(function()
