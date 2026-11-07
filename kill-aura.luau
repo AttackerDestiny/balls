@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.hide-between-room-status-v3.0.2"
-local VERSION="3.0.2"
+local BUILD="2026-11-07.waves-defense-rooms-v3.0.3"
+local VERSION="3.0.3"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -1626,7 +1626,7 @@ state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelLi
 local adapters={"AutoEquipBestSword","AtheonDodge","MiscSkillToggle","MiscSkillDropdown","MiscSkillOptions","BoostDropdown",
     "BoostOptions","PlayerSelector","PlayerOptions","TeleportPlayer","ViewPlayer","ViewInventory","PlayerInventory","PlayerMessage"}
 for _,name in ipairs(adapters)do state.UI[name]=controllerViews.New({Name=name})end
-for _,name in ipairs({"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"})do
+for _,name in ipairs({"Main","Combat","Waves Defense","Auto Skill","Misc","Player","Utility","Speacial"})do
     state.UI.Pages[name]=controllerViews.New({Name=name})
 end
 function state.SetTab(name)state.UI.ActiveTab=name end
@@ -9473,15 +9473,21 @@ return function(ctx)
         end
         for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
         local rooms=value.BetweenRooms or {}
+        local access={Private=true,Friends=true,["Game Party"]=true}
+        local difficulties={Normal=true,Hard=true,Elite=true}
         assert(#rooms<=20,"Too many Between rooms")
         for index,room in pairs(rooms)do
             assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
                 and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
-                and type(room.Alt)=="string" and #room.Alt<=256,"Invalid Between room")
+                and type(room.Alt)=="string" and #room.Alt<=256
+                and (room.Mode==nil or access[room.Mode])
+                and (room.Difficulty==nil or difficulties[room.Difficulty])
+                and (room.Start==nil or type(room.Start)=="boolean"),"Invalid Between room")
         end
-        for mode,minutes in pairs(value.BetweenPace or {})do
-            assert((mode=="Normal" or mode=="Hard" or mode=="Elite") and type(minutes)=="number"
-                and minutes%1==0 and minutes>=0 and minutes<=100,"Invalid Between completion time")
+        local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
+        for mode,range in pairs(value.BetweenPace or {})do
+            assert(difficulties[mode] and (minute(range) or (type(range)=="table"
+                and minute(range.Min) and minute(range.Max) and range.Min<=range.Max)),"Invalid Between completion time")
         end
     end
     local function arenas(value)
@@ -9670,6 +9676,7 @@ return function(ctx)
         if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
         local assignment=ctx.Assignment and ctx.Assignment()
+        local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then
             local hostRoom=ctx.FindHostRoom(assignment.Host)
             if room then
@@ -9677,12 +9684,12 @@ return function(ctx)
                     or "Leave your current party to join "..assignment.Host)
             elseif not hostRoom then
                 ctx.Status("Waiting for host "..assignment.Host.." in this server")
-            elseif hostRoom.Status and hostRoom.Status~="Public" then
+            elseif hostRoom.Status==access and hostRoom.Mode==difficulty then
                 if joinRoom~=hostRoom.Id or joinStatus~=hostRoom.Status then
                     joinRoom,joinStatus,joinAttempts,nextJoin=hostRoom.Id,hostRoom.Status,0,0
                 end
                 if joinAttempts>=3 then
-                    ctx.Status("Could not join the host. Check room access and toggle Auto Create to retry.")
+                    ctx.Status("Could not join the host. Check room access and toggle Start to retry.")
                 elseif now>=nextJoin then
                     joinAttempts+=1;nextJoin=now+3
                     ctx.Status("Joining "..assignment.Host)
@@ -9697,7 +9704,7 @@ return function(ctx)
         if waiting then
             local changed=waiting.Field=="Id"and room or room and room[waiting.Field]~=waiting.Before
             if changed then waiting=nil
-            elseif now>=waiting.Until then stop("Room request timed out. Toggle Auto Create to retry.");return
+            elseif now>=waiting.Until then stop("Room request timed out. Toggle Start to retry.");return
             else return end
         end
         if room then
@@ -9705,7 +9712,6 @@ return function(ctx)
             if room.Host~=ctx.UserId or room.PlaceId~=ctx.PlaceId then ctx.Status("Leave your current party to create a Between room");return end
             if room.Id==completedRoom or not(room.Status and room.Mode)then return end
         end
-        local access,difficulty=ctx.Selection()
         if not room then attempts=0;dispatch("CreateParty","Id",nil,now);return end
         if room.Mode~=difficulty then dispatch("ToggleMode","Mode",room,now);return end
         if room.Status~=access then dispatch("ToggleStatus","Status",room,now);return end
@@ -9730,7 +9736,7 @@ return function(ctx)
             local ok,accepted=pcall(ctx.Start)
             starting=false
             if ok and accepted==true then completedRoom=room.Id;phase="Stopped";if ctx.Active()then ctx.Status("Start accepted · waiting for teleport")end
-            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Auto Create to retry.")
+            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Start to retry.")
             else phase="Stopped"end
         end)
     end
@@ -9775,29 +9781,36 @@ end
     local allowedDifficulty={Normal=true,Hard=true,Elite=true}
     if not allowedAccess[state.BetweenAccess]then state.BetweenAccess="Private"end
     if not allowedDifficulty[state.BetweenDifficulty]then state.BetweenDifficulty="Normal"end
+    local function minute(value)
+        return type(value)=="number" and value==value and math.clamp(math.round(value),0,100) or 0
+    end
     local pace={}
     for mode in pairs(allowedDifficulty)do
-        local value=type(state.BetweenPace)=="table" and tonumber(state.BetweenPace[mode]) or 0
-        pace[mode]=math.clamp(math.floor((value or 0)+.5),0,100)
+        local value=type(state.BetweenPace)=="table" and state.BetweenPace[mode]
+        local minimum=minute(type(value)=="table" and value.Min or value)
+        local maximum=type(value)=="table" and minute(value.Max)
+            or math.min(100,minimum+(minimum>0 and 1 or 0))
+        pace[mode]={Min=minimum,Max=math.max(minimum,maximum)}
     end
     state.BetweenPace=pace
-    function state.SetBetweenPace(mode,minutes)
-        if not allowedDifficulty[mode] or type(minutes)~="number" or minutes~=minutes then return end
-        pace[mode]=math.clamp(math.floor(minutes+.5),0,100)
+    function state.SetBetweenPace(mode,minimum,maximum)
+        if not allowedDifficulty[mode] then return end
+        minimum,maximum=minute(minimum),minute(maximum)
+        pace[mode]={Min=minimum,Max=math.max(minimum,maximum)}
         requestSave()
     end
     if localFloor then
         local makePace=(function()
 -- BEGIN BUNDLED BETWEEN PACE
 return function(jobId)
-    -- All accounts in the same run pick the same seconds offset.
+    -- Accounts using the same range in the same run pick the same second.
     local hash=0
     for i=1,#jobId do hash=(hash*31+jobId:byte(i))%65521 end
-    local jitter=1+hash%59
     local lastWave,peak
-    return function(minutes,wave,runTime,remaining,survival,finalHealth)
-        if type(minutes)~="number" or minutes<=0 then return false end
-        local goal=math.min(6000,minutes*60+jitter)
+    return function(range,wave,runTime,remaining,survival,finalHealth)
+        if not range or range.Max==0 then return false end
+        local first,last=range.Min*60,range.Max*60
+        local goal=first+hash%(last-first+1)
         local h,m,s=tostring(runTime or ""):match("^(%d+):(%d+):(%d+)$")
         local elapsed=h and (tonumber(h)*3600+tonumber(m)*60+tonumber(s))
         if not elapsed or type(wave)~="number" or wave<1 or wave>100 then return false,goal end
@@ -9843,6 +9856,17 @@ end
         end)
         table.insert(frameOrder,1,"BetweenPace")
     end
+    local function normalizeAlts(value)
+        local names,seen={},{}
+        for name in value:gmatch("[^,%s;.]+")do
+            name=name:gsub("^@","")
+            local key=name:lower()
+            if name~="" and not seen[key] then
+                seen[key]=true;names[#names+1]=name
+            end
+        end
+        return table.concat(names,", ")
+    end
     local rooms={}
     if type(state.BetweenRooms)=="table" then
         for i,entry in ipairs(state.BetweenRooms)do
@@ -9850,7 +9874,10 @@ end
             if type(entry)=="table" then
                 rooms[#rooms+1]={
                     Host=type(entry.Host)=="string" and entry.Host:sub(1,64) or "",
-                    Alt=type(entry.Alt)=="string" and entry.Alt:sub(1,256) or "",
+                    Alt=type(entry.Alt)=="string" and normalizeAlts(entry.Alt:sub(1,256)) or "",
+                    Mode=allowedAccess[entry.Mode] and entry.Mode or state.BetweenAccess,
+                    Difficulty=allowedDifficulty[entry.Difficulty] and entry.Difficulty or state.BetweenDifficulty,
+                    Start=entry.Start==true,
                 }
             end
         end
@@ -9867,8 +9894,9 @@ end
     local assignment
     local function updateAssignment()
         assignment=nil
-        if #rooms==0 then return end
+        state.AutoCreateBetween=false
         for _,entry in ipairs(rooms)do
+            if not entry.Start then continue end
             local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
             local alts,seen={},{}
             local isAlt,invalid=false,false
@@ -9886,16 +9914,17 @@ end
             if isHost or isAlt then
                 if assignment or (isHost and isAlt) then
                     assignment={Role="Invalid",Message="This account has conflicting room assignments"}
-                    return
+                    break
                 end
                 if invalid or not host or #host>20 or #alts>7 then
                     assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
                 else
-                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts}
+                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts,Room=entry}
                 end
             end
         end
         assignment=assignment or {Role="Unassigned"}
+        state.AutoCreateBetween=assignment.Room~=nil
     end
     updateAssignment()
     local index
@@ -9936,37 +9965,45 @@ end
             end
             return missing
         end,
-        Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
+        Selection=function()
+            local room=assignment.Room
+            if room then return room.Mode,room.Difficulty end
+        end,
         Status=function(message)state.BetweenRoomStatus=message end,
         PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
         Start=function()
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})
     state.BetweenRoomController=controller
-    function state.SetAutoCreateBetween(requested)
-        state.AutoCreateBetween=requested==true;controller.Reset()
-        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create is off"
-        requestSave()
-    end
     function state.AddBetweenRoom()
         if #rooms>=20 then
             state.BetweenRoomStatus="Room setup limit reached"
             return
         end
-        rooms[#rooms+1]={Host="",Alt=""}
-        updateAssignment();controller.Reset();requestSave()
+        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false}
+        requestSave()
         return #rooms
     end
     function state.SetBetweenRoomField(index,field,value)
         local entry=rooms[index]
-        if not entry or (field~="Host" and field~="Alt") or type(value)~="string" then return end
-        value=value:sub(1,field=="Host" and 64 or 256)
-        if entry[field]==value then return end
-        entry[field]=value
-        updateAssignment();controller.Reset();requestSave()
+        if not entry then return end
+        if field=="Host" and type(value)=="string" then value=value:sub(1,64)
+        elseif field=="Alt" and type(value)=="string" then
+            value=normalizeAlts(value)
+            if #value>256 then return entry.Alt end
+        elseif field=="Mode" and allowedAccess[value] then
+        elseif field=="Difficulty" and allowedDifficulty[value] then
+        elseif field=="Start" and type(value)=="boolean" then
+        else return end
+        if entry[field]~=value then
+            local previous=assignment.Room
+            entry[field]=value
+            updateAssignment()
+            if previous==entry or assignment.Room~=previous then controller.Reset()end
+            requestSave()
+        end
+        return value
     end
-    function state.SetBetweenAccess(value)if allowedAccess[value]then state.BetweenAccess=value;requestSave()end end
-    function state.SetBetweenDifficulty(value)if allowedDifficulty[value]then state.BetweenDifficulty=value;requestSave()end end
     taskController("BetweenRoom",.35,controller.Update);frameOrder[#frameOrder+1]="BetweenRoom"
 end
 installBetweenAutomation()
@@ -27396,7 +27433,8 @@ return function(ctx)
     local state=ctx.State
     local api={Controls={},Tabs={},Ready=false,BackgroundReady=false,Visible=true}
     local lifetime={Closed=false,VisibilityApplied=false}
-    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
+    local wavesTab="Waves Defense"
+    local order={"Main","Combat",wavesTab,"Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
     local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","shield","sliders-horizontal"}
     local projections={}
     local cadence={Next=0,Choices=0,Cursor=1,Tab=nil,Build=os.clock()}
@@ -27482,6 +27520,74 @@ return function(ctx)
     window:OnOpen(function()if valid()then publish(true)end end)
     window:OnClose(function()if valid()then publish(false)end end)
     window:OnDestroy(function()if valid()then action("Destroy")end end)
+    local function mountRange(control,definition,tabObject)
+        local elements=control.ParagraphFrame and control.ParagraphFrame.UIElements
+        if not elements then return end
+        local inputService=ctx.InputService
+        local scroller=tabObject.UIElements and tabObject.UIElements.ContainerFrame
+        local function gui(class,parent,properties)
+            local object=Instance.new(class)
+            for key,value in pairs(properties)do object[key]=value end
+            object.Parent=parent
+            return object
+        end
+        local function rounded(object)
+            gui("UICorner",object,{CornerRadius=UDim.new(1,0)})
+            return object
+        end
+        local row=gui("Frame",elements.Container,{Size=UDim2.new(1,0,0,32),BackgroundTransparency=1})
+        local hit=gui("TextButton",row,{Size=UDim2.new(1,0,0,22),Text="",AutoButtonColor=false,BackgroundTransparency=1})
+        local track=rounded(gui("Frame",hit,{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),
+            Size=UDim2.new(1,-16,0,4),BorderSizePixel=0,BackgroundTransparency=.75}))
+        local fill=rounded(gui("Frame",track,{BorderSizePixel=0}))
+        local function thumb()
+            return rounded(gui("Frame",track,{AnchorPoint=Vector2.new(.5,.5),Size=UDim2.fromOffset(13,13),BorderSizePixel=0}))
+        end
+        local low,high=thumb(),thumb()
+        local label=gui("TextLabel",row,{Position=UDim2.fromOffset(0,20),Size=UDim2.new(1,0,0,12),
+            BackgroundTransparency=1,TextSize=12,FontFace=elements.Title.FontFace,TextXAlignment=Enum.TextXAlignment.Right})
+        local minimum,maximum=definition.Value.Min,definition.Value.Max
+        local function draw()
+            local color=elements.Title.TextColor3
+            low.BackgroundColor3=color;high.BackgroundColor3=color
+            fill.BackgroundColor3=color;track.BackgroundColor3=color;label.TextColor3=color
+            low.Position=UDim2.fromScale(minimum/100,.5);high.Position=UDim2.fromScale(maximum/100,.5)
+            fill.Position=UDim2.fromScale(minimum/100,0);fill.Size=UDim2.fromScale((maximum-minimum)/100,1)
+            label.Text=maximum==0 and "Off" or string.format("%d – %d min",minimum,maximum)
+        end
+        draw()
+        local changed,ended,scrolling
+        local function stopDrag()
+            if not changed then return end
+            changed:Disconnect();ended:Disconnect();changed=nil;ended=nil
+            if scroller then scroller.ScrollingEnabled=scrolling end
+        end
+        hit.InputBegan:Connect(safe(function(inputObject)
+            local touch=inputObject.UserInputType==Enum.UserInputType.Touch
+            if not api.Ready or changed or (not touch and inputObject.UserInputType~=Enum.UserInputType.MouseButton1) then return end
+            local function position(input)
+                return math.clamp((input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)*100,0,100)
+            end
+            local point=position(inputObject)
+            local lower=point<(minimum+maximum)/2
+            local function move(input)
+                local value=math.round(position(input))
+                if lower then minimum=math.min(value,maximum) else maximum=math.max(value,minimum) end
+                draw()
+            end
+            if scroller then scrolling=scroller.ScrollingEnabled;scroller.ScrollingEnabled=false end
+            changed=inputService.InputChanged:Connect(safe(function(input)
+                if input==inputObject or (not touch and input.UserInputType==Enum.UserInputType.MouseMovement) then move(input) end
+            end))
+            ended=inputService.InputEnded:Connect(safe(function(input)
+                if input==inputObject or (not touch and input.UserInputType==Enum.UserInputType.MouseButton1) then
+                    stopDrag();definition.Write(minimum,maximum)
+                end
+            end))
+            move(inputObject)
+        end))
+        return stopDrag
+    end
     local function register(tab,definition)
         constructionPoint()
         local key=definition.Key
@@ -27502,9 +27608,6 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
-        elseif kind=="Slider"then
-            options.Value=definition.Value;options.Step=1
-            options.Callback=safe(function(value)if api.Ready then definition.Write(value)end end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -27519,7 +27622,9 @@ return function(ctx)
                 definition.Write(value,projection.Map);cadence.Choices=0;cadence.Cursor=1
             end)
         end
-        projection.Control=tabObject[kind](tabObject,options)
+        local factory=kind=="RangeSlider" and "Paragraph" or kind
+        projection.Control=tabObject[factory](tabObject,options)
+        if kind=="RangeSlider"then projection.Cleanup=mountRange(projection.Control,definition,tabObject) end
         projection.Syncing=false;api.Controls[key]=projection.Control
         projections[#projections+1]=projection
         return projection
@@ -27615,32 +27720,43 @@ return function(ctx)
         input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
         paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
-        toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
-        section("Challenge Floors","BetweenSection","The Between")
-        toggle("Challenge Floors","AutoCreateBetween","Auto Create","SetAutoCreateBetween")
-        dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
-        dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
-        section("Challenge Floors","BetweenPaceSection","Completion Time")
-        for _,mode in ipairs({"Normal","Hard","Elite"})do
-            register("Challenge Floors",{Kind="Slider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
-                Desc="0 turns pacing off",Value={Min=0,Max=100,Default=state.BetweenPace and state.BetweenPace[mode] or 0},
-                Write=function(value)action("SetBetweenPace",mode,value)end})
+        toggle(wavesTab,"AutoDodge","Auto Dodge","SetAutoDodge")
+        section(wavesTab,"BetweenPaceSection","Completion Time")
+        local difficulties={"Normal","Hard","Elite"}
+        for _,mode in ipairs(difficulties)do
+            register(wavesTab,{Kind="RangeSlider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
+                Value=state.BetweenPace and state.BetweenPace[mode] or {Min=0,Max=0},
+                Write=function(minimum,maximum)action("SetBetweenPace",mode,minimum,maximum)end})
         end
-        paragraph("Challenge Floors","BetweenPaceStatus","Pace Status",function()
+        paragraph(wavesTab,"BetweenPaceStatus","Pace Status",function()
             return state.BetweenPaceStatus or "Pacing applies inside The Between"
         end)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]
-            section("Challenge Floors",key,"Room "..index)
-            input("Challenge Floors",key.."Host","Host",entry.Host,function(text)
+            section(wavesTab,key,"Room "..index)
+            input(wavesTab,key.."Host","Host",entry.Host,function(text)
                 action("SetBetweenRoomField",index,"Host",text)
             end,"Roblox username or user ID")
-            input("Challenge Floors",key.."Alt","Alt",entry.Alt,function(text)
-                action("SetBetweenRoomField",index,"Alt",text)
-            end,"Up to seven usernames or IDs, separated by commas or spaces")
+            local alt
+            alt=input(wavesTab,key.."Alt","Alt",entry.Alt,function(text)
+                if text==entry.Alt then return end
+                local formatted=action("SetBetweenRoomField",index,"Alt",text)
+                if formatted and formatted~=text then
+                    alt.Syncing=true;alt.Control:Set(formatted);alt.Syncing=false
+                end
+            end,"Up to seven usernames or IDs")
+            dropdown(wavesTab,key.."Difficulty","Difficulty",function()
+                return {Options=difficulties,Value=entry.Difficulty}
+            end,function(value)action("SetBetweenRoomField",index,"Difficulty",value)end)
+            dropdown(wavesTab,key.."Mode","Mode",function()
+                return {Options={"Private","Friends","Game Party"},Value=entry.Mode}
+            end,function(value)action("SetBetweenRoomField",index,"Mode",value)end)
+            register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
+                Read=function()return entry.Start end,
+                Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
         end
-        button("Challenge Floors","CreateBetweenRoom","Create Room",function()
+        button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")
             if index then room(index)end
         end)
@@ -27741,6 +27857,7 @@ return function(ctx)
         local function attempt(fn,...)
             local ok,reason=pcall(fn,...);if not ok then errors[#errors+1]=tostring(reason)end
         end
+        for _,projection in ipairs(projections)do if projection.Cleanup then attempt(projection.Cleanup)end end
         attempt(ctx.Visibility,false);attempt(function()window:Destroy()end)
         if memory.Destroy then attempt(memory.Destroy)end
         if ctx.DestroyRoots then attempt(ctx.DestroyRoots)end
@@ -27748,6 +27865,7 @@ return function(ctx)
         table.clear(projections)
     end
     local savedTab=state.UI.ActiveTab or "Main"
+    if savedTab=="Challenge Floors"then savedTab=wavesTab end
     tab(1);main()
     local function background()
         if not valid()then return end
@@ -27761,7 +27879,7 @@ return function(ctx)
     end
     if ctx.Defer then ctx.Defer(background)else background()end
     api.Ready=true
-    local active=api.Tabs[state.UI.ActiveTab or "Main"]or api.Tabs.Main;active:Select()
+    local active=api.Tabs[savedTab]or api.Tabs.Main;active:Select()
     api.Update(0)
     return api
 end
@@ -27912,7 +28030,7 @@ end
         state.UI.ActiveTab=preference("ActiveTab",state.UI.ActiveTab or "Main")
         state.WindUIPosition=preference("WindUIPosition",nil)
         function state.SetAutoHideUI(on)state.AutoHideUI=on==true;state.SaveNow()end
-        local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,
+        local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,InputService=UserInputService,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
             Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,

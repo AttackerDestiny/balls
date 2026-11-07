@@ -332,15 +332,22 @@ local function installBetweenAutomation()
     local allowedDifficulty={Normal=true,Hard=true,Elite=true}
     if not allowedAccess[state.BetweenAccess]then state.BetweenAccess="Private"end
     if not allowedDifficulty[state.BetweenDifficulty]then state.BetweenDifficulty="Normal"end
+    local function minute(value)
+        return type(value)=="number" and value==value and math.clamp(math.round(value),0,100) or 0
+    end
     local pace={}
     for mode in pairs(allowedDifficulty)do
-        local value=type(state.BetweenPace)=="table" and tonumber(state.BetweenPace[mode]) or 0
-        pace[mode]=math.clamp(math.floor((value or 0)+.5),0,100)
+        local value=type(state.BetweenPace)=="table" and state.BetweenPace[mode]
+        local minimum=minute(type(value)=="table" and value.Min or value)
+        local maximum=type(value)=="table" and minute(value.Max)
+            or math.min(100,minimum+(minimum>0 and 1 or 0))
+        pace[mode]={Min=minimum,Max=math.max(minimum,maximum)}
     end
     state.BetweenPace=pace
-    function state.SetBetweenPace(mode,minutes)
-        if not allowedDifficulty[mode] or type(minutes)~="number" or minutes~=minutes then return end
-        pace[mode]=math.clamp(math.floor(minutes+.5),0,100)
+    function state.SetBetweenPace(mode,minimum,maximum)
+        if not allowedDifficulty[mode] then return end
+        minimum,maximum=minute(minimum),minute(maximum)
+        pace[mode]={Min=minimum,Max=math.max(minimum,maximum)}
         requestSave()
     end
     if localFloor then
@@ -377,6 +384,17 @@ local function installBetweenAutomation()
         end)
         table.insert(frameOrder,1,"BetweenPace")
     end
+    local function normalizeAlts(value)
+        local names,seen={},{}
+        for name in value:gmatch("[^,%s;.]+")do
+            name=name:gsub("^@","")
+            local key=name:lower()
+            if name~="" and not seen[key] then
+                seen[key]=true;names[#names+1]=name
+            end
+        end
+        return table.concat(names,", ")
+    end
     local rooms={}
     if type(state.BetweenRooms)=="table" then
         for i,entry in ipairs(state.BetweenRooms)do
@@ -384,7 +402,10 @@ local function installBetweenAutomation()
             if type(entry)=="table" then
                 rooms[#rooms+1]={
                     Host=type(entry.Host)=="string" and entry.Host:sub(1,64) or "",
-                    Alt=type(entry.Alt)=="string" and entry.Alt:sub(1,256) or "",
+                    Alt=type(entry.Alt)=="string" and normalizeAlts(entry.Alt:sub(1,256)) or "",
+                    Mode=allowedAccess[entry.Mode] and entry.Mode or state.BetweenAccess,
+                    Difficulty=allowedDifficulty[entry.Difficulty] and entry.Difficulty or state.BetweenDifficulty,
+                    Start=entry.Start==true,
                 }
             end
         end
@@ -401,8 +422,9 @@ local function installBetweenAutomation()
     local assignment
     local function updateAssignment()
         assignment=nil
-        if #rooms==0 then return end
+        state.AutoCreateBetween=false
         for _,entry in ipairs(rooms)do
+            if not entry.Start then continue end
             local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
             local alts,seen={},{}
             local isAlt,invalid=false,false
@@ -420,16 +442,17 @@ local function installBetweenAutomation()
             if isHost or isAlt then
                 if assignment or (isHost and isAlt) then
                     assignment={Role="Invalid",Message="This account has conflicting room assignments"}
-                    return
+                    break
                 end
                 if invalid or not host or #host>20 or #alts>7 then
                     assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
                 else
-                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts}
+                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts,Room=entry}
                 end
             end
         end
         assignment=assignment or {Role="Unassigned"}
+        state.AutoCreateBetween=assignment.Room~=nil
     end
     updateAssignment()
     local index
@@ -470,37 +493,45 @@ local function installBetweenAutomation()
             end
             return missing
         end,
-        Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
+        Selection=function()
+            local room=assignment.Room
+            if room then return room.Mode,room.Difficulty end
+        end,
         Status=function(message)state.BetweenRoomStatus=message end,
         PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
         Start=function()
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})
     state.BetweenRoomController=controller
-    function state.SetAutoCreateBetween(requested)
-        state.AutoCreateBetween=requested==true;controller.Reset()
-        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create is off"
-        requestSave()
-    end
     function state.AddBetweenRoom()
         if #rooms>=20 then
             state.BetweenRoomStatus="Room setup limit reached"
             return
         end
-        rooms[#rooms+1]={Host="",Alt=""}
-        updateAssignment();controller.Reset();requestSave()
+        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false}
+        requestSave()
         return #rooms
     end
     function state.SetBetweenRoomField(index,field,value)
         local entry=rooms[index]
-        if not entry or (field~="Host" and field~="Alt") or type(value)~="string" then return end
-        value=value:sub(1,field=="Host" and 64 or 256)
-        if entry[field]==value then return end
-        entry[field]=value
-        updateAssignment();controller.Reset();requestSave()
+        if not entry then return end
+        if field=="Host" and type(value)=="string" then value=value:sub(1,64)
+        elseif field=="Alt" and type(value)=="string" then
+            value=normalizeAlts(value)
+            if #value>256 then return entry.Alt end
+        elseif field=="Mode" and allowedAccess[value] then
+        elseif field=="Difficulty" and allowedDifficulty[value] then
+        elseif field=="Start" and type(value)=="boolean" then
+        else return end
+        if entry[field]~=value then
+            local previous=assignment.Room
+            entry[field]=value
+            updateAssignment()
+            if previous==entry or assignment.Room~=previous then controller.Reset()end
+            requestSave()
+        end
+        return value
     end
-    function state.SetBetweenAccess(value)if allowedAccess[value]then state.BetweenAccess=value;requestSave()end end
-    function state.SetBetweenDifficulty(value)if allowedDifficulty[value]then state.BetweenDifficulty=value;requestSave()end end
     taskController("BetweenRoom",.35,controller.Update);frameOrder[#frameOrder+1]="BetweenRoom"
 end
 installBetweenAutomation()

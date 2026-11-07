@@ -2,6 +2,8 @@ return function(source)
     local make=assert(loadstring(source))()
     local clipboard,applied,encoded
     local settings={Version=1,Enabled=true,SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
+        BetweenRooms={{Host="Host",Alt="Alt, 123",Mode="Friends",Difficulty="Hard",Start=true},{Host="Legacy",Alt=""}},
+        BetweenPace={Normal=35,Hard={Min=35,Max=38},Elite={Min=0,Max=0}},
         AutoFarm=false,CreditCheck=true,CreditWhitelistText="Friend, 123",BossOnly=true,MultiSpotOrder={"b","a"},AutoCraft={["Rare Upgrade Crystal"]=true},TradeItems={Gem=true},MultiSpotSelected={arena=true},
         SkillPerWeapon={Sword="Summon Pistol"},OffsetProfiles={Boss=20},Theme="Light",AutoHideUI=true,ActiveTab="Settings",
         WindUIPosition={.5,0,.5,0},HealthHUDPosition={.5,0,.7,0},ViewingPlayerInventory=true,SelectedPlayerId=123}
@@ -16,6 +18,8 @@ return function(source)
     invalid({Format="Wrong",Version=1,Settings=settings,CustomSpots=spots})
     settings.SafeMode="yes";invalid(encoded);settings.SafeMode=true
     settings.Unknown=true;invalid(encoded);settings.Unknown=nil
+    settings.BetweenRooms[1].Start="yes";invalid(encoded);settings.BetweenRooms[1].Start=true
+    settings.BetweenPace.Hard.Max=34;invalid(encoded);settings.BetweenPace.Hard.Max=38
     spots["../escape"]={};invalid(encoded);spots["../escape"]=nil
     spots["11"][1].Position[1]=math.huge;invalid(encoded);spots["11"][1].Position[1]=1
     assert(not pcall(api.Import,string.rep("x",262145)))

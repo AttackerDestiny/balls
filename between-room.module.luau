@@ -22,6 +22,7 @@ return function(ctx)
         if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
         local assignment=ctx.Assignment and ctx.Assignment()
+        local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then
             local hostRoom=ctx.FindHostRoom(assignment.Host)
             if room then
@@ -29,12 +30,12 @@ return function(ctx)
                     or "Leave your current party to join "..assignment.Host)
             elseif not hostRoom then
                 ctx.Status("Waiting for host "..assignment.Host.." in this server")
-            elseif hostRoom.Status and hostRoom.Status~="Public" then
+            elseif hostRoom.Status==access and hostRoom.Mode==difficulty then
                 if joinRoom~=hostRoom.Id or joinStatus~=hostRoom.Status then
                     joinRoom,joinStatus,joinAttempts,nextJoin=hostRoom.Id,hostRoom.Status,0,0
                 end
                 if joinAttempts>=3 then
-                    ctx.Status("Could not join the host. Check room access and toggle Auto Create to retry.")
+                    ctx.Status("Could not join the host. Check room access and toggle Start to retry.")
                 elseif now>=nextJoin then
                     joinAttempts+=1;nextJoin=now+3
                     ctx.Status("Joining "..assignment.Host)
@@ -49,7 +50,7 @@ return function(ctx)
         if waiting then
             local changed=waiting.Field=="Id"and room or room and room[waiting.Field]~=waiting.Before
             if changed then waiting=nil
-            elseif now>=waiting.Until then stop("Room request timed out. Toggle Auto Create to retry.");return
+            elseif now>=waiting.Until then stop("Room request timed out. Toggle Start to retry.");return
             else return end
         end
         if room then
@@ -57,7 +58,6 @@ return function(ctx)
             if room.Host~=ctx.UserId or room.PlaceId~=ctx.PlaceId then ctx.Status("Leave your current party to create a Between room");return end
             if room.Id==completedRoom or not(room.Status and room.Mode)then return end
         end
-        local access,difficulty=ctx.Selection()
         if not room then attempts=0;dispatch("CreateParty","Id",nil,now);return end
         if room.Mode~=difficulty then dispatch("ToggleMode","Mode",room,now);return end
         if room.Status~=access then dispatch("ToggleStatus","Status",room,now);return end
@@ -82,7 +82,7 @@ return function(ctx)
             local ok,accepted=pcall(ctx.Start)
             starting=false
             if ok and accepted==true then completedRoom=room.Id;phase="Stopped";if ctx.Active()then ctx.Status("Start accepted · waiting for teleport")end
-            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Auto Create to retry.")
+            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Start to retry.")
             else phase="Stopped"end
         end)
     end

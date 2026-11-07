@@ -5,11 +5,12 @@ return function(source)
     local worker
     local starts=0
     local accepted=false
+    local enabled=false
     local assignment,hostRoom
     local missing={}
     local controller=make({
         UserId=10,PlaceId=20,
-        Active=function()return true end,
+        Active=function()return enabled end,
         Read=function()return room end,
         Assignment=function()return assignment end,
         MissingAlts=function()return missing end,
@@ -20,6 +21,9 @@ return function(source)
         Spawn=function(fn)assert(not worker);worker=fn end,
         Start=function()starts+=1;return accepted end,
     })
+    controller.Update(-1)
+    assert(#requests==0,"Disabled rooms must not send requests")
+    enabled=true
     controller.Update(0)
     controller.Update(.5)
     assert(#requests==1 and requests[1]=="ToggleMode" and not worker)
@@ -52,10 +56,13 @@ return function(source)
     assert(starts==2,"Check the roster again immediately before Start")
     room=nil
     assignment={Role="Alt",Host="HostAccount"}
-    hostRoom={Id="3",Status="Friends"}
+    hostRoom={Id="3",Status="Friends",Mode="Normal"}
     controller.Reset()
     controller.Update(9)
+    assert(#requests==2,"Wait for the host room to finish configuring")
+    hostRoom.Mode="Hard"
     controller.Update(9.35)
+    controller.Update(9.7)
     assert(#requests==3 and requests[3]=="JoinParty:3","Only request the configured host room and pace retries")
     print("PASS The Between starts once after both room settings are confirmed")
 end

@@ -36,15 +36,21 @@ return function(ctx)
         end
         for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
         local rooms=value.BetweenRooms or {}
+        local access={Private=true,Friends=true,["Game Party"]=true}
+        local difficulties={Normal=true,Hard=true,Elite=true}
         assert(#rooms<=20,"Too many Between rooms")
         for index,room in pairs(rooms)do
             assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
                 and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
-                and type(room.Alt)=="string" and #room.Alt<=256,"Invalid Between room")
+                and type(room.Alt)=="string" and #room.Alt<=256
+                and (room.Mode==nil or access[room.Mode])
+                and (room.Difficulty==nil or difficulties[room.Difficulty])
+                and (room.Start==nil or type(room.Start)=="boolean"),"Invalid Between room")
         end
-        for mode,minutes in pairs(value.BetweenPace or {})do
-            assert((mode=="Normal" or mode=="Hard" or mode=="Elite") and type(minutes)=="number"
-                and minutes%1==0 and minutes>=0 and minutes<=100,"Invalid Between completion time")
+        local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
+        for mode,range in pairs(value.BetweenPace or {})do
+            assert(difficulties[mode] and (minute(range) or (type(range)=="table"
+                and minute(range.Min) and minute(range.Max) and range.Min<=range.Max)),"Invalid Between completion time")
         end
     end
     local function arenas(value)

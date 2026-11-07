@@ -3,7 +3,8 @@ return function(ctx)
     local state=ctx.State
     local api={Controls={},Tabs={},Ready=false,BackgroundReady=false,Visible=true}
     local lifetime={Closed=false,VisibilityApplied=false}
-    local order={"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
+    local wavesTab="Waves Defense"
+    local order={"Main","Combat",wavesTab,"Auto Skill","Misc","Player","Utility","Speacial","Dodge","Settings"}
     local icons={"house","swords","shield","sparkles","menu","users","settings","trending-up","shield","sliders-horizontal"}
     local projections={}
     local cadence={Next=0,Choices=0,Cursor=1,Tab=nil,Build=os.clock()}
@@ -89,6 +90,74 @@ return function(ctx)
     window:OnOpen(function()if valid()then publish(true)end end)
     window:OnClose(function()if valid()then publish(false)end end)
     window:OnDestroy(function()if valid()then action("Destroy")end end)
+    local function mountRange(control,definition,tabObject)
+        local elements=control.ParagraphFrame and control.ParagraphFrame.UIElements
+        if not elements then return end
+        local inputService=ctx.InputService
+        local scroller=tabObject.UIElements and tabObject.UIElements.ContainerFrame
+        local function gui(class,parent,properties)
+            local object=Instance.new(class)
+            for key,value in pairs(properties)do object[key]=value end
+            object.Parent=parent
+            return object
+        end
+        local function rounded(object)
+            gui("UICorner",object,{CornerRadius=UDim.new(1,0)})
+            return object
+        end
+        local row=gui("Frame",elements.Container,{Size=UDim2.new(1,0,0,32),BackgroundTransparency=1})
+        local hit=gui("TextButton",row,{Size=UDim2.new(1,0,0,22),Text="",AutoButtonColor=false,BackgroundTransparency=1})
+        local track=rounded(gui("Frame",hit,{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),
+            Size=UDim2.new(1,-16,0,4),BorderSizePixel=0,BackgroundTransparency=.75}))
+        local fill=rounded(gui("Frame",track,{BorderSizePixel=0}))
+        local function thumb()
+            return rounded(gui("Frame",track,{AnchorPoint=Vector2.new(.5,.5),Size=UDim2.fromOffset(13,13),BorderSizePixel=0}))
+        end
+        local low,high=thumb(),thumb()
+        local label=gui("TextLabel",row,{Position=UDim2.fromOffset(0,20),Size=UDim2.new(1,0,0,12),
+            BackgroundTransparency=1,TextSize=12,FontFace=elements.Title.FontFace,TextXAlignment=Enum.TextXAlignment.Right})
+        local minimum,maximum=definition.Value.Min,definition.Value.Max
+        local function draw()
+            local color=elements.Title.TextColor3
+            low.BackgroundColor3=color;high.BackgroundColor3=color
+            fill.BackgroundColor3=color;track.BackgroundColor3=color;label.TextColor3=color
+            low.Position=UDim2.fromScale(minimum/100,.5);high.Position=UDim2.fromScale(maximum/100,.5)
+            fill.Position=UDim2.fromScale(minimum/100,0);fill.Size=UDim2.fromScale((maximum-minimum)/100,1)
+            label.Text=maximum==0 and "Off" or string.format("%d – %d min",minimum,maximum)
+        end
+        draw()
+        local changed,ended,scrolling
+        local function stopDrag()
+            if not changed then return end
+            changed:Disconnect();ended:Disconnect();changed=nil;ended=nil
+            if scroller then scroller.ScrollingEnabled=scrolling end
+        end
+        hit.InputBegan:Connect(safe(function(inputObject)
+            local touch=inputObject.UserInputType==Enum.UserInputType.Touch
+            if not api.Ready or changed or (not touch and inputObject.UserInputType~=Enum.UserInputType.MouseButton1) then return end
+            local function position(input)
+                return math.clamp((input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)*100,0,100)
+            end
+            local point=position(inputObject)
+            local lower=point<(minimum+maximum)/2
+            local function move(input)
+                local value=math.round(position(input))
+                if lower then minimum=math.min(value,maximum) else maximum=math.max(value,minimum) end
+                draw()
+            end
+            if scroller then scrolling=scroller.ScrollingEnabled;scroller.ScrollingEnabled=false end
+            changed=inputService.InputChanged:Connect(safe(function(input)
+                if input==inputObject or (not touch and input.UserInputType==Enum.UserInputType.MouseMovement) then move(input) end
+            end))
+            ended=inputService.InputEnded:Connect(safe(function(input)
+                if input==inputObject or (not touch and input.UserInputType==Enum.UserInputType.MouseButton1) then
+                    stopDrag();definition.Write(minimum,maximum)
+                end
+            end))
+            move(inputObject)
+        end))
+        return stopDrag
+    end
     local function register(tab,definition)
         constructionPoint()
         local key=definition.Key
@@ -109,9 +178,6 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
-        elseif kind=="Slider"then
-            options.Value=definition.Value;options.Step=1
-            options.Callback=safe(function(value)if api.Ready then definition.Write(value)end end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -126,7 +192,9 @@ return function(ctx)
                 definition.Write(value,projection.Map);cadence.Choices=0;cadence.Cursor=1
             end)
         end
-        projection.Control=tabObject[kind](tabObject,options)
+        local factory=kind=="RangeSlider" and "Paragraph" or kind
+        projection.Control=tabObject[factory](tabObject,options)
+        if kind=="RangeSlider"then projection.Cleanup=mountRange(projection.Control,definition,tabObject) end
         projection.Syncing=false;api.Controls[key]=projection.Control
         projections[#projections+1]=projection
         return projection
@@ -222,32 +290,43 @@ return function(ctx)
         input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
         paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
-        toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
-        section("Challenge Floors","BetweenSection","The Between")
-        toggle("Challenge Floors","AutoCreateBetween","Auto Create","SetAutoCreateBetween")
-        dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
-        dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
-        section("Challenge Floors","BetweenPaceSection","Completion Time")
-        for _,mode in ipairs({"Normal","Hard","Elite"})do
-            register("Challenge Floors",{Kind="Slider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
-                Desc="0 turns pacing off",Value={Min=0,Max=100,Default=state.BetweenPace and state.BetweenPace[mode] or 0},
-                Write=function(value)action("SetBetweenPace",mode,value)end})
+        toggle(wavesTab,"AutoDodge","Auto Dodge","SetAutoDodge")
+        section(wavesTab,"BetweenPaceSection","Completion Time")
+        local difficulties={"Normal","Hard","Elite"}
+        for _,mode in ipairs(difficulties)do
+            register(wavesTab,{Kind="RangeSlider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
+                Value=state.BetweenPace and state.BetweenPace[mode] or {Min=0,Max=0},
+                Write=function(minimum,maximum)action("SetBetweenPace",mode,minimum,maximum)end})
         end
-        paragraph("Challenge Floors","BetweenPaceStatus","Pace Status",function()
+        paragraph(wavesTab,"BetweenPaceStatus","Pace Status",function()
             return state.BetweenPaceStatus or "Pacing applies inside The Between"
         end)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]
-            section("Challenge Floors",key,"Room "..index)
-            input("Challenge Floors",key.."Host","Host",entry.Host,function(text)
+            section(wavesTab,key,"Room "..index)
+            input(wavesTab,key.."Host","Host",entry.Host,function(text)
                 action("SetBetweenRoomField",index,"Host",text)
             end,"Roblox username or user ID")
-            input("Challenge Floors",key.."Alt","Alt",entry.Alt,function(text)
-                action("SetBetweenRoomField",index,"Alt",text)
-            end,"Up to seven usernames or IDs, separated by commas or spaces")
+            local alt
+            alt=input(wavesTab,key.."Alt","Alt",entry.Alt,function(text)
+                if text==entry.Alt then return end
+                local formatted=action("SetBetweenRoomField",index,"Alt",text)
+                if formatted and formatted~=text then
+                    alt.Syncing=true;alt.Control:Set(formatted);alt.Syncing=false
+                end
+            end,"Up to seven usernames or IDs")
+            dropdown(wavesTab,key.."Difficulty","Difficulty",function()
+                return {Options=difficulties,Value=entry.Difficulty}
+            end,function(value)action("SetBetweenRoomField",index,"Difficulty",value)end)
+            dropdown(wavesTab,key.."Mode","Mode",function()
+                return {Options={"Private","Friends","Game Party"},Value=entry.Mode}
+            end,function(value)action("SetBetweenRoomField",index,"Mode",value)end)
+            register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
+                Read=function()return entry.Start end,
+                Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
         end
-        button("Challenge Floors","CreateBetweenRoom","Create Room",function()
+        button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")
             if index then room(index)end
         end)
@@ -348,6 +427,7 @@ return function(ctx)
         local function attempt(fn,...)
             local ok,reason=pcall(fn,...);if not ok then errors[#errors+1]=tostring(reason)end
         end
+        for _,projection in ipairs(projections)do if projection.Cleanup then attempt(projection.Cleanup)end end
         attempt(ctx.Visibility,false);attempt(function()window:Destroy()end)
         if memory.Destroy then attempt(memory.Destroy)end
         if ctx.DestroyRoots then attempt(ctx.DestroyRoots)end
@@ -355,6 +435,7 @@ return function(ctx)
         table.clear(projections)
     end
     local savedTab=state.UI.ActiveTab or "Main"
+    if savedTab=="Challenge Floors"then savedTab=wavesTab end
     tab(1);main()
     local function background()
         if not valid()then return end
@@ -368,7 +449,7 @@ return function(ctx)
     end
     if ctx.Defer then ctx.Defer(background)else background()end
     api.Ready=true
-    local active=api.Tabs[state.UI.ActiveTab or "Main"]or api.Tabs.Main;active:Select()
+    local active=api.Tabs[savedTab]or api.Tabs.Main;active:Select()
     api.Update(0)
     return api
 end

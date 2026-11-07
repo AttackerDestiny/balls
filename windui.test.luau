@@ -59,21 +59,31 @@ return function(source)
         SelectedMiscSkill="Heal",MiscSkillChoices={{Name="Heal",Usable=true},{Name="Locked skill",Usable=false}},
         JoinFriendUsername="Friend",AutoJoinFriend=true,HealthVisible=true,
         FloorDestinations={A={Id="A",Kind="Boss",Name="Arena"},B={Id="B",Kind="Boss",Name="Arena"}},
-        PlayerInventoryRows={{Name="Sword",Upgrade=3,Count=2}}}
+        PlayerInventoryRows={{Name="Sword",Upgrade=3,Count=2}},
+        BetweenRooms={{Host="Host",Alt="",Mode="Private",Difficulty="Normal",Start=false}}}
     local catalog={Floors={{Id=11,Label="F1",Unlocked=true},{Id=22,Label="F2",Unlocked=false}},
         Spots={{Id="11/Boss",PlaceId=11,Name="Boss arena",Kind="Boss"},{Id="11/Mini",PlaceId=11,Name="Mini arena",Kind="Mini boss"},
             {Id="22/Boss",PlaceId=22,Name="Foreign arena",Kind="Boss"}},AddCurrent=function()end,Sort=function()end}
     s.AutomationCatalog=catalog
     local function record(name,...)calls[#calls+1]={Name=name,Args={...}}end
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
-        NoSelfDamage="SetNoSelfDamage",AeganatosDodge="SetAeganatosDodge",AtheonUnlock="SetAtheonUnlock",AutoCreateBetween="SetAutoCreateBetween",CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
+        NoSelfDamage="SetNoSelfDamage",AeganatosDodge="SetAeganatosDodge",AtheonUnlock="SetAtheonUnlock",CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
         AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
     end
     for key,method in pairs({CreditWhitelistText="SetCreditWhitelist",SafeWhitelistText="SetSafeWhitelist",JoinFriendUsername="SetJoinFriendUsername",
-        BetweenAccess="SetBetweenAccess",BetweenDifficulty="SetBetweenDifficulty",SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
+        SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
         s[method]=function(value)record(method,value);s[key]=value end
+    end
+    function s.SetBetweenRoomField(index,field,value)
+        if field=="Alt"then value=value:gsub("%s+",", ") end
+        s.BetweenRooms[index][field]=value
+        return value
+    end
+    function s.AddBetweenRoom()
+        table.insert(s.BetweenRooms,{Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false})
+        return #s.BetweenRooms
     end
     function s.IsAutomationFloorUnlocked(id)return id==11 or catalog.Floors[2].Unlocked end
     function s.SetSafeFloor(id)record("SetSafeFloor",id);if s.IsAutomationFloorUnlocked(id)then s.SafeFloorId=id end end
@@ -147,13 +157,20 @@ return function(source)
     c.CreditCheck:Emit(true);assert(s.CreditCheck)
     c.CreditWhitelist:Emit("CreditFriend, 123");assert(s.CreditWhitelistText=="CreditFriend, 123"and s.SafeWhitelistText==safeList,"Credit whitelist must stay separate from Safe Mode")
     assert(c.AutoEquipBestSword.Title=="Auto Equip Best Gear")
-    assert(c.NoSelfDamage and c.AeganatosDodge and c.AtheonDodge and c.AtheonUnlock and c.AutoCreateBetween and c.BetweenAccess and c.BetweenDifficulty and not c.FarmPosition,"Latest Dodge/Between/Atheon controls replace the removed position selector")
+    assert(c.NoSelfDamage and c.AeganatosDodge and c.AtheonDodge and c.AtheonUnlock and not c.FarmPosition)
+    assert(api.Tabs["Waves Defense"] and not api.Tabs["Challenge Floors"])
+    assert(not (c.AutoCreateBetween or c.BetweenAccess or c.BetweenDifficulty or c.BetweenRoomStatus))
+    assert(c.BetweenPaceNormal and c.BetweenPaceHard and c.BetweenPaceElite)
     c.NoSelfDamage:Emit(true);assert(s.NoSelfDamage and calls[#calls].Name=="SetNoSelfDamage")
     c.AeganatosDodge:Emit(true);assert(s.AeganatosDodge)
     c.AtheonUnlock:Emit(true);assert(s.AtheonUnlock)
-    c.AutoCreateBetween:Emit(true);assert(s.AutoCreateBetween)
-    c.BetweenAccess:Emit("Friends");assert(s.BetweenAccess=="Friends")
-    c.BetweenDifficulty:Emit("Hard");assert(s.BetweenDifficulty=="Hard")
+    assert(c.BetweenRoom1Start.Title=="Start" and not c.BetweenRoom1Start.Value)
+    c.BetweenRoom1Mode:Emit("Friends");assert(s.BetweenRooms[1].Mode=="Friends")
+    c.BetweenRoom1Difficulty:Emit("Hard");assert(s.BetweenRooms[1].Difficulty=="Hard")
+    c.BetweenRoom1Start:Emit(true);assert(s.BetweenRooms[1].Start)
+    c.BetweenRoom1Alt:Emit("One Two");assert(c.BetweenRoom1Alt.Value=="One, Two")
+    c.CreateBetweenRoom.Callback()
+    assert(c.BetweenRoom2Host and c.BetweenRoom2Mode and not c.BetweenRoom2Start.Value)
     c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")

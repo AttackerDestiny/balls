@@ -127,7 +127,7 @@ state.UI={Root=gui,Content=content,SkillOptions=skillList,TravelOptions=travelLi
 local adapters={"AutoEquipBestSword","AtheonDodge","MiscSkillToggle","MiscSkillDropdown","MiscSkillOptions","BoostDropdown",
     "BoostOptions","PlayerSelector","PlayerOptions","TeleportPlayer","ViewPlayer","ViewInventory","PlayerInventory","PlayerMessage"}
 for _,name in ipairs(adapters)do state.UI[name]=controllerViews.New({Name=name})end
-for _,name in ipairs({"Main","Combat","Challenge Floors","Auto Skill","Misc","Player","Utility","Speacial"})do
+for _,name in ipairs({"Main","Combat","Waves Defense","Auto Skill","Misc","Player","Utility","Speacial"})do
     state.UI.Pages[name]=controllerViews.New({Name=name})
 end
 function state.SetTab(name)state.UI.ActiveTab=name end

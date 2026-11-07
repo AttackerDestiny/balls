@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v2.0.0**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.3**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -14,7 +14,7 @@ The distributed entry is one standalone Luau file (Roblox's Lua). It uses the ex
 - [Interface](#interface)
 - [Main](#main)
 - [Combat](#combat)
-- [Challenge Floors](#challenge-floors)
+- [Waves Defense](#waves-defense)
 - [Auto Skill](#auto-skill)
 - [Misc and Player](#misc-and-player)
 - [Utility](#utility)
@@ -56,7 +56,7 @@ Use the header's **Restart script** icon or re-execute the loader to update. Upd
 
 ## Interface
 
-Tabs: **Main · Combat · Challenge Floors · Auto Skill · Misc · Player · Utility · Speacial · Dodge · Settings**.
+Tabs: **Main · Combat · Waves Defense · Auto Skill · Misc · Player · Utility · Speacial · Dodge · Settings**.
 
 `Speacial` and `Perfromance Booster` retain their current UI spelling. The interface uses bundled **WindUI 1.6.66**, searchable dropdowns, and multi-select controls.
 
@@ -197,13 +197,13 @@ The planner learns normal-hit and selected-skill damage per equipped weapon/enem
 
 This gates local scripted hits. It cannot undo in-flight damage, split a single lethal hit, or stop other/manual attackers. More than 20 accounts cannot each receive 5% of one unhealed HP pool. It cannot guarantee every account gets drops or Vel.
 
-## Challenge Floors
+## Waves Defense
 
-**The Between → Auto Create** creates a room and starts the challenge once the game confirms the selected access and difficulty. Use **Create Room** to add numbered setups with a Host and up to seven Alt usernames or user IDs. Enable Auto Create on the assigned accounts in the same server. Alts join using the selected room’s native access rules, and the host waits for every listed Alt to appear in its party before starting. With no numbered rooms, Auto Create retains solo setup. A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
+Use **Create Room** to add a numbered setup with **Host**, **Alt**, **Difficulty**, **Mode**, and **Start**. Paste up to seven Alt usernames or IDs and Feather formats them with commas and spaces. Enable the same room setup on the assigned accounts in the same server. The host creates and configures the room, then starts after every listed Alt joins. An empty Alt list starts a solo room. The game's access rules still apply. A failed start pauses that setup until you toggle **Start** again.
 
-The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, Auto Create attempts another room from inside The Between.
+The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, an enabled room attempts another run from inside The Between.
 
-**Completion Time** sets an independent 0–100 minute goal for Normal, Hard, and Elite. Zero turns pacing off. Feather uses the server run timer, spreads kills across the 100 waves, and pauses automated attacks when ahead. It adds a random seconds offset per server run, up to the 100-minute cap. Actual completion depends on the game's wave timers and available damage.
+**Completion Time** has a two-handle range for each difficulty, up to 100 minutes. Set both ends to zero to turn pacing off. Feather picks a time down to the second inside the range, shared by accounts using the same range in the same run. It spreads kills across the 100 waves and pauses automated attacks when ahead. Actual completion depends on wave timers and available damage.
 
 **Auto Dodge** holds at `(10, -19, -5)` during survival special waves and `(14, 73, 2)` during Blackout. Kill objectives keep combat active. If Blackout reports a kill objective, Auto Farm waits for an enemy within the white orb's light and fights from above it. Default ON.
 
