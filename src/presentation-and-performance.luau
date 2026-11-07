@@ -40,7 +40,7 @@ function state.SetUIVisible(requested)
     if requested and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
-local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
+local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",

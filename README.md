@@ -199,9 +199,11 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 ## Challenge Floors
 
-**The Between → Auto Create Room** creates a room and starts the challenge once the game confirms the selected access mode (Private, Friends, or Game Party) and difficulty (Normal, Hard, or Elite). A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
+**The Between → Auto Create** creates a room and starts the challenge once the game confirms the selected access and difficulty. Use **Create Room** to add numbered setups with a Host and up to seven Alt usernames or user IDs. Enable Auto Create on the assigned accounts in the same server. Alts join using the selected room’s native access rules, and the host waits for every listed Alt to appear in its party before starting. With no numbered rooms, Auto Create retains solo setup. A failed start pauses automation until you toggle it again. The game cycles access settings through Public while applying some selections.
 
-The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, Auto Create Room attempts another room from inside The Between.
+The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, Auto Create attempts another room from inside The Between.
+
+**Completion Time** sets an independent 0–100 minute goal for Normal, Hard, and Elite. Zero turns pacing off. Feather uses the server run timer, spreads kills across the 100 waves, and pauses automated attacks when ahead. It adds a random seconds offset per server run, up to the 100-minute cap. Actual completion depends on the game's wave timers and available damage.
 
 **Auto Dodge** holds at `(10, -19, -5)` during survival special waves and `(14, 73, 2)` during Blackout. Kill objectives keep combat active. If Blackout reports a kill objective, Auto Farm waits for an enemy within the white orb's light and fights from above it. Default ON.
 

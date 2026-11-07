@@ -30,7 +30,7 @@ return function(source)
     function window:Tab(opts)
         tabCount+=1;local index=tabCount
         local tab={Title=opts.Title}
-        for _,kind in ipairs({"Button","Toggle","Input","Dropdown","Paragraph","Section"})do
+        for _,kind in ipairs({"Button","Toggle","Input","Dropdown","Paragraph","Section","Slider"})do
             tab[kind]=function(_,opts)return element(kind,opts)end
         end
         function tab:Select()window.CurrentTab=index end

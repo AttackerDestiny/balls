@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-06.complete-source-v3.0.0"
-local VERSION="3.0.0"
+local BUILD="2026-11-07.between-room-rosters-v3.0.1"
+local VERSION="3.0.1"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -21,7 +21,7 @@ return function(previous,userId)
     if type(previous)~="table"or previous.UserId~=userId then return nil end
     local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
         "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
-        "AutomationResumeFeatures","AutomationRunId","BossOnly","NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","Enabled",
+        "AutomationResumeFeatures","AutomationRunId","BossOnly","NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
         "MultiSpotPending","MultiSpotSelected","OffsetProfiles","PerformanceBoosters","ProgressionBossCleared",
         "ProgressionBossClearedName","ProgressionComplete","ProgressionFloor","ProgressionRestore","ResumeFeatures",
@@ -293,7 +293,7 @@ if filePersistence then
 -- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
     local file="SB2Codex/shared-settings.json"
-    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}
@@ -387,7 +387,7 @@ local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBes
 for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
 local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
 for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
-for _,key in ipairs({"TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
+for _,key in ipairs({"BetweenRooms","BetweenPace","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
     local value=preference(key,{})
     restore[key]=type(value)=="table"and value or {}
 end
@@ -523,7 +523,7 @@ local state={
     AutoSaveStatus=filePersistence and "Auto-save · ready"or "Auto-save · file access unavailable",
 }
 for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
-    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
+    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
     "SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
     "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
     state[key]=restore[key]
@@ -1368,7 +1368,7 @@ function state.SetUIVisible(requested)
     if requested and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
-local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
+local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
@@ -4776,6 +4776,7 @@ local swingThread
 local swingTrack
 local swingClock={Due=0,Index=0}
 local function swingAllowed()
+    if state.BetweenPaceHolding then return false end
     return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations and not state.SkillCastRunning
 end
 local function stopSword(force)
@@ -4880,7 +4881,7 @@ end
 -- END BUNDLED SKILL ACTIVATION
     end)()
     local function castable()
-        if not state.Running or not state.SkillAura then return false end
+        if not state.Running or not state.SkillAura or state.BetweenPaceHolding then return false end
         for _,field in ipairs({"TravelBusy","Dodging","Recovering","ProtectionRetreating","StopEverything","SafeModePanic","ModeratorBlocking","AutoTradeBusy"})do
             if state[field]then return false end
         end
@@ -4957,7 +4958,7 @@ local function updateSkillAura()
     if now<nextSkillCheck then return end
     nextSkillCheck=now+(state.NetworkPressureLimited and .04 or 1/60)
     state.SkillWantsWindow=false;state.SkillPreparing=false;state.ReserveGunStamina=false;state.SkillRegistrationTarget=nil
-    if not state.SkillAura or state.StopEverything or state.SafeModePanic or state.MultiSpotOwnsTravel or state.MultiSpotTravelPending then return end
+    if state.BetweenPaceHolding or not state.SkillAura or state.StopEverything or state.SafeModePanic or state.MultiSpotOwnsTravel or state.MultiSpotTravelPending then return end
     local weapons=state.WeaponSkills
     local name=state.SelectedSkill
     if not(weapons and weapons.Ready and weapons.IsCompatible(name))then state.SkillStatus="Waiting for equipped weapon skills";return end
@@ -5005,7 +5006,7 @@ local function updateSkillAura()
     state.ActiveSkillCast=cast;state.AttackingTarget=target;trackHealth(target)
     state.SkillExecution="Source window";state.SkillStatus="Casting "..name
     local function current()
-        if cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
+        if state.BetweenPaceHolding or cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
         if not(state.Running and state.SkillAura and weapons.Ready and weapons.Version==cast.Version and state.SelectedSkill==name)then return false end
         if character~=player.Character or root.Parent==nil or health.Value<=0 or os.clock()<state.LagPauseUntil then return false end
         return not(state.StopEverything or state.TravelBusy or state.Dodging or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy or state.Recovering)
@@ -5481,6 +5482,7 @@ normalScheduler.Bind({GetData=function(mob)
         if data and os.clock()>=(data.SkipUntil or 0)then return data end
     end,Contribution=state.ReadOwnDamage,Radius=attackRadiusFor,Delta=attackDeltaFor,
     Damage=function(mob)
+        if state.BetweenPaceHolding then return false end
         local data=getMobData(mob)
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"Normal")then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation()end
@@ -5529,6 +5531,7 @@ local function processNormalObservations(now,mobs,root)
 end
 
 local function scan()
+    if state.BetweenPaceHolding then return "Between · waiting for completion pace" end
     local now=os.clock()
     if state.Dodging or now<(state.FarmPauseUntil or 0)then finishAttackBurst("Dodging or repositioning");return end
     local character=player.Character
@@ -9438,7 +9441,7 @@ return function(ctx)
         boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
-        table={"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+        table={"BetweenRooms","BetweenPace","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
     local function data(value,depth,path)
@@ -9468,6 +9471,17 @@ return function(ctx)
             for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
         end
         for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
+        local rooms=value.BetweenRooms or {}
+        assert(#rooms<=20,"Too many Between rooms")
+        for index,room in pairs(rooms)do
+            assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
+                and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
+                and type(room.Alt)=="string" and #room.Alt<=256,"Invalid Between room")
+        end
+        for mode,minutes in pairs(value.BetweenPace or {})do
+            assert((mode=="Normal" or mode=="Hard" or mode=="Elite") and type(minutes)=="number"
+                and minutes%1==0 and minutes>=0 and minutes<=100,"Invalid Between completion time")
+        end
     end
     local function arenas(value)
         assert(type(value)=="table","Missing custom spots")
@@ -9628,7 +9642,7 @@ end
     taskController("AtheonUnlock",.5,controller.Update)
     table.insert(frameOrder,1,"AtheonUnlock")
 end
-do
+local function installBetweenAutomation()
     local create=(function()
 -- BEGIN BUNDLED BETWEEN ROOM
 -- Native room setup is a receipt-driven transaction with a single start dispatch.
@@ -9637,8 +9651,13 @@ return function(ctx)
     local phase="Setup"
     local waiting,completedRoom
     local attempts=0
+    local joinRoom,joinStatus,joinAttempts,nextJoin
+    local starting=false
     local function stop(message)phase="Stopped";ctx.Status(message)end
-    function api.Reset()phase="Setup";waiting=nil;attempts=0 end
+    function api.Reset()
+        phase="Setup";waiting=nil;attempts=0
+        joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
+    end
     local function dispatch(action,field,room,now)
         attempts+=1
         if attempts>8 then stop("Room settings could not be applied. Check the native party menu.");return end
@@ -9647,12 +9666,37 @@ return function(ctx)
         ctx.Send(action)
     end
     function api.Update(now)
-        if phase~="Setup"or not ctx.Active()then return end
+        if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
+        local assignment=ctx.Assignment and ctx.Assignment()
+        if assignment and assignment.Role=="Alt" then
+            local hostRoom=ctx.FindHostRoom(assignment.Host)
+            if room then
+                ctx.Status(hostRoom and room.Id==hostRoom.Id and "Joined host · waiting for the party"
+                    or "Leave your current party to join "..assignment.Host)
+            elseif not hostRoom then
+                ctx.Status("Waiting for host "..assignment.Host.." in this server")
+            elseif hostRoom.Status and hostRoom.Status~="Public" then
+                if joinRoom~=hostRoom.Id or joinStatus~=hostRoom.Status then
+                    joinRoom,joinStatus,joinAttempts,nextJoin=hostRoom.Id,hostRoom.Status,0,0
+                end
+                if joinAttempts>=3 then
+                    ctx.Status("Could not join the host. Check room access and toggle Auto Create to retry.")
+                elseif now>=nextJoin then
+                    joinAttempts+=1;nextJoin=now+3
+                    ctx.Status("Joining "..assignment.Host)
+                    ctx.Send("JoinParty",hostRoom.Id)
+                end
+            end
+            return
+        elseif assignment and assignment.Role~="Host" then
+            ctx.Status(assignment.Message or "Set a Host and Alt assignment for this account")
+            return
+        end
         if waiting then
             local changed=waiting.Field=="Id"and room or room and room[waiting.Field]~=waiting.Before
             if changed then waiting=nil
-            elseif now>=waiting.Until then stop("Room request timed out. Toggle Auto Create Room to retry.");return
+            elseif now>=waiting.Until then stop("Room request timed out. Toggle Auto Create to retry.");return
             else return end
         end
         if room then
@@ -9664,11 +9708,28 @@ return function(ctx)
         if not room then attempts=0;dispatch("CreateParty","Id",nil,now);return end
         if room.Mode~=difficulty then dispatch("ToggleMode","Mode",room,now);return end
         if room.Status~=access then dispatch("ToggleStatus","Status",room,now);return end
+        local missing=assignment and ctx.MissingAlts(room,assignment.Alts)
+        if missing and #missing>0 then
+            ctx.Status("Waiting for Alt: "..table.concat(missing,", "))
+            return
+        end
+        starting=true
         phase="Starting";ctx.Status("Starting The Between · "..access.." · "..difficulty)
         ctx.Spawn(function()
+            if ctx.PrepareStart then ctx.PrepareStart() end
+            local current=ctx.Read()
+            local selected=ctx.Assignment and ctx.Assignment()
+            local desiredAccess,desiredMode=ctx.Selection()
+            if not ctx.Active() or not current or current.Id~=room.Id or current.Host~=ctx.UserId
+                or current.PlaceId~=ctx.PlaceId or current.Status~=desiredAccess or current.Mode~=desiredMode
+                or selected and (selected.Role~="Host" or #ctx.MissingAlts(current,selected.Alts)>0) then
+                starting=false;phase="Setup"
+                return
+            end
             local ok,accepted=pcall(ctx.Start)
+            starting=false
             if ok and accepted==true then completedRoom=room.Id;phase="Stopped";if ctx.Active()then ctx.Status("Start accepted · waiting for teleport")end
-            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Auto Create Room to retry.")
+            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Auto Create to retry.")
             else phase="Stopped"end
         end)
     end
@@ -9713,43 +9774,201 @@ end
     local allowedDifficulty={Normal=true,Hard=true,Elite=true}
     if not allowedAccess[state.BetweenAccess]then state.BetweenAccess="Private"end
     if not allowedDifficulty[state.BetweenDifficulty]then state.BetweenDifficulty="Normal"end
+    local pace={}
+    for mode in pairs(allowedDifficulty)do
+        local value=type(state.BetweenPace)=="table" and tonumber(state.BetweenPace[mode]) or 0
+        pace[mode]=math.clamp(math.floor((value or 0)+.5),0,100)
+    end
+    state.BetweenPace=pace
+    function state.SetBetweenPace(mode,minutes)
+        if not allowedDifficulty[mode] or type(minutes)~="number" or minutes~=minutes then return end
+        pace[mode]=math.clamp(math.floor(minutes+.5),0,100)
+        requestSave()
+    end
+    if localFloor then
+        local makePace=(function()
+-- BEGIN BUNDLED BETWEEN PACE
+return function(jobId)
+    -- All accounts in the same run pick the same seconds offset.
+    local hash=0
+    for i=1,#jobId do hash=(hash*31+jobId:byte(i))%65521 end
+    local jitter=1+hash%59
+    local lastWave,peak
+    return function(minutes,wave,runTime,remaining,survival,finalHealth)
+        if type(minutes)~="number" or minutes<=0 then return false end
+        local goal=math.min(6000,minutes*60+jitter)
+        local h,m,s=tostring(runTime or ""):match("^(%d+):(%d+):(%d+)$")
+        local elapsed=h and (tonumber(h)*3600+tonumber(m)*60+tonumber(s))
+        if not elapsed or type(wave)~="number" or wave<1 or wave>100 then return false,goal end
+        if wave~=lastWave then lastWave=wave;peak=0 end
+        remaining=math.max(0,tonumber(remaining) or 0)
+        peak=math.max(peak,remaining)
+        if survival or remaining==0 then return false,goal,elapsed end
+        local progress=(peak-remaining)/math.max(1,peak)
+        local release=(wave-1+progress)*goal/100
+        if wave==100 and remaining==1 and finalHealth and finalHealth<=.15 then release=goal end
+        return elapsed<release,goal,elapsed,release
+    end
+end
+
+-- END BUNDLED BETWEEN PACE
+        end)()
+        local getPace=makePace(game.JobId)
+        taskController("BetweenPace",.2,function()
+            local mode=workspace:GetAttribute("WaveDefenseMode")
+            local wave=workspace:GetAttribute("Wave")
+            local progress=workspace:GetAttribute("WaveProgressLeft")
+            local mobs=workspace:GetAttribute("MobsLeft")
+            local note=tostring(workspace:GetAttribute("CountdownNote") or ""):lower()
+            local finalHealth
+            if wave==100 and mobs==1 and state.FollowTarget then
+                local data=getMobData(state.FollowTarget)
+                if data then
+                    local maximum=data.Health:GetAttribute("MaxValue") or data.Entity:GetAttribute("MaxHealth")
+                    local value=data.Entity:FindFirstChild("MaxHealth")
+                    maximum=tonumber(maximum or (value and value.Value))
+                    if maximum and maximum>0 then finalHealth=data.Health.Value/maximum end
+                end
+            end
+            local hold,goal,elapsed,release=getPace(pace[mode],wave,workspace:GetAttribute("WDRunTime"),
+                progress or mobs,note:find("survive",1,true)~=nil,finalHealth)
+            if hold and not state.BetweenPaceHolding then
+                finishAttackBurst("Between completion pace")
+                state.CancelSkillAura("Between completion pace")
+            end
+            state.BetweenPaceHolding=hold
+            state.BetweenPaceStatus=goal and string.format("Goal %d:%02d · %s",math.floor(goal/60),goal%60,
+                hold and ("waiting "..math.ceil(release-elapsed).."s") or "combat ready") or "Completion pacing is off"
+        end)
+        table.insert(frameOrder,1,"BetweenPace")
+    end
+    local rooms={}
+    if type(state.BetweenRooms)=="table" then
+        for i,entry in ipairs(state.BetweenRooms)do
+            if i>20 then break end
+            if type(entry)=="table" then
+                rooms[#rooms+1]={
+                    Host=type(entry.Host)=="string" and entry.Host:sub(1,64) or "",
+                    Alt=type(entry.Alt)=="string" and entry.Alt:sub(1,256) or "",
+                }
+            end
+        end
+    end
+    state.BetweenRooms=rooms
+    local function matches(person,name)
+        return person.Name:lower()==name:lower() or tostring(person.UserId)==name
+    end
+    local function findPlayer(name)
+        for _,person in ipairs(Players:GetPlayers())do
+            if matches(person,name) then return person end
+        end
+    end
+    local assignment
+    local function updateAssignment()
+        assignment=nil
+        if #rooms==0 then return end
+        for _,entry in ipairs(rooms)do
+            local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
+            local alts,seen={},{}
+            local isAlt,invalid=false,false
+            for token in entry.Alt:gmatch("[^,%s;]+")do
+                local name=token:gsub("^@","")
+                local key=name:lower()
+                if not name:match("^[%w_]+$") or #name>20 then invalid=true
+                elseif not seen[key] then
+                    seen[key]=true
+                    alts[#alts+1]=name
+                    if matches(player,name) then isAlt=true end
+                end
+            end
+            local isHost=host and matches(player,host)
+            if isHost or isAlt then
+                if assignment or (isHost and isAlt) then
+                    assignment={Role="Invalid",Message="This account has conflicting room assignments"}
+                    return
+                end
+                if invalid or not host or #host>20 or #alts>7 then
+                    assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
+                else
+                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts}
+                end
+            end
+        end
+        assignment=assignment or {Role="Unassigned"}
+    end
+    updateAssignment()
     local index
-    local function roomSnapshot()
-        local id=player:GetAttribute("PartyID")
+    local function roomSnapshot(person)
+        local id=(person or player):GetAttribute("PartyID")
         if not id then return nil end
         local parties=ReplicatedStorage:FindFirstChild("LobbyParties")
         local party=parties and parties:FindFirstChild(tostring(id))
-        local view={Id=id}
+        local view={Id=tostring(id),Instance=party}
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
     end
-    local function send(action)
+    local function send(action,partyId)
         if action=="CreateParty"and index==nil then
             for ordinal,floor in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
                 if floor.PlaceId==destination then index=ordinal;break end
             end
             assert(index,"The Between is unavailable")
         end
-        ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or nil})
+        ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or partyId})
     end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
         Active=function()return state.Running and state.AutoCreateBetween and(not localFloor or partyDefeated())and not state.AutomationTeleporting and not state.TravelBusy end,
+        Assignment=function()return assignment end,
+        FindHostRoom=function(name)
+            local host=findPlayer(name)
+            local found=host and roomSnapshot(host)
+            if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+        end,
+        MissingAlts=function(current,names)
+            local missing={}
+            for _,name in ipairs(names)do
+                local alt=findPlayer(name)
+                if not alt or not current.Instance or tostring(alt:GetAttribute("PartyID"))~=current.Id
+                    or current.Instance:GetAttribute(tostring(alt.UserId))==nil then
+                    missing[#missing+1]=name
+                end
+            end
+            return missing
+        end,
         Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
         Status=function(message)state.BetweenRoomStatus=message end,
+        PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
         Start=function()
-            if state.QueueAutomation then pcall(state.QueueAutomation)end
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})
     state.BetweenRoomController=controller
     function state.SetAutoCreateBetween(requested)
         state.AutoCreateBetween=requested==true;controller.Reset()
-        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create Room is off"
+        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create is off"
         requestSave()
+    end
+    function state.AddBetweenRoom()
+        if #rooms>=20 then
+            state.BetweenRoomStatus="Room setup limit reached"
+            return
+        end
+        rooms[#rooms+1]={Host="",Alt=""}
+        updateAssignment();controller.Reset();requestSave()
+        return #rooms
+    end
+    function state.SetBetweenRoomField(index,field,value)
+        local entry=rooms[index]
+        if not entry or (field~="Host" and field~="Alt") or type(value)~="string" then return end
+        value=value:sub(1,field=="Host" and 64 or 256)
+        if entry[field]==value then return end
+        entry[field]=value
+        updateAssignment();controller.Reset();requestSave()
     end
     function state.SetBetweenAccess(value)if allowedAccess[value]then state.BetweenAccess=value;requestSave()end end
     function state.SetBetweenDifficulty(value)if allowedDifficulty[value]then state.BetweenDifficulty=value;requestSave()end end
     taskController("BetweenRoom",.35,controller.Update);frameOrder[#frameOrder+1]="BetweenRoom"
 end
+installBetweenAutomation()
 do
 local function initializeModernUI()
 -- WindUI is bundled at a fixed release; no compatibility window exists.
@@ -27282,6 +27501,9 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Slider"then
+            options.Value=definition.Value;options.Step=1
+            options.Callback=safe(function(value)if api.Ready then definition.Write(value)end end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -27394,10 +27616,35 @@ return function(ctx)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
         toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
         section("Challenge Floors","BetweenSection","The Between")
-        toggle("Challenge Floors","AutoCreateBetween","Auto Create Room","SetAutoCreateBetween")
+        toggle("Challenge Floors","AutoCreateBetween","Auto Create","SetAutoCreateBetween")
         dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
         dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
-        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create Room is off"end)
+        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create is off"end)
+        section("Challenge Floors","BetweenPaceSection","Completion Time")
+        for _,mode in ipairs({"Normal","Hard","Elite"})do
+            register("Challenge Floors",{Kind="Slider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
+                Desc="0 turns pacing off",Value={Min=0,Max=100,Default=state.BetweenPace and state.BetweenPace[mode] or 0},
+                Write=function(value)action("SetBetweenPace",mode,value)end})
+        end
+        paragraph("Challenge Floors","BetweenPaceStatus","Pace Status",function()
+            return state.BetweenPaceStatus or "Pacing applies inside The Between"
+        end)
+        local function room(index)
+            local key="BetweenRoom"..index
+            local entry=state.BetweenRooms[index]
+            section("Challenge Floors",key,"Room "..index)
+            input("Challenge Floors",key.."Host","Host",entry.Host,function(text)
+                action("SetBetweenRoomField",index,"Host",text)
+            end,"Roblox username or user ID")
+            input("Challenge Floors",key.."Alt","Alt",entry.Alt,function(text)
+                action("SetBetweenRoomField",index,"Alt",text)
+            end,"Up to seven usernames or IDs, separated by commas or spaces")
+        end
+        button("Challenge Floors","CreateBetweenRoom","Create Room",function()
+            local index=action("AddBetweenRoom")
+            if index then room(index)end
+        end)
+        for index in ipairs(state.BetweenRooms or {})do room(index)end
         section("Auto Skill","SkillAuraSection","Skill Aura");toggle("Auto Skill","SkillAura","Skill Aura","SetSkillAura")
         dropdown("Auto Skill","SelectedSkill","Skill",function()return {Options=state.SkillChoices or {},Value=state.SelectedSkill}end,function(name)if name and name~=state.SelectedSkill then action("SetSelectedSkill",name)end end)
         section("Auto Skill","MiscSkillSection","Misc Skill");toggle("Auto Skill","MiscSkillEnabled","Misc Skill","SetMiscSkillEnabled")

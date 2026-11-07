@@ -18,7 +18,7 @@ local state={
     AutoSaveStatus=filePersistence and "Auto-save · ready"or "Auto-save · file access unavailable",
 }
 for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
-    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
+    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
     "SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
     "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
     state[key]=restore[key]

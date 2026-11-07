@@ -59,6 +59,8 @@ def main():
         ("AEGANATOS DODGE", "aeganatos-dodge.module.luau"),
         ("ATHEON UNLOCK", "atheon-unlock.module.luau"),
         ("BETWEEN ROOM", "between-room.module.luau"),
+        ("BETWEEN PACE", "between-pace.module.luau"),
+        ("BETWEEN ROOM", "between-room.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
         ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
         ("BLOCK UI MASK", "block-ui-mask.module.luau"),
@@ -126,6 +128,8 @@ def main():
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + quote(read("between-room.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("between-pace.test.luau")) + "))()(" + quote(read("between-pace.module.luau")) + ")\n"
     for name in ("atheon-unlock", "between-room", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
         module = "safe-mode" if name == "safe-mode-suspended" else name
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(module + ".module.luau")) + ")\n"

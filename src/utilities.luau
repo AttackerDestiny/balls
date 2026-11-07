@@ -291,7 +291,7 @@ do
     taskController("AtheonUnlock",.5,controller.Update)
     table.insert(frameOrder,1,"AtheonUnlock")
 end
-do
+local function installBetweenAutomation()
     local create=(function()
 -- BEGIN BUNDLED BETWEEN ROOM
 -- END BUNDLED BETWEEN ROOM
@@ -332,40 +332,175 @@ do
     local allowedDifficulty={Normal=true,Hard=true,Elite=true}
     if not allowedAccess[state.BetweenAccess]then state.BetweenAccess="Private"end
     if not allowedDifficulty[state.BetweenDifficulty]then state.BetweenDifficulty="Normal"end
+    local pace={}
+    for mode in pairs(allowedDifficulty)do
+        local value=type(state.BetweenPace)=="table" and tonumber(state.BetweenPace[mode]) or 0
+        pace[mode]=math.clamp(math.floor((value or 0)+.5),0,100)
+    end
+    state.BetweenPace=pace
+    function state.SetBetweenPace(mode,minutes)
+        if not allowedDifficulty[mode] or type(minutes)~="number" or minutes~=minutes then return end
+        pace[mode]=math.clamp(math.floor(minutes+.5),0,100)
+        requestSave()
+    end
+    if localFloor then
+        local makePace=(function()
+-- BEGIN BUNDLED BETWEEN PACE
+-- END BUNDLED BETWEEN PACE
+        end)()
+        local getPace=makePace(game.JobId)
+        taskController("BetweenPace",.2,function()
+            local mode=workspace:GetAttribute("WaveDefenseMode")
+            local wave=workspace:GetAttribute("Wave")
+            local progress=workspace:GetAttribute("WaveProgressLeft")
+            local mobs=workspace:GetAttribute("MobsLeft")
+            local note=tostring(workspace:GetAttribute("CountdownNote") or ""):lower()
+            local finalHealth
+            if wave==100 and mobs==1 and state.FollowTarget then
+                local data=getMobData(state.FollowTarget)
+                if data then
+                    local maximum=data.Health:GetAttribute("MaxValue") or data.Entity:GetAttribute("MaxHealth")
+                    local value=data.Entity:FindFirstChild("MaxHealth")
+                    maximum=tonumber(maximum or (value and value.Value))
+                    if maximum and maximum>0 then finalHealth=data.Health.Value/maximum end
+                end
+            end
+            local hold,goal,elapsed,release=getPace(pace[mode],wave,workspace:GetAttribute("WDRunTime"),
+                progress or mobs,note:find("survive",1,true)~=nil,finalHealth)
+            if hold and not state.BetweenPaceHolding then
+                finishAttackBurst("Between completion pace")
+                state.CancelSkillAura("Between completion pace")
+            end
+            state.BetweenPaceHolding=hold
+            state.BetweenPaceStatus=goal and string.format("Goal %d:%02d · %s",math.floor(goal/60),goal%60,
+                hold and ("waiting "..math.ceil(release-elapsed).."s") or "combat ready") or "Completion pacing is off"
+        end)
+        table.insert(frameOrder,1,"BetweenPace")
+    end
+    local rooms={}
+    if type(state.BetweenRooms)=="table" then
+        for i,entry in ipairs(state.BetweenRooms)do
+            if i>20 then break end
+            if type(entry)=="table" then
+                rooms[#rooms+1]={
+                    Host=type(entry.Host)=="string" and entry.Host:sub(1,64) or "",
+                    Alt=type(entry.Alt)=="string" and entry.Alt:sub(1,256) or "",
+                }
+            end
+        end
+    end
+    state.BetweenRooms=rooms
+    local function matches(person,name)
+        return person.Name:lower()==name:lower() or tostring(person.UserId)==name
+    end
+    local function findPlayer(name)
+        for _,person in ipairs(Players:GetPlayers())do
+            if matches(person,name) then return person end
+        end
+    end
+    local assignment
+    local function updateAssignment()
+        assignment=nil
+        if #rooms==0 then return end
+        for _,entry in ipairs(rooms)do
+            local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
+            local alts,seen={},{}
+            local isAlt,invalid=false,false
+            for token in entry.Alt:gmatch("[^,%s;]+")do
+                local name=token:gsub("^@","")
+                local key=name:lower()
+                if not name:match("^[%w_]+$") or #name>20 then invalid=true
+                elseif not seen[key] then
+                    seen[key]=true
+                    alts[#alts+1]=name
+                    if matches(player,name) then isAlt=true end
+                end
+            end
+            local isHost=host and matches(player,host)
+            if isHost or isAlt then
+                if assignment or (isHost and isAlt) then
+                    assignment={Role="Invalid",Message="This account has conflicting room assignments"}
+                    return
+                end
+                if invalid or not host or #host>20 or #alts>7 then
+                    assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
+                else
+                    assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts}
+                end
+            end
+        end
+        assignment=assignment or {Role="Unassigned"}
+    end
+    updateAssignment()
     local index
-    local function roomSnapshot()
-        local id=player:GetAttribute("PartyID")
+    local function roomSnapshot(person)
+        local id=(person or player):GetAttribute("PartyID")
         if not id then return nil end
         local parties=ReplicatedStorage:FindFirstChild("LobbyParties")
         local party=parties and parties:FindFirstChild(tostring(id))
-        local view={Id=id}
+        local view={Id=tostring(id),Instance=party}
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
     end
-    local function send(action)
+    local function send(action,partyId)
         if action=="CreateParty"and index==nil then
             for ordinal,floor in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
                 if floor.PlaceId==destination then index=ordinal;break end
             end
             assert(index,"The Between is unavailable")
         end
-        ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or nil})
+        ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or partyId})
     end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
         Active=function()return state.Running and state.AutoCreateBetween and(not localFloor or partyDefeated())and not state.AutomationTeleporting and not state.TravelBusy end,
+        Assignment=function()return assignment end,
+        FindHostRoom=function(name)
+            local host=findPlayer(name)
+            local found=host and roomSnapshot(host)
+            if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+        end,
+        MissingAlts=function(current,names)
+            local missing={}
+            for _,name in ipairs(names)do
+                local alt=findPlayer(name)
+                if not alt or not current.Instance or tostring(alt:GetAttribute("PartyID"))~=current.Id
+                    or current.Instance:GetAttribute(tostring(alt.UserId))==nil then
+                    missing[#missing+1]=name
+                end
+            end
+            return missing
+        end,
         Selection=function()return state.BetweenAccess,state.BetweenDifficulty end,
         Status=function(message)state.BetweenRoomStatus=message end,
+        PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
         Start=function()
-            if state.QueueAutomation then pcall(state.QueueAutomation)end
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})
     state.BetweenRoomController=controller
     function state.SetAutoCreateBetween(requested)
         state.AutoCreateBetween=requested==true;controller.Reset()
-        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create Room is off"
+        state.BetweenRoomStatus=state.AutoCreateBetween and "Waiting to create room"or "Auto Create is off"
         requestSave()
+    end
+    function state.AddBetweenRoom()
+        if #rooms>=20 then
+            state.BetweenRoomStatus="Room setup limit reached"
+            return
+        end
+        rooms[#rooms+1]={Host="",Alt=""}
+        updateAssignment();controller.Reset();requestSave()
+        return #rooms
+    end
+    function state.SetBetweenRoomField(index,field,value)
+        local entry=rooms[index]
+        if not entry or (field~="Host" and field~="Alt") or type(value)~="string" then return end
+        value=value:sub(1,field=="Host" and 64 or 256)
+        if entry[field]==value then return end
+        entry[field]=value
+        updateAssignment();controller.Reset();requestSave()
     end
     function state.SetBetweenAccess(value)if allowedAccess[value]then state.BetweenAccess=value;requestSave()end end
     function state.SetBetweenDifficulty(value)if allowedDifficulty[value]then state.BetweenDifficulty=value;requestSave()end end
     taskController("BetweenRoom",.35,controller.Update);frameOrder[#frameOrder+1]="BetweenRoom"
 end
+installBetweenAutomation()

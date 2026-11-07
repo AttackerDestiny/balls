@@ -5,7 +5,7 @@ return function(ctx)
         boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
-        table={"AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+        table={"BetweenRooms","BetweenPace","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
     local function data(value,depth,path)
@@ -35,6 +35,17 @@ return function(ctx)
             for option,on in pairs(value[name]or {})do assert(type(option)=="string"and type(on)=="boolean","Invalid selection: "..name)end
         end
         for _,id in ipairs(value.MultiSpotOrder or {})do assert(type(id)=="string","Invalid spot priority")end
+        local rooms=value.BetweenRooms or {}
+        assert(#rooms<=20,"Too many Between rooms")
+        for index,room in pairs(rooms)do
+            assert(type(index)=="number" and index%1==0 and index>=1 and index<=#rooms
+                and type(room)=="table" and type(room.Host)=="string" and #room.Host<=64
+                and type(room.Alt)=="string" and #room.Alt<=256,"Invalid Between room")
+        end
+        for mode,minutes in pairs(value.BetweenPace or {})do
+            assert((mode=="Normal" or mode=="Hard" or mode=="Elite") and type(minutes)=="number"
+                and minutes%1==0 and minutes>=0 and minutes<=100,"Invalid Between completion time")
+        end
     end
     local function arenas(value)
         assert(type(value)=="table","Missing custom spots")

@@ -2,6 +2,7 @@ local swingThread
 local swingTrack
 local swingClock={Due=0,Index=0}
 local function swingAllowed()
+    if state.BetweenPaceHolding then return false end
     return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations and not state.SkillCastRunning
 end
 local function stopSword(force)
@@ -46,7 +47,7 @@ do
 -- END BUNDLED SKILL ACTIVATION
     end)()
     local function castable()
-        if not state.Running or not state.SkillAura then return false end
+        if not state.Running or not state.SkillAura or state.BetweenPaceHolding then return false end
         for _,field in ipairs({"TravelBusy","Dodging","Recovering","ProtectionRetreating","StopEverything","SafeModePanic","ModeratorBlocking","AutoTradeBusy"})do
             if state[field]then return false end
         end
@@ -91,7 +92,7 @@ local function updateSkillAura()
     if now<nextSkillCheck then return end
     nextSkillCheck=now+(state.NetworkPressureLimited and .04 or 1/60)
     state.SkillWantsWindow=false;state.SkillPreparing=false;state.ReserveGunStamina=false;state.SkillRegistrationTarget=nil
-    if not state.SkillAura or state.StopEverything or state.SafeModePanic or state.MultiSpotOwnsTravel or state.MultiSpotTravelPending then return end
+    if state.BetweenPaceHolding or not state.SkillAura or state.StopEverything or state.SafeModePanic or state.MultiSpotOwnsTravel or state.MultiSpotTravelPending then return end
     local weapons=state.WeaponSkills
     local name=state.SelectedSkill
     if not(weapons and weapons.Ready and weapons.IsCompatible(name))then state.SkillStatus="Waiting for equipped weapon skills";return end
@@ -139,7 +140,7 @@ local function updateSkillAura()
     state.ActiveSkillCast=cast;state.AttackingTarget=target;trackHealth(target)
     state.SkillExecution="Source window";state.SkillStatus="Casting "..name
     local function current()
-        if cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
+        if state.BetweenPaceHolding or cast.Cancelled or cast.CreditFinished or state.ActiveSkillCast~=cast then return false end
         if not(state.Running and state.SkillAura and weapons.Ready and weapons.Version==cast.Version and state.SelectedSkill==name)then return false end
         if character~=player.Character or root.Parent==nil or health.Value<=0 or os.clock()<state.LagPauseUntil then return false end
         return not(state.StopEverything or state.TravelBusy or state.Dodging or state.SafeModePanic or state.ModeratorBlocking or state.AutoTradeBusy or state.Recovering)
@@ -439,6 +440,7 @@ normalScheduler.Bind({GetData=function(mob)
         if data and os.clock()>=(data.SkipUntil or 0)then return data end
     end,Contribution=state.ReadOwnDamage,Radius=attackRadiusFor,Delta=attackDeltaFor,
     Damage=function(mob)
+        if state.BetweenPaceHolding then return false end
         local data=getMobData(mob)
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"Normal")then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation()end
@@ -487,6 +489,7 @@ local function processNormalObservations(now,mobs,root)
 end
 
 local function scan()
+    if state.BetweenPaceHolding then return "Between · waiting for completion pace" end
     local now=os.clock()
     if state.Dodging or now<(state.FarmPauseUntil or 0)then finishAttackBurst("Dodging or repositioning");return end
     local character=player.Character

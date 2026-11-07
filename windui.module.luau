@@ -109,6 +109,9 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Slider"then
+            options.Value=definition.Value;options.Step=1
+            options.Callback=safe(function(value)if api.Ready then definition.Write(value)end end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -221,10 +224,35 @@ return function(ctx)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
         toggle("Challenge Floors","AutoDodge","Auto Dodge","SetAutoDodge")
         section("Challenge Floors","BetweenSection","The Between")
-        toggle("Challenge Floors","AutoCreateBetween","Auto Create Room","SetAutoCreateBetween")
+        toggle("Challenge Floors","AutoCreateBetween","Auto Create","SetAutoCreateBetween")
         dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
         dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
-        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create Room is off"end)
+        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create is off"end)
+        section("Challenge Floors","BetweenPaceSection","Completion Time")
+        for _,mode in ipairs({"Normal","Hard","Elite"})do
+            register("Challenge Floors",{Kind="Slider",Key="BetweenPace"..mode,Title=mode.." (minutes)",
+                Desc="0 turns pacing off",Value={Min=0,Max=100,Default=state.BetweenPace and state.BetweenPace[mode] or 0},
+                Write=function(value)action("SetBetweenPace",mode,value)end})
+        end
+        paragraph("Challenge Floors","BetweenPaceStatus","Pace Status",function()
+            return state.BetweenPaceStatus or "Pacing applies inside The Between"
+        end)
+        local function room(index)
+            local key="BetweenRoom"..index
+            local entry=state.BetweenRooms[index]
+            section("Challenge Floors",key,"Room "..index)
+            input("Challenge Floors",key.."Host","Host",entry.Host,function(text)
+                action("SetBetweenRoomField",index,"Host",text)
+            end,"Roblox username or user ID")
+            input("Challenge Floors",key.."Alt","Alt",entry.Alt,function(text)
+                action("SetBetweenRoomField",index,"Alt",text)
+            end,"Up to seven usernames or IDs, separated by commas or spaces")
+        end
+        button("Challenge Floors","CreateBetweenRoom","Create Room",function()
+            local index=action("AddBetweenRoom")
+            if index then room(index)end
+        end)
+        for index in ipairs(state.BetweenRooms or {})do room(index)end
         section("Auto Skill","SkillAuraSection","Skill Aura");toggle("Auto Skill","SkillAura","Skill Aura","SetSkillAura")
         dropdown("Auto Skill","SelectedSkill","Skill",function()return {Options=state.SkillChoices or {},Value=state.SelectedSkill}end,function(name)if name and name~=state.SelectedSkill then action("SetSelectedSkill",name)end end)
         section("Auto Skill","MiscSkillSection","Misc Skill");toggle("Auto Skill","MiscSkillEnabled","Misc Skill","SetMiscSkillEnabled")
