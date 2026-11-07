@@ -301,9 +301,15 @@ return function(ctx)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]
+            local retry
+            local function refreshRetry()
+                local frame=retry and retry.Control.ElementFrame
+                if frame then frame.Visible=state.IsBetweenRoomHost(index)end
+            end
             section(wavesTab,key,"Room "..index)
             input(wavesTab,key.."Host","Host",entry.Host,function(text)
                 action("SetBetweenRoomField",index,"Host",text)
+                refreshRetry()
             end,"Roblox username or user ID")
             local alt
             alt=input(wavesTab,key.."Alt","Alt",entry.Alt,function(text)
@@ -322,9 +328,10 @@ return function(ctx)
             register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
                 Read=function()return entry.Start end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
-            register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
+            retry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
                 Read=function()return entry.AutoRetry==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"AutoRetry",value)end})
+            refreshRetry()
         end
         button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")

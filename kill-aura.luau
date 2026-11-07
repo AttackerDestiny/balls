@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.between-retry-blackout-v3.0.5"
-local VERSION="3.0.5"
+local BUILD="2026-11-07.host-only-auto-retry-v3.0.6"
+local VERSION="3.0.6"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -9994,6 +9994,14 @@ end
     local function matches(person,name)
         return person.Name:lower()==name:lower() or tostring(person.UserId)==name
     end
+    local function hostName(entry)
+        return entry.Host:match("^%s*@?([%w_]+)%s*$")
+    end
+    function state.IsBetweenRoomHost(index)
+        local entry=rooms[index]
+        local name=entry and hostName(entry)
+        return name~=nil and matches(player,name)
+    end
     local function findPlayer(name)
         for _,person in ipairs(Players:GetPlayers())do
             if matches(person,name) then return person end
@@ -10005,7 +10013,7 @@ end
         state.AutoCreateBetween=false
         for _,entry in ipairs(rooms)do
             if not entry.Start then continue end
-            local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
+            local host=hostName(entry)
             local alts,seen={},{}
             local isAlt,invalid=false,false
             for token in entry.Alt:gmatch("[^,%s;]+")do
@@ -10114,7 +10122,8 @@ end
             if #value>256 then return entry.Alt end
         elseif field=="Mode" and allowedAccess[value] then
         elseif field=="Difficulty" and allowedDifficulty[value] then
-        elseif (field=="Start" or field=="AutoRetry") and type(value)=="boolean" then
+        elseif field=="Start" and type(value)=="boolean" then
+        elseif field=="AutoRetry" and type(value)=="boolean" and state.IsBetweenRoomHost(index) then
         else return end
         if entry[field]~=value then
             local previous=assignment.Room
@@ -27852,9 +27861,15 @@ return function(ctx)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]
+            local retry
+            local function refreshRetry()
+                local frame=retry and retry.Control.ElementFrame
+                if frame then frame.Visible=state.IsBetweenRoomHost(index)end
+            end
             section(wavesTab,key,"Room "..index)
             input(wavesTab,key.."Host","Host",entry.Host,function(text)
                 action("SetBetweenRoomField",index,"Host",text)
+                refreshRetry()
             end,"Roblox username or user ID")
             local alt
             alt=input(wavesTab,key.."Alt","Alt",entry.Alt,function(text)
@@ -27873,9 +27888,10 @@ return function(ctx)
             register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
                 Read=function()return entry.Start end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
-            register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
+            retry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
                 Read=function()return entry.AutoRetry==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"AutoRetry",value)end})
+            refreshRetry()
         end
         button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")

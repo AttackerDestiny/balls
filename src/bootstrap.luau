@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.between-retry-blackout-v3.0.5"
-local VERSION="3.0.5"
+local BUILD="2026-11-07.host-only-auto-retry-v3.0.6"
+local VERSION="3.0.6"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

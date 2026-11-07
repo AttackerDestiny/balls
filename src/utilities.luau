@@ -440,6 +440,14 @@ local function installBetweenAutomation()
     local function matches(person,name)
         return person.Name:lower()==name:lower() or tostring(person.UserId)==name
     end
+    local function hostName(entry)
+        return entry.Host:match("^%s*@?([%w_]+)%s*$")
+    end
+    function state.IsBetweenRoomHost(index)
+        local entry=rooms[index]
+        local name=entry and hostName(entry)
+        return name~=nil and matches(player,name)
+    end
     local function findPlayer(name)
         for _,person in ipairs(Players:GetPlayers())do
             if matches(person,name) then return person end
@@ -451,7 +459,7 @@ local function installBetweenAutomation()
         state.AutoCreateBetween=false
         for _,entry in ipairs(rooms)do
             if not entry.Start then continue end
-            local host=entry.Host:match("^%s*@?([%w_]+)%s*$")
+            local host=hostName(entry)
             local alts,seen={},{}
             local isAlt,invalid=false,false
             for token in entry.Alt:gmatch("[^,%s;]+")do
@@ -560,7 +568,8 @@ local function installBetweenAutomation()
             if #value>256 then return entry.Alt end
         elseif field=="Mode" and allowedAccess[value] then
         elseif field=="Difficulty" and allowedDifficulty[value] then
-        elseif (field=="Start" or field=="AutoRetry") and type(value)=="boolean" then
+        elseif field=="Start" and type(value)=="boolean" then
+        elseif field=="AutoRetry" and type(value)=="boolean" and state.IsBetweenRoomHost(index) then
         else return end
         if entry[field]~=value then
             local previous=assignment.Room

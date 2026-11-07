@@ -14,7 +14,7 @@ return function(source)
         while #queue>0 do count+=1;assert(count<200,"UI callbacks cannot loop");table.remove(queue,1)()end
     end
     local function element(kind,opts)
-        local item={Kind=kind,Title=opts.Title,Desc=opts.Desc,Value=opts.Value,Values=opts.Values,Callback=opts.Callback}
+        local item={Kind=kind,Title=opts.Title,Desc=opts.Desc,Value=opts.Value,Values=opts.Values,Callback=opts.Callback,ElementFrame={Visible=true}}
         function item:Set(value,fire)
             self.Value=value
             if fire~=false and self.Callback then later(self)end
@@ -76,7 +76,9 @@ return function(source)
         SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
         s[method]=function(value)record(method,value);s[key]=value end
     end
+    function s.IsBetweenRoomHost(index)return s.BetweenRooms[index].Host=="Host"end
     function s.SetBetweenRoomField(index,field,value)
+        if field=="AutoRetry" and not s.IsBetweenRoomHost(index)then return end
         if field=="Alt"then value=value:gsub("%s+",", ") end
         s.BetweenRooms[index][field]=value
         return value
@@ -168,11 +170,15 @@ return function(source)
     c.BetweenRoom1Mode:Emit("Friends");assert(s.BetweenRooms[1].Mode=="Friends")
     c.BetweenRoom1Difficulty:Emit("Hard");assert(s.BetweenRooms[1].Difficulty=="Hard")
     c.BetweenRoom1Start:Emit(true);assert(s.BetweenRooms[1].Start)
-    assert(c.BetweenRoom1AutoRetry.Title=="Auto Retry" and not c.BetweenRoom1AutoRetry.Value)
+    assert(c.BetweenRoom1AutoRetry.Title=="Auto Retry" and c.BetweenRoom1AutoRetry.ElementFrame.Visible and not c.BetweenRoom1AutoRetry.Value)
     c.BetweenRoom1AutoRetry:Emit(true);assert(s.BetweenRooms[1].AutoRetry)
+    c.BetweenRoom1Host:Emit("OtherHost")
+    assert(not c.BetweenRoom1AutoRetry.ElementFrame.Visible,"The retry toggle is hidden from non-hosts")
+    c.BetweenRoom1AutoRetry:Emit(false);assert(s.BetweenRooms[1].AutoRetry)
+    c.BetweenRoom1Host:Emit("Host");assert(c.BetweenRoom1AutoRetry.ElementFrame.Visible)
     c.BetweenRoom1Alt:Emit("One Two");assert(c.BetweenRoom1Alt.Value=="One, Two")
     c.CreateBetweenRoom.Callback()
-    assert(c.BetweenRoom2Host and c.BetweenRoom2Mode and not c.BetweenRoom2Start.Value and not c.BetweenRoom2AutoRetry.Value)
+    assert(c.BetweenRoom2Host and c.BetweenRoom2Mode and not c.BetweenRoom2Start.Value and not c.BetweenRoom2AutoRetry.ElementFrame.Visible)
     c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")
