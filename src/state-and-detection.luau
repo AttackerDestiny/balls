@@ -102,7 +102,9 @@ local function refreshMobIndex()
 end
 local function getMobData(mob)
     if not mob then return nil end
-    return enemyRegistry.Data(mob)
+    local data=enemyRegistry.Data(mob)
+    if data and state.ObserveBetweenReward then state.ObserveBetweenReward(mob,data.Health)end
+    return data
 end
 function state.ReadOwnDamage(health,counter)
     if health==nil then return nil,nil end

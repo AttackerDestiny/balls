@@ -301,12 +301,36 @@ local function installBetweenAutomation()
     local native=localFloor and require(services.UI.WaveDefense.Revive)
     local function prompt()return native and native.Frame and native.Frame.Visible end
     local function partyDefeated()
-        if not prompt()then return false end
         for _,person in ipairs(Players:GetPlayers())do
             local lives=person:GetAttribute("Lives")
             if livingPlayer(person)or type(lives)~="number"or lives>0 then return false end
         end
         return true
+    end
+    local retry
+    local function isChest(name)return name:lower():find("%f[%a]chest%f[%A]")~=nil end
+    if localFloor then
+        local makeRetry=(function()
+-- BEGIN BUNDLED BETWEEN RETRY
+-- END BUNDLED BETWEEN RETRY
+        end)()
+        retry=makeRetry({
+            Wave=function()return workspace:GetAttribute("Wave"),workspace:GetAttribute("MobsLeft")end,
+            PartyDefeated=partyDefeated,
+            IsChest=isChest,
+            Chests=function()
+                local chests,enemies={},0
+                local folder=refreshMobIndex()
+                if not folder then return chests,1 end
+                for mob in pairs(trackedMobs)do
+                    local data=getMobData(mob)
+                    if isChest(mob.Name) then
+                        if data then chests[mob]=data.Health else enemies+=1 end
+                    elseif not data or data.Health.Value>0 then enemies+=1 end
+                end
+                return chests,enemies
+            end,
+        })
     end
     if localFloor then
         local receipt,busy
@@ -362,6 +386,7 @@ local function installBetweenAutomation()
             local progress=workspace:GetAttribute("WaveProgressLeft")
             local mobs=workspace:GetAttribute("MobsLeft")
             local note=tostring(workspace:GetAttribute("CountdownNote") or ""):lower()
+            local environment=workspace:GetAttribute("WaveDefenseEnvironment")
             local finalHealth
             if wave==100 and mobs==1 and state.FollowTarget then
                 local data=getMobData(state.FollowTarget)
@@ -373,7 +398,7 @@ local function installBetweenAutomation()
                 end
             end
             local hold,goal,elapsed,release=getPace(pace[mode],wave,workspace:GetAttribute("WDRunTime"),
-                progress or mobs,note:find("survive",1,true)~=nil,finalHealth)
+                progress or mobs,environment=="Blackout" or environment=="Darkness" or note:find("survive",1,true)~=nil,finalHealth)
             if hold and not state.BetweenPaceHolding then
                 finishAttackBurst("Between completion pace")
                 state.CancelSkillAura("Between completion pace")
@@ -406,6 +431,7 @@ local function installBetweenAutomation()
                     Mode=allowedAccess[entry.Mode] and entry.Mode or state.BetweenAccess,
                     Difficulty=allowedDifficulty[entry.Difficulty] and entry.Difficulty or state.BetweenDifficulty,
                     Start=entry.Start==true,
+                    AutoRetry=entry.AutoRetry==true,
                 }
             end
         end
@@ -453,6 +479,7 @@ local function installBetweenAutomation()
         end
         assignment=assignment or {Role="Unassigned"}
         state.AutoCreateBetween=assignment.Room~=nil
+        state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()
     local index
@@ -474,14 +501,26 @@ local function installBetweenAutomation()
         end
         ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or partyId})
     end
+    local function findHostRoom(name)
+        local host=findPlayer(name)
+        local found=host and roomSnapshot(host)
+        if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+    end
+    local priorRoom=localFloor and roomSnapshot() or nil
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
-        Active=function()return state.Running and state.AutoCreateBetween and(not localFloor or partyDefeated())and not state.AutomationTeleporting and not state.TravelBusy end,
-        Assignment=function()return assignment end,
-        FindHostRoom=function(name)
-            local host=findPlayer(name)
-            local found=host and roomSnapshot(host)
-            if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+        PriorRoomId=priorRoom and priorRoom.Id,
+        Active=function()
+            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
+            if not localFloor then return true end
+            if assignment.Role=="Alt" then
+                local hostRoom=findHostRoom(assignment.Host)
+                return hostRoom~=nil and (not priorRoom or hostRoom.Id~=priorRoom.Id)
+                    and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
+            end
+            return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
         end,
+        Assignment=function()return assignment end,
+        FindHostRoom=findHostRoom,
         MissingAlts=function(current,names)
             local missing={}
             for _,name in ipairs(names)do
@@ -508,7 +547,7 @@ local function installBetweenAutomation()
             state.BetweenRoomStatus="Room setup limit reached"
             return
         end
-        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false}
+        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false,AutoRetry=false}
         requestSave()
         return #rooms
     end
@@ -521,7 +560,7 @@ local function installBetweenAutomation()
             if #value>256 then return entry.Alt end
         elseif field=="Mode" and allowedAccess[value] then
         elseif field=="Difficulty" and allowedDifficulty[value] then
-        elseif field=="Start" and type(value)=="boolean" then
+        elseif (field=="Start" or field=="AutoRetry") and type(value)=="boolean" then
         else return end
         if entry[field]~=value then
             local previous=assignment.Room

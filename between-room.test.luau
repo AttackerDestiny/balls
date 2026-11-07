@@ -8,7 +8,7 @@ return function(source)
     local enabled=false
     local assignment,hostRoom
     local missing={}
-    local controller=make({
+    local ctx={
         UserId=10,PlaceId=20,
         Active=function()return enabled end,
         Read=function()return room end,
@@ -20,7 +20,8 @@ return function(source)
         Send=function(action,id)requests[#requests+1]=id and action..":"..id or action end,
         Spawn=function(fn)assert(not worker);worker=fn end,
         Start=function()starts+=1;return accepted end,
-    })
+    }
+    local controller=make(ctx)
     controller.Update(-1)
     assert(#requests==0,"Disabled rooms must not send requests")
     enabled=true
@@ -64,5 +65,22 @@ return function(source)
     controller.Update(9.35)
     controller.Update(9.7)
     assert(#requests==3 and requests[3]=="JoinParty:3","Only request the configured host room and pace retries")
+    assignment={Role="Host",Alts={"First","Second"}}
+    ctx.PriorRoomId="old"
+    room={Id="old",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
+    controller=make(ctx)
+    controller.Update(10)
+    controller.Update(10.35)
+    assert(#requests==4 and requests[4]=="LeaveParty" and not worker,"Wait for the old party to close")
+    room=nil
+    controller.Update(11)
+    assert(requests[5]=="CreateParty")
+    room={Id="new",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
+    controller.Update(12)
+    assert(not worker,"Wait for the roster again in the recreated room")
+    missing={}
+    controller.Update(13)
+    run=worker;worker=nil;run()
+    assert(starts==3,"Start the fresh room once its roster is present")
     print("PASS The Between starts once after both room settings are confirmed")
 end

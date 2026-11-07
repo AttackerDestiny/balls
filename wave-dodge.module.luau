@@ -149,25 +149,40 @@ return function(ctx)
         if kind=="Horde"or kind=="Rift"or kind=="Wisp"or kind=="Meme"or kind=="Bob"then return true end
         return kind~="Lava"and kind~="Tempest"and kind~="Blackout"and (tonumber(workspace:GetAttribute("MobsLeft"))or 0)>0
     end
-    local function whiteLightTarget(root,humanoid)
-        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil end
+    local function whiteLightTarget(root,humanoid,now)
         local orb=workspace:FindFirstChild("DarknerOrb");local part=orb and orb:FindFirstChild("Part")
         local light=part and part:FindFirstChildOfClass("PointLight")
-        if not light or not light.Enabled or light.Range<=0 then return nil end
-        local best,above,distance
-        for mob in pairs(ctx.Mobs)do
+        if not light then return nil,Vector3.new(14,73,2) end
+        local center=part.Position
+        local duration=tonumber(orb:GetAttribute("LightDuration"))or light.Range
+        local radius=light.Enabled and math.max(0,math.min(duration,light.Range))or 0
+        local clearance=math.max(0,radius-3)
+        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center end
+        local function attackPoint(mob)
             local data=ctx.MobData(mob)
-            if data and data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)and not data.Entity:FindFirstChild("Immortal")then
-                local point=data.Root.Position
-                local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
-                if (point-part.Position).Magnitude<light.Range and (elevated-part.Position).Magnitude<light.Range then
-                    if mob==state.BlackoutTarget then return mob,elevated end
-                    local gap=(point-root.Position).Magnitude
-                    if not distance or gap<distance then best=mob;above=elevated;distance=gap end
-                end
+            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
+                or data.Entity:FindFirstChild("Immortal") then return end
+            local point=data.Root.Position
+            local distance=(point-center).Magnitude
+            if distance>radius+6 then return end
+            local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
+            local offset=elevated-center
+            if offset.Magnitude>clearance then elevated=center+offset.Unit*clearance end
+            return elevated,distance
+        end
+        local previous=state.BlackoutTarget
+        local point=previous and attackPoint(previous)
+        if point then return previous,point,center,radius end
+        if now<timing.ScanAt then return nil,center end
+        timing.ScanAt=now+.12
+        local best,bestPoint,distance
+        for mob in pairs(ctx.Mobs)do
+            local candidate,gap=attackPoint(mob)
+            if candidate and (not distance or gap<distance)then
+                best,bestPoint,distance=mob,candidate,gap
             end
         end
-        return best,above
+        return best,bestPoint or center,center,radius
     end
     function api.Update()
         if closed or state.StopEverything then return false end
@@ -195,14 +210,15 @@ return function(ctx)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
         if not state.AutoDodge or not usable then release();ctx.Status((state.AutoDodge and "Ready"or "Off").." · events "..seen.."/8");return false end
-        local kill=kind and needsKills(kind)
-        if kind and (kind=="Blackout"or not kill)then
-            local mob,above
-            if kind=="Blackout"and kill then mob,above=whiteLightTarget(root,humanoid)end
+        if kind and (kind=="Blackout"or not needsKills(kind))then
+            local mob,point,center,radius
+            if kind=="Blackout"then mob,point,center,radius=whiteLightTarget(root,humanoid,now)
+            else point=Vector3.new(10,-19,-5)end
             state.BlackoutTarget=mob
-            local point=above or (kind=="Blackout"and Vector3.new(14,73,2)or Vector3.new(10,-19,-5))
             if hold(point,kind.." shelter",now)then
-                if mob and (root.Position-point).Magnitude<=2 then state.FollowTarget=mob;state.Dodging=false end
+                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<=radius then
+                    state.FollowTarget=mob;state.Dodging=false
+                end
                 ctx.Status(kind..(mob and " · attacking inside white light"or " · sheltering"));return true
             end
         end

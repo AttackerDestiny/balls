@@ -322,6 +322,9 @@ return function(ctx)
             register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
                 Read=function()return entry.Start end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
+            register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
+                Read=function()return entry.AutoRetry==true end,
+                Write=function(value)action("SetBetweenRoomField",index,"AutoRetry",value)end})
         end
         button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")

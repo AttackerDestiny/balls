@@ -45,7 +45,8 @@ return function(ctx)
                 and type(room.Alt)=="string" and #room.Alt<=256
                 and (room.Mode==nil or access[room.Mode])
                 and (room.Difficulty==nil or difficulties[room.Difficulty])
-                and (room.Start==nil or type(room.Start)=="boolean"),"Invalid Between room")
+                and (room.Start==nil or type(room.Start)=="boolean")
+                and (room.AutoRetry==nil or type(room.AutoRetry)=="boolean"),"Invalid Between room")
         end
         local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
         for mode,range in pairs(value.BetweenPace or {})do

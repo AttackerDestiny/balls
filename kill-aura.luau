@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.hide-pace-status-v3.0.4"
-local VERSION="3.0.4"
+local BUILD="2026-11-07.between-retry-blackout-v3.0.5"
+local VERSION="3.0.5"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -1023,7 +1023,9 @@ local function refreshMobIndex()
 end
 local function getMobData(mob)
     if not mob then return nil end
-    return enemyRegistry.Data(mob)
+    local data=enemyRegistry.Data(mob)
+    if data and state.ObserveBetweenReward then state.ObserveBetweenReward(mob,data.Health)end
+    return data
 end
 function state.ReadOwnDamage(health,counter)
     if health==nil then return nil,nil end
@@ -2490,16 +2492,20 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
-    if state.BlackoutTarget and mob~=state.BlackoutTarget then return nil end
-    local rank=targetPriority.Rank(mob)
-    if state.AutoFarm and state.BossOnly and rank>2 then return nil end
-    if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+    local blackout=state.BlackoutTarget
+    if blackout and mob~=blackout then return nil end
     local data=getMobData(mob)
-    if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
     if not data then return nil end
-    local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
-    if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or os.clock()<(data.SkipUntil or 0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    if not blackout then
+        local rank=targetPriority.Rank(mob)
+        if state.AutoFarm and state.BossOnly and rank>2 then return nil end
+        if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+        if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
+        local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+        if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
+        if os.clock()<(data.SkipUntil or 0)then return nil end
+    end
     return data.Root
 end
 function state.IsFarmEnemyAlive()
@@ -3403,25 +3409,40 @@ return function(ctx)
         if kind=="Horde"or kind=="Rift"or kind=="Wisp"or kind=="Meme"or kind=="Bob"then return true end
         return kind~="Lava"and kind~="Tempest"and kind~="Blackout"and (tonumber(workspace:GetAttribute("MobsLeft"))or 0)>0
     end
-    local function whiteLightTarget(root,humanoid)
-        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil end
+    local function whiteLightTarget(root,humanoid,now)
         local orb=workspace:FindFirstChild("DarknerOrb");local part=orb and orb:FindFirstChild("Part")
         local light=part and part:FindFirstChildOfClass("PointLight")
-        if not light or not light.Enabled or light.Range<=0 then return nil end
-        local best,above,distance
-        for mob in pairs(ctx.Mobs)do
+        if not light then return nil,Vector3.new(14,73,2) end
+        local center=part.Position
+        local duration=tonumber(orb:GetAttribute("LightDuration"))or light.Range
+        local radius=light.Enabled and math.max(0,math.min(duration,light.Range))or 0
+        local clearance=math.max(0,radius-3)
+        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center end
+        local function attackPoint(mob)
             local data=ctx.MobData(mob)
-            if data and data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)and not data.Entity:FindFirstChild("Immortal")then
-                local point=data.Root.Position
-                local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
-                if (point-part.Position).Magnitude<light.Range and (elevated-part.Position).Magnitude<light.Range then
-                    if mob==state.BlackoutTarget then return mob,elevated end
-                    local gap=(point-root.Position).Magnitude
-                    if not distance or gap<distance then best=mob;above=elevated;distance=gap end
-                end
+            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
+                or data.Entity:FindFirstChild("Immortal") then return end
+            local point=data.Root.Position
+            local distance=(point-center).Magnitude
+            if distance>radius+6 then return end
+            local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
+            local offset=elevated-center
+            if offset.Magnitude>clearance then elevated=center+offset.Unit*clearance end
+            return elevated,distance
+        end
+        local previous=state.BlackoutTarget
+        local point=previous and attackPoint(previous)
+        if point then return previous,point,center,radius end
+        if now<timing.ScanAt then return nil,center end
+        timing.ScanAt=now+.12
+        local best,bestPoint,distance
+        for mob in pairs(ctx.Mobs)do
+            local candidate,gap=attackPoint(mob)
+            if candidate and (not distance or gap<distance)then
+                best,bestPoint,distance=mob,candidate,gap
             end
         end
-        return best,above
+        return best,bestPoint or center,center,radius
     end
     function api.Update()
         if closed or state.StopEverything then return false end
@@ -3449,14 +3470,15 @@ return function(ctx)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
         if not state.AutoDodge or not usable then release();ctx.Status((state.AutoDodge and "Ready"or "Off").." · events "..seen.."/8");return false end
-        local kill=kind and needsKills(kind)
-        if kind and (kind=="Blackout"or not kill)then
-            local mob,above
-            if kind=="Blackout"and kill then mob,above=whiteLightTarget(root,humanoid)end
+        if kind and (kind=="Blackout"or not needsKills(kind))then
+            local mob,point,center,radius
+            if kind=="Blackout"then mob,point,center,radius=whiteLightTarget(root,humanoid,now)
+            else point=Vector3.new(10,-19,-5)end
             state.BlackoutTarget=mob
-            local point=above or (kind=="Blackout"and Vector3.new(14,73,2)or Vector3.new(10,-19,-5))
             if hold(point,kind.." shelter",now)then
-                if mob and (root.Position-point).Magnitude<=2 then state.FollowTarget=mob;state.Dodging=false end
+                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<=radius then
+                    state.FollowTarget=mob;state.Dodging=false
+                end
                 ctx.Status(kind..(mob and " · attacking inside white light"or " · sheltering"));return true
             end
         end
@@ -9482,7 +9504,8 @@ return function(ctx)
                 and type(room.Alt)=="string" and #room.Alt<=256
                 and (room.Mode==nil or access[room.Mode])
                 and (room.Difficulty==nil or difficulties[room.Difficulty])
-                and (room.Start==nil or type(room.Start)=="boolean"),"Invalid Between room")
+                and (room.Start==nil or type(room.Start)=="boolean")
+                and (room.AutoRetry==nil or type(room.AutoRetry)=="boolean"),"Invalid Between room")
         end
         local function minute(v)return type(v)=="number" and v%1==0 and v>=0 and v<=100 end
         for mode,range in pairs(value.BetweenPace or {})do
@@ -9660,9 +9683,10 @@ return function(ctx)
     local attempts=0
     local joinRoom,joinStatus,joinAttempts,nextJoin
     local starting=false
+    local leavingUntil
     local function stop(message)phase="Stopped";ctx.Status(message)end
     function api.Reset()
-        phase="Setup";waiting=nil;attempts=0
+        phase="Setup";waiting=nil;attempts=0;leavingUntil=nil
         joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
     end
     local function dispatch(action,field,room,now)
@@ -9675,6 +9699,12 @@ return function(ctx)
     function api.Update(now)
         if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
+        if ctx.PriorRoomId and room and room.Id==ctx.PriorRoomId then
+            if not leavingUntil then
+                leavingUntil=now+5;ctx.Send("LeaveParty")
+            elseif now>=leavingUntil then stop("Previous party did not close. Toggle Start to retry.")end
+            return
+        end
         local assignment=ctx.Assignment and ctx.Assignment()
         local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then
@@ -9750,12 +9780,88 @@ end
     local native=localFloor and require(services.UI.WaveDefense.Revive)
     local function prompt()return native and native.Frame and native.Frame.Visible end
     local function partyDefeated()
-        if not prompt()then return false end
         for _,person in ipairs(Players:GetPlayers())do
             local lives=person:GetAttribute("Lives")
             if livingPlayer(person)or type(lives)~="number"or lives>0 then return false end
         end
         return true
+    end
+    local retry
+    local function isChest(name)return name:lower():find("%f[%a]chest%f[%A]")~=nil end
+    if localFloor then
+        local makeRetry=(function()
+-- BEGIN BUNDLED BETWEEN RETRY
+-- A retry needs a stable party wipe or an observed final chest breaking.
+return function(ctx)
+    local wipeAt,ready
+    local chests={}
+    local bossHealth
+    local api={}
+    function api.Observe(mob,health)
+        if ready then return end
+        local name=mob.Name
+        if name=="Rubricatus, The Sentinel of Order" then
+            if ctx.Wave()==100 then bossHealth=health end
+        elseif health.Value>0 and not chests[mob] and ctx.IsChest(name) then
+            if bossHealth and bossHealth.Value<=0 and ctx.Wave()==100 then
+                chests[mob]={Health=health}
+            end
+        end
+    end
+    function api.Update(now)
+        if ready then return ready end
+        local wave,mobsLeft=ctx.Wave()
+        if type(wave)~="number" or wave<1 then return end
+        if ctx.PartyDefeated() then
+            wipeAt=wipeAt or now
+            if now-wipeAt>=1 then ready="Wipe";return ready end
+        else
+            wipeAt=nil
+        end
+        if wave~=100 then return end
+        local rewards,enemyCount=ctx.Chests()
+        if not bossHealth or bossHealth.Value>0 or enemyCount>0 then return end
+        local count=0
+        for chest,health in pairs(rewards)do
+            if health.Value>0 then count+=1 end
+        end
+        -- The final boss must have cleared before admitting the remaining chest mobs.
+        if type(mobsLeft)=="number" and mobsLeft<=count then
+            for chest,health in pairs(rewards)do
+                if health.Value>0 and not chests[chest] then chests[chest]={Health=health} end
+            end
+        end
+        if next(chests)==nil or count>0 or (mobsLeft~=nil and mobsLeft~=0) then return end
+        for _,receipt in pairs(chests)do
+            if receipt.Health.Value>0 then return end
+            receipt.At=receipt.At or now
+            if now-receipt.At<1 then return end
+        end
+        ready="Chest"
+        return ready
+    end
+    return api
+end
+
+-- END BUNDLED BETWEEN RETRY
+        end)()
+        retry=makeRetry({
+            Wave=function()return workspace:GetAttribute("Wave"),workspace:GetAttribute("MobsLeft")end,
+            PartyDefeated=partyDefeated,
+            IsChest=isChest,
+            Chests=function()
+                local chests,enemies={},0
+                local folder=refreshMobIndex()
+                if not folder then return chests,1 end
+                for mob in pairs(trackedMobs)do
+                    local data=getMobData(mob)
+                    if isChest(mob.Name) then
+                        if data then chests[mob]=data.Health else enemies+=1 end
+                    elseif not data or data.Health.Value>0 then enemies+=1 end
+                end
+                return chests,enemies
+            end,
+        })
     end
     if localFloor then
         local receipt,busy
@@ -9834,6 +9940,7 @@ end
             local progress=workspace:GetAttribute("WaveProgressLeft")
             local mobs=workspace:GetAttribute("MobsLeft")
             local note=tostring(workspace:GetAttribute("CountdownNote") or ""):lower()
+            local environment=workspace:GetAttribute("WaveDefenseEnvironment")
             local finalHealth
             if wave==100 and mobs==1 and state.FollowTarget then
                 local data=getMobData(state.FollowTarget)
@@ -9845,7 +9952,7 @@ end
                 end
             end
             local hold,goal,elapsed,release=getPace(pace[mode],wave,workspace:GetAttribute("WDRunTime"),
-                progress or mobs,note:find("survive",1,true)~=nil,finalHealth)
+                progress or mobs,environment=="Blackout" or environment=="Darkness" or note:find("survive",1,true)~=nil,finalHealth)
             if hold and not state.BetweenPaceHolding then
                 finishAttackBurst("Between completion pace")
                 state.CancelSkillAura("Between completion pace")
@@ -9878,6 +9985,7 @@ end
                     Mode=allowedAccess[entry.Mode] and entry.Mode or state.BetweenAccess,
                     Difficulty=allowedDifficulty[entry.Difficulty] and entry.Difficulty or state.BetweenDifficulty,
                     Start=entry.Start==true,
+                    AutoRetry=entry.AutoRetry==true,
                 }
             end
         end
@@ -9925,6 +10033,7 @@ end
         end
         assignment=assignment or {Role="Unassigned"}
         state.AutoCreateBetween=assignment.Room~=nil
+        state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()
     local index
@@ -9946,14 +10055,26 @@ end
         end
         ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"Parties",action,action=="CreateParty"and index or partyId})
     end
+    local function findHostRoom(name)
+        local host=findPlayer(name)
+        local found=host and roomSnapshot(host)
+        if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+    end
+    local priorRoom=localFloor and roomSnapshot() or nil
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
-        Active=function()return state.Running and state.AutoCreateBetween and(not localFloor or partyDefeated())and not state.AutomationTeleporting and not state.TravelBusy end,
-        Assignment=function()return assignment end,
-        FindHostRoom=function(name)
-            local host=findPlayer(name)
-            local found=host and roomSnapshot(host)
-            if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+        PriorRoomId=priorRoom and priorRoom.Id,
+        Active=function()
+            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
+            if not localFloor then return true end
+            if assignment.Role=="Alt" then
+                local hostRoom=findHostRoom(assignment.Host)
+                return hostRoom~=nil and (not priorRoom or hostRoom.Id~=priorRoom.Id)
+                    and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
+            end
+            return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
         end,
+        Assignment=function()return assignment end,
+        FindHostRoom=findHostRoom,
         MissingAlts=function(current,names)
             local missing={}
             for _,name in ipairs(names)do
@@ -9980,7 +10101,7 @@ end
             state.BetweenRoomStatus="Room setup limit reached"
             return
         end
-        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false}
+        rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false,AutoRetry=false}
         requestSave()
         return #rooms
     end
@@ -9993,7 +10114,7 @@ end
             if #value>256 then return entry.Alt end
         elseif field=="Mode" and allowedAccess[value] then
         elseif field=="Difficulty" and allowedDifficulty[value] then
-        elseif field=="Start" and type(value)=="boolean" then
+        elseif (field=="Start" or field=="AutoRetry") and type(value)=="boolean" then
         else return end
         if entry[field]~=value then
             local previous=assignment.Room
@@ -27752,6 +27873,9 @@ return function(ctx)
             register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
                 Read=function()return entry.Start end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
+            register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
+                Read=function()return entry.AutoRetry==true end,
+                Write=function(value)action("SetBetweenRoomField",index,"AutoRetry",value)end})
         end
         button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")

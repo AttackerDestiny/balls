@@ -310,16 +310,20 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
-    if state.BlackoutTarget and mob~=state.BlackoutTarget then return nil end
-    local rank=targetPriority.Rank(mob)
-    if state.AutoFarm and state.BossOnly and rank>2 then return nil end
-    if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+    local blackout=state.BlackoutTarget
+    if blackout and mob~=blackout then return nil end
     local data=getMobData(mob)
-    if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
     if not data then return nil end
-    local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
-    if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or os.clock()<(data.SkipUntil or 0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
+    if not blackout then
+        local rank=targetPriority.Rank(mob)
+        if state.AutoFarm and state.BossOnly and rank>2 then return nil end
+        if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
+        if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
+        local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+        if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
+        if os.clock()<(data.SkipUntil or 0)then return nil end
+    end
     return data.Root
 end
 function state.IsFarmEnemyAlive()

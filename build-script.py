@@ -16,6 +16,7 @@ MODULES = {
     "PAD SLOT": "pad-slot.module.luau",
     "BLOCK UI MASK": "block-ui-mask.module.luau",
     "BETWEEN ROOM": "between-room.module.luau",
+    "BETWEEN RETRY": "between-retry.module.luau",
     "BETWEEN PACE": "between-pace.module.luau",
     "ATHEON UNLOCK": "atheon-unlock.module.luau",
     "INSTANCE QUEUE": "instance-queue.module.luau",

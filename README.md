@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.4**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.5**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -201,11 +201,11 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 
 Use **Create Room** to add a numbered setup with **Host**, **Alt**, **Difficulty**, **Mode**, and **Start**. Paste up to seven Alt usernames or IDs and Feather formats them with commas and spaces. Enable the same room setup on the assigned accounts in the same server. The host creates and configures the room, then starts after every listed Alt joins. An empty Alt list starts a solo room. The game's access rules still apply. A failed start pauses that setup until you toggle **Start** again.
 
-The Between automatically uses free revives while the server reports lives remaining. When everyone is down and out of lives, an enabled room attempts another run from inside The Between.
+The Between automatically uses free revives while the server reports lives remaining. Enable **Auto Retry** on the host's room to create a new room from inside The Between after everyone is down with no free revives left, or after Feather observes the Wave 100 reward chest being opened. The host waits for all configured Alts again. **Start** must be enabled on each assigned account.
 
 **Completion Time** has a two-handle range for each difficulty, up to 100 minutes. Set both ends to zero to turn pacing off. Feather picks a time down to the second inside the range, shared by accounts using the same range in the same run. It spreads kills across the 100 waves and pauses automated attacks when ahead. Actual completion depends on wave timers and available damage.
 
-**Auto Dodge** holds at `(10, -19, -5)` during survival special waves and `(14, 73, 2)` during Blackout. Kill objectives keep combat active. If Blackout reports a kill objective, Auto Farm waits for an enemy within the white orb's light and fights from above it. Default ON.
+**Auto Dodge** holds at `(10, -19, -5)` during other survival special waves. During Blackout, it tracks the gate's shrinking light and holds inside it. With Auto Farm and an attack aura active, it targets enemies near the light from within the safe radius to replenish souls. Default ON.
 
 Extended camera zoom is applied while the runtime owns it.
 

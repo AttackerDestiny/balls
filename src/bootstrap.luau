@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.hide-pace-status-v3.0.4"
-local VERSION="3.0.4"
+local BUILD="2026-11-07.between-retry-blackout-v3.0.5"
+local VERSION="3.0.5"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
