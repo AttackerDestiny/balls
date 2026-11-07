@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.anti-suspicious-labels-v3.0.12"
-local VERSION="3.0.12"
+local BUILD="2026-11-07.rubricatus-dodge-v3.0.13"
+local VERSION="3.0.13"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2185,7 +2185,7 @@ function state.ResolveAutoOffset(mob)
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     if not data or not root then return nil end
-    if state.AutoFarm and mob.Name=="Suspended Unborn"then
+    if state.AutoFarm and game.PlaceId==6144637080 and mob.Name=="Suspended Unborn"then
         local destination=Vector3.new(-2439,70,5389)
         if state.FarmCoordination then destination=state.FarmCoordination.Spread(destination,mob)end
         activeOffsetMob,offsetSample=nil,nil
@@ -2650,10 +2650,14 @@ return function(ctx)
     local warnings,bindings={},{}
     local snapshots={}
     local castWindows={}
+    local cone
     local closed=false
     local escape={Point=nil,Until=0,SearchAt=0}
     local labels={RedGroundWarning="Circle",LockedAimWarning="Beam"}
     local tags={"AegorSlam Rock","AegorSlam Slam","AegorSpike Spike","RiftDetonation Rift"}
+    local final=ctx.FinalWave
+    local wave=ctx.RubricatusWave or {}
+    local laserColor=final and Color3.fromRGB(255,18,38)
     local function bind(signal,fn)bindings[#bindings+1]=signal:Connect(fn)end
     local function register(object,kind,name,radius)
         if closed then return end
@@ -2680,12 +2684,40 @@ return function(ctx)
         end
     end
     local function inspect(object)
+        local name,parent=object.Name,object.Parent
+        local group=parent and parent.Name
+        if final and (group=="RedLightningDiscEffects" or group=="RedLightningLaserEffects" or group=="RedLightningEffects"
+            or parent==ctx.Workspace and name=="Part")and final()then
+            if group=="RedLightningDiscEffects" and name:match("^LightningDisc%d+$")and object:IsA("Model")then
+                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6);return
+            elseif group=="RedLightningLaserEffects" then
+                if name=="RedBeam" and object:IsA("BasePart")then register(object,"Laser","Red Lightning Laser",ctx.LaserRadius or 5)end
+                if name=="RedBeam" or name=="LockedAimWarning"then return end
+            elseif group=="RedLightningEffects" and name=="LightningWaveAnchor" and object:IsA("BasePart")then
+                register(object,"Wave","Red Lightning Wave");return
+            elseif parent==ctx.Workspace and name=="Part" and object:IsA("BasePart")and object.Color==laserColor then
+                task.defer(function()
+                    if object.Parent and object:FindFirstChild("Beam")then register(object,"Box","Rubricatus Lasers")end
+                end)
+            end
+        end
         if labels[object.Name]and (object:IsA("Model")or object:IsA("BasePart"))then register(object,labels[object.Name])end
         if object:IsA("BasePart")and object.Name=="Part"then projectile(object)end
     end
-    if ctx.Replicate then bind(ctx.Replicate,function(_,phase,name)
+    if ctx.Replicate then bind(ctx.Replicate,function(_,phase,name,duration,target)
         if phase~="Initial"and phase~="RunPhase"then return end
         for _,spec in ipairs(ctx.Projectiles or {})do if spec.Name==name then castWindows[name]=os.clock()+10 end end
+        if final and final()and phase=="Initial"and name=="RedLightningWave"and typeof(target)=="Vector3"then
+            local origin=ctx.RubricatusOrigin and ctx.RubricatusOrigin()
+            if not origin then return end
+            origin+=Vector3.new(0,wave.OriginHeight or 2.5,0)
+            local delta=target-origin
+            delta=Vector3.new(delta.X,0,delta.Z)
+            if delta.Magnitude<.01 then return end
+            local direction=delta.Unit
+            cone={Kind="Cone",Name="Red Lightning Wave",Origin=origin+direction*(wave.MuzzleOffset or 2.5),
+                Direction=direction,Until=os.clock()+(wave.ChargeTime or .9)+math.clamp(tonumber(duration)or 1.7,.65,10)+.35}
+        end
     end)end
     bind(ctx.Workspace.DescendantAdded,inspect)
     for _,object in ipairs(ctx.Workspace:QueryDescendants("#RedGroundWarning,#LockedAimWarning"))do inspect(object)end
@@ -2693,6 +2725,21 @@ return function(ctx)
         local function tagged(object)if object:IsA("BasePart")and object.Name=="Circle"then register(object,"Circle")end end
         bind(ctx.Collection:GetInstanceAddedSignal(tag),tagged)
         for _,object in ipairs(ctx.Collection:GetTagged(tag))do tagged(object)end
+    end
+    if final then
+        for _,tag in ipairs({"RubricatusAttack Attack","RubricatusSlam Slam"})do
+            local function tagged(object)
+                if final()and object.Name=="Box"and object:IsA("BasePart")then register(object,"Box",tag)end
+            end
+            bind(ctx.Collection:GetInstanceAddedSignal(tag),tagged)
+            for _,object in ipairs(ctx.Collection:GetTagged(tag))do tagged(object)end
+        end
+        if final()then
+            for _,name in ipairs({"RedLightningDiscEffects","RedLightningLaserEffects","RedLightningEffects"})do
+                local folder=ctx.Workspace:FindFirstChild(name)
+                if folder then for _,object in ipairs(folder:GetChildren())do inspect(object)end end
+            end
+        end
     end
     local mobs=ctx.Workspace:FindFirstChild("Mobs")
     local scanExisting=false
@@ -2706,12 +2753,20 @@ return function(ctx)
     local function sample(object,entry,time)
         if not object.Parent then entry.RemovedAt=entry.RemovedAt or time;return end
         entry.RemovedAt=nil
+        if entry.Kind=="Laser"and object.Shape~=Enum.PartType.Cylinder then return end
         local ok,frame,size=pcall(function()
+            if entry.Kind=="Disc"then
+                local root=object.PrimaryPart
+                local target=object:GetAttribute("LockedTarget")
+                if not root or typeof(target)~="Vector3"then return end
+                entry.Target=target
+                return root.CFrame,root.Size
+            end
             if object:IsA("Model")then return object:GetBoundingBox()end
             return object.CFrame,object.Size
         end)
-        if not ok or math.max(size.X,size.Z)<=.2 then return end
-        if entry.Kind=="Projectile"and entry.CFrame and time>(entry.SampleAt or time)then
+        if not ok or not frame or math.max(size.X,size.Z)<=.2 then return end
+        if (entry.Kind=="Projectile"or entry.Kind=="Disc")and entry.CFrame and time>(entry.SampleAt or time)then
             local motion=(frame.Position-entry.CFrame.Position)/(time-entry.SampleAt)
             entry.Velocity=motion.Magnitude<=400 and motion or Vector3.zero
         end
@@ -2726,22 +2781,44 @@ return function(ctx)
             if time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
             elseif entry.CFrame then snapshots[#snapshots+1]=entry end
         end
-        api.ThreatCount=#snapshots;ctx.State.BossThreatCount=#snapshots;api.HasHazards=next(warnings)~=nil
+        if cone and time<cone.Until and final()then snapshots[#snapshots+1]=cone else cone=nil end
+        api.ThreatCount=#snapshots;ctx.State.BossThreatCount=#snapshots;api.HasHazards=cone~=nil or next(warnings)~=nil
+    end
+    local function distanceFromSegment(point,start,segment)
+        local length=segment:Dot(segment)
+        local fraction=length>.01 and math.clamp((point-start):Dot(segment)/length,0,1)or 0
+        return (point-start-segment*fraction).Magnitude
     end
     local function collision(entry,point,margin)
         local frame,size=entry.CFrame,entry.Size
+        if entry.Kind=="Wave"or entry.Kind=="Cone"then
+            if entry.Kind=="Wave"and cone then return false end
+            local delta=point-(entry.Origin or frame.Position)
+            if math.abs(delta.Y)>(wave.Height or 12)*.5+margin then return false end
+            delta=Vector3.new(delta.X,0,delta.Z)
+            if delta.Magnitude>(wave.Range or 52)+margin then return false end
+            if not entry.Direction then return true end
+            local forward=delta:Dot(entry.Direction)
+            return forward>=-margin and (delta-entry.Direction*forward).Magnitude<=math.max(0,forward)*math.tan(math.rad((wave.SpreadAngle or 80)/2))+margin
+        end
+        if entry.Kind=="Box"or entry.Kind=="Laser"then
+            local at=frame:PointToObjectSpace(point)
+            if entry.Kind=="Laser"then
+                local radius=math.max(entry.Radius,size.Y*.5)+margin
+                return math.abs(at.X)<=size.X*.5+margin and at.Y*at.Y+at.Z*at.Z<=radius*radius
+            end
+            return math.abs(at.X)<=size.X*.5+margin and math.abs(at.Y)<=size.Y*.5+margin and math.abs(at.Z)<=size.Z*.5+margin
+        end
         if entry.Kind=="Beam"then
             local at=frame:PointToObjectSpace(point)
             return math.abs(at.X)<size.X*.5+margin and math.abs(at.Z)<size.Z*.5+margin
         end
-        if entry.Kind=="Projectile"then
+        if entry.Kind=="Projectile"or entry.Kind=="Disc"then
             local lead=math.clamp(.12+(ctx.State.PingMs or 0)/1000,.12,.4)
-            local segment=(entry.Velocity or Vector3.zero)*lead
-            local length=segment:Dot(segment)
-            local fraction=length>.01 and math.clamp((point-frame.Position):Dot(segment)/length,0,1)or 0
-            local delta=point-frame.Position-segment*fraction
             local radius=(entry.Radius or math.max(size.X,size.Y,size.Z)*.5)+margin
-            return delta:Dot(delta)<radius*radius
+            local position=frame.Position
+            if entry.Kind=="Disc"and (point-entry.Target).Magnitude<radius then return true end
+            return distanceFromSegment(point,position,(entry.Velocity or Vector3.zero)*lead)<radius
         end
         local x=math.abs(frame.RightVector.X)*size.X+math.abs(frame.UpVector.X)*size.Y+math.abs(frame.LookVector.X)*size.Z
         local z=math.abs(frame.RightVector.Z)*size.X+math.abs(frame.UpVector.Z)*size.Y+math.abs(frame.LookVector.Z)*size.Z
@@ -2796,7 +2873,7 @@ return function(ctx)
         if closed then return end
         closed=true;api.HasHazards=false;api.ThreatCount=0
         for _,connection in ipairs(bindings)do connection:Disconnect()end
-        table.clear(bindings);table.clear(warnings);table.clear(snapshots);table.clear(castWindows);escape.Point=nil
+        table.clear(bindings);table.clear(warnings);table.clear(snapshots);table.clear(castWindows);escape.Point=nil;cone=nil
     end
     return api
 end
@@ -2821,7 +2898,22 @@ end
         end
     end
     local events=ReplicatedStorage:FindFirstChild("ReplicateSkill")
-    state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),Projectiles=projectiles,Replicate=events and events.OnClientEvent})
+    local rubricatusName="Rubricatus, The Sentinel of Order"
+    local rubricatus=bosses and bosses:FindFirstChild(rubricatusName)
+    local function attributes(name)
+        local skill=rubricatus and rubricatus:FindFirstChild(name)
+        return skill and skill:GetAttributes()or {}
+    end
+    state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),
+        Projectiles=projectiles,Replicate=events and events.OnClientEvent,
+        FinalWave=game.PlaceId==78945654064532 and function()return workspace:GetAttribute("Wave")==100 end or nil,
+        RubricatusWave=attributes("RedLightningWave"),DiscRadius=attributes("RedLightningDiscs").Radius,
+        LaserRadius=attributes("RedLightningLaser").Radius,
+        RubricatusOrigin=function()
+            local mobs=workspace:FindFirstChild("Mobs")
+            local boss=mobs and mobs:FindFirstChild(rubricatusName)
+            return boss and boss:GetPivot().Position
+        end})
 end
 do
     local createPlanner=(function()

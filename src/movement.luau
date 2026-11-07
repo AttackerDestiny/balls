@@ -76,7 +76,7 @@ function state.ResolveAutoOffset(mob)
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     if not data or not root then return nil end
-    if state.AutoFarm and mob.Name=="Suspended Unborn"then
+    if state.AutoFarm and game.PlaceId==6144637080 and mob.Name=="Suspended Unborn"then
         local destination=Vector3.new(-2439,70,5389)
         if state.FarmCoordination then destination=state.FarmCoordination.Spread(destination,mob)end
         activeOffsetMob,offsetSample=nil,nil
@@ -432,7 +432,22 @@ do
         end
     end
     local events=ReplicatedStorage:FindFirstChild("ReplicateSkill")
-    state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),Projectiles=projectiles,Replicate=events and events.OnClientEvent})
+    local rubricatusName="Rubricatus, The Sentinel of Order"
+    local rubricatus=bosses and bosses:FindFirstChild(rubricatusName)
+    local function attributes(name)
+        local skill=rubricatus and rubricatus:FindFirstChild(name)
+        return skill and skill:GetAttributes()or {}
+    end
+    state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),
+        Projectiles=projectiles,Replicate=events and events.OnClientEvent,
+        FinalWave=game.PlaceId==78945654064532 and function()return workspace:GetAttribute("Wave")==100 end or nil,
+        RubricatusWave=attributes("RedLightningWave"),DiscRadius=attributes("RedLightningDiscs").Radius,
+        LaserRadius=attributes("RedLightningLaser").Radius,
+        RubricatusOrigin=function()
+            local mobs=workspace:FindFirstChild("Mobs")
+            local boss=mobs and mobs:FindFirstChild(rubricatusName)
+            return boss and boss:GetPivot().Position
+        end})
 end
 do
     local createPlanner=(function()

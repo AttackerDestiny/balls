@@ -132,6 +132,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + quote(read("between-room.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("between-pace.test.luau")) + "))()(" + quote(read("between-pace.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("rock-switch.test.luau")) + "))()(" + quote(wave) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("rubricatus-dodge.test.luau")) + "))()(" + quote(read("boss-dodge.module.luau")) + ")\n"
     for name in ("atheon-unlock", "between-retry", "anti-suspicious", "wave-dodge", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
         module = "safe-mode" if name == "safe-mode-suspended" else name
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(module + ".module.luau")) + ")\n"
