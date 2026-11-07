@@ -172,6 +172,8 @@ return function(source)
     assert(not (c.AutoCreateBetween or c.BetweenAccess or c.BetweenDifficulty or c.BetweenRoomStatus or c.BetweenPaceStatus))
     assert(c.BetweenPaceNormal and c.BetweenPaceHard and c.BetweenPaceElite)
     assert(c.AntiSuspicious.Title=="Anti Suspicious" and c.AntiSuspiciousRest and c.AntiSuspiciousHops.Value.Default==10)
+    assert(c.AntiSuspiciousHops.Title=="Rejoin Limit" and c.AntiSuspiciousWindow.Title=="Track (min)"
+        and c.AntiSuspiciousRest.Title=="Rest Time (min)")
     c.AntiSuspicious:Emit(true);assert(s.AntiSuspicious)
     c.AntiSuspiciousWindow:Emit(15);assert(s.AntiSuspiciousLimits.Window==15)
     c.NoSelfDamage:Emit(true);assert(s.NoSelfDamage and calls[#calls].Name=="SetNoSelfDamage")

@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.fixed-darkness-shelter-v3.0.11"
-local VERSION="3.0.11"
+local BUILD="2026-11-07.anti-suspicious-labels-v3.0.12"
+local VERSION="3.0.12"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -28117,13 +28117,13 @@ return function(ctx)
         section("Speacial","AntiSuspiciousSection","Anti Suspicious")
         toggle("Speacial","AntiSuspicious","Anti Suspicious","SetAntiSuspicious")
         local limits=state.AntiSuspiciousLimits or {Hops=10,Window=10,Min=40,Max=60}
-        for _,setting in ipairs({{"Hops","Rejoin / kick limit",100},{"Window","Tracking window (minutes)",200}})do
+        for _,setting in ipairs({{"Hops","Rejoin Limit",100},{"Window","Track (min)",200}})do
             local key,title,maximum=table.unpack(setting)
             register("Speacial",{Kind="Slider",Key="AntiSuspicious"..key,Title=title,Maximum=maximum,
                 Read=function()return limits[key]end,
                 Write=function(value)action("SetAntiSuspiciousLimit",key,value)end})
         end
-        register("Speacial",{Kind="RangeSlider",Key="AntiSuspiciousRest",Title="Rest time (minutes)",Minimum=1,Maximum=200,
+        register("Speacial",{Kind="RangeSlider",Key="AntiSuspiciousRest",Title="Rest Time (min)",Minimum=1,Maximum=200,
             Value=limits,Write=function(minimum,maximum)action("SetAntiSuspiciousLimit","Rest",minimum,maximum)end})
         paragraph("Speacial","AntiSuspiciousStatus","Rest Status",function()
             local untilAt=state.AntiSuspiciousRestUntil
