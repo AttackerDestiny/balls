@@ -117,12 +117,14 @@ return function(ctx)
         local label=gui("TextLabel",row,{Position=UDim2.fromOffset(0,20),Size=UDim2.new(1,0,0,12),
             BackgroundTransparency=1,TextSize=12,FontFace=elements.Title.FontFace,TextXAlignment=Enum.TextXAlignment.Right})
         local minimum,maximum=definition.Value.Min,definition.Value.Max
+        local first,last=definition.Minimum or 0,definition.Maximum or 100
+        local span=last-first
         local function draw()
             local color=elements.Title.TextColor3
             low.BackgroundColor3=color;high.BackgroundColor3=color
             fill.BackgroundColor3=color;track.BackgroundColor3=color;label.TextColor3=color
-            low.Position=UDim2.fromScale(minimum/100,.5);high.Position=UDim2.fromScale(maximum/100,.5)
-            fill.Position=UDim2.fromScale(minimum/100,0);fill.Size=UDim2.fromScale((maximum-minimum)/100,1)
+            low.Position=UDim2.fromScale((minimum-first)/span,.5);high.Position=UDim2.fromScale((maximum-first)/span,.5)
+            fill.Position=UDim2.fromScale((minimum-first)/span,0);fill.Size=UDim2.fromScale((maximum-minimum)/span,1)
             label.Text=maximum==0 and "Off" or string.format("%d – %d min",minimum,maximum)
         end
         draw()
@@ -136,7 +138,8 @@ return function(ctx)
             local touch=inputObject.UserInputType==Enum.UserInputType.Touch
             if not api.Ready or changed or (not touch and inputObject.UserInputType~=Enum.UserInputType.MouseButton1) then return end
             local function position(input)
-                return math.clamp((input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)*100,0,100)
+                local ratio=(input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)
+                return first+math.clamp(ratio,0,1)*span
             end
             local point=position(inputObject)
             local lower=point<(minimum+maximum)/2
@@ -178,6 +181,11 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Slider"then
+            options.Value={Min=1,Max=definition.Maximum,Default=definition.Read()};options.Step=1
+            options.Callback=safe(function(value)
+                if api.Ready and value~=definition.Read()then definition.Write(value)end
+            end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -381,6 +389,23 @@ return function(ctx)
             return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
         end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
         toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        section("Speacial","AntiSuspiciousSection","Anti Suspicious")
+        toggle("Speacial","AntiSuspicious","Anti Suspicious","SetAntiSuspicious")
+        local limits=state.AntiSuspiciousLimits or {Hops=10,Window=10,Min=40,Max=60}
+        for _,setting in ipairs({{"Hops","Rejoin / kick limit",100},{"Window","Tracking window (minutes)",200}})do
+            local key,title,maximum=table.unpack(setting)
+            register("Speacial",{Kind="Slider",Key="AntiSuspicious"..key,Title=title,Maximum=maximum,
+                Read=function()return limits[key]end,
+                Write=function(value)action("SetAntiSuspiciousLimit",key,value)end})
+        end
+        register("Speacial",{Kind="RangeSlider",Key="AntiSuspiciousRest",Title="Rest time (minutes)",Minimum=1,Maximum=200,
+            Value=limits,Write=function(minimum,maximum)action("SetAntiSuspiciousLimit","Rest",minimum,maximum)end})
+        paragraph("Speacial","AntiSuspiciousStatus","Rest Status",function()
+            local untilAt=state.AntiSuspiciousRestUntil
+            if not untilAt then return state.AntiSuspicious and "Watching Safe Mode departures"or "Off"end
+            local seconds=math.max(0,untilAt-os.time())
+            return seconds>0 and string.format("%d:%02d remaining",math.floor(seconds/60),seconds%60)or "Rest finished · waiting for rejoin"
+        end)
         toggle("Dodge","NoSelfDamage","No Self Damage (enemy skills)","SetNoSelfDamage","Blocks the native client-reported enemy-skill DamageSelf path. Server-applied damage can still occur.")
         toggle("Dodge","AeganatosDodge","Aeganatos Dodge","SetAeganatosDodge")
         toggle("Dodge","AtheonDodge","Atheon Dodge","SetAtheonDodge")

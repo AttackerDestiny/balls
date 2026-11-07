@@ -131,7 +131,7 @@ do
     local credit,lastWarning=0,0
     bind(RunService.Heartbeat,function(delta)
         local now=os.clock();frameTiming.Sample(delta,now)
-        if not state.Running or state.StopEverything or not gui.Parent then return end
+        if not state.Running or state.StopEverything or state.AntiSuspiciousRestUntil or not gui.Parent then return end
         state.RuntimeRecovery.CheckPending(now)
         credit+=delta
         local period

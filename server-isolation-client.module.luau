@@ -307,7 +307,42 @@ end
         if not sent then fail(reason)end
         return sent,state.LastFloorTravelError
     end
-    local kickFallback
+    local kickFallback,restTracker
+    if ctx.MakeRest then
+        local path="SB2Codex/anti-suspicious_"..player.UserId..".json"
+        local function integer(value,fallback,maximum)
+            return type(value)=="number" and value==value and math.clamp(math.round(value),1,maximum)or fallback
+        end
+        local limits=state.AntiSuspiciousLimits or {}
+        state.AntiSuspiciousLimits=limits
+        limits.Hops=integer(limits.Hops,10,100);limits.Window=integer(limits.Window,10,200)
+        limits.Min=integer(limits.Min,40,200);limits.Max=math.max(limits.Min,integer(limits.Max,60,200))
+        function state.SetAntiSuspicious(value)
+            state.AntiSuspicious=value==true
+            ctx.SavePreferences()
+        end
+        function state.SetAntiSuspiciousLimit(key,value,maximum)
+            if key=="Hops"then limits.Hops=integer(value,limits.Hops,100)
+            elseif key=="Window"then limits.Window=integer(value,limits.Window,200)
+            elseif key=="Rest"then
+                limits.Min=integer(value,limits.Min,200)
+                limits.Max=math.max(limits.Min,integer(maximum,limits.Max,200))
+            else return end
+            ctx.SavePreferences()
+        end
+        restTracker=ctx.MakeRest({Now=os.time,Random=math.random,Enabled=function()return state.AntiSuspicious end,
+            Limits=function()return limits end,
+            Load=function()
+                if type(isfile)~="function" or not isfile(path)then return end
+                local bytes=readfile(path)
+                if #bytes<8192 then return HttpService:JSONDecode(bytes)end
+            end,
+            Save=function(ledger)
+                if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure(true);assert(ready,reason)end
+                writefile(path,HttpService:JSONEncode(ledger))
+            end})
+        state.AntiSuspiciousRestUntil=restTracker.Deadline()
+    end
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
         Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
@@ -326,10 +361,11 @@ end
         Queue=function()state.QueueAutomation()end,
         Hop=function()
             local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
-            if inBetween then
+            local rest=kickFallback and restTracker and restTracker.Departure()
+            if inBetween or rest then
                 assert(kickFallback and ticket and ticket.LastBlockedUserId,"Confirmed-block rejoin unavailable")
                 state.ServerTeleportStarted=false
-                kickFallback.Requested(ticket.LastBlockedUserId)
+                kickFallback.Requested(ticket.LastBlockedUserId,rest)
                 return
             end
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40;state.SafeRejoinRequested=true
@@ -346,6 +382,7 @@ end
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         Suspended=function()
+            if state.AntiSuspiciousRestUntil then return true end
             if not waitingForBetween()then return false end
             if state.SafeMode and not state.SafeWhitelistResolving then state.SafeModeStatus="Waiting to enter The Between through a room"end
             return true
@@ -356,6 +393,7 @@ end
             if inBetween then return end
             if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
         end,
+        Protected=function()if restTracker then restTracker.ObserveProtected()end end,
         ReleasePanic=function()state.ReleaseSafePanic()end,Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(message)state.SafeModeStatus=message end,Save=state.SaveNow})
     state.SafeController=safe
@@ -429,7 +467,7 @@ end
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id)then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id
         state.SaveNow();refresh()
-        if state.SafeMode then
+        if state.SafeMode and not state.AntiSuspiciousRestUntil then
             if waitingForBetween()then
                 if state.SafeKickFallback then state.SafeKickFallback.Reset()end
                 state.ReleaseSafePanic()
@@ -571,7 +609,7 @@ end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
-    local function fallbackTicket()
+    local function fallbackTicket(rest)
         local ticket=api.Ticket
         if not ticket then
             local ok,value=pcall(readTicket)
@@ -580,12 +618,17 @@ end
         if ticket then
             assert(ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId,"Saved search scope mismatch · no fallback kick")
             assert(type(ticket.StartedAt)=="number"and os.time()-ticket.StartedAt<900
-                and type(ticket.Hops)=="number"and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no fallback kick")
+                and type(ticket.Hops)=="number"and ticket.Hops<((inBetween or rest) and 13 or 12),"Safe Mode search limit reached · no fallback kick")
         end
         return ticket
     end
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
+            WallTime=os.time,CommitRest=function(seconds)
+                local untilAt=restTracker.Commit(seconds)
+                state.AntiSuspiciousRestUntil=untilAt
+                return untilAt
+            end,
             Active=function()return state.Running and state.SafeMode and not waitingForBetween()and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
             Started=function()return state.ServerTeleportStarted==true end,
@@ -596,10 +639,10 @@ end
                 end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
-            Prepare=function(person)
-                local ticket=fallbackTicket()or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
+            Prepare=function(person,rest)
+                local ticket=fallbackTicket(rest)or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
-                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no kick")
+                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<((inBetween or rest) and 13 or 12),"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
                 ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
@@ -626,7 +669,8 @@ end
         if resumeFeatures then restoreFeatures(resumeFeatures)end
         local ok,resume=pcall(readTicket)
         if queuedResume then ok,resume=true,queuedResume end
-        local resumeAllowed=not state.ModeratorBlocking and state.SafeMode and (inBetween or state.AccountProgression or state.SafeFloorId==game.PlaceId)
+        local resumeAllowed=not state.AntiSuspiciousRestUntil and not state.ModeratorBlocking and state.SafeMode
+            and (inBetween or state.AccountProgression or state.SafeFloorId==game.PlaceId)
         if resumeAllowed and ok and type(resume)=="table"and resume.Active==true and resume.PlaceId==game.PlaceId then
             api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end
         end
@@ -634,6 +678,10 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
+                if state.AntiSuspiciousRestUntil then
+                    if os.time()<state.AntiSuspiciousRestUntil or kickFallback and kickFallback.Armed then return end
+                    state.AntiSuspiciousRestUntil=nil
+                end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
                 if inBetween then safe.Update();return end
                 friend.Update(os.clock());safe.Update()

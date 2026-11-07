@@ -1,9 +1,10 @@
 return function(helpers,hop)
-    local function fixture(fail,yields,inBetween)
+    local function fixture(fail,yields,inBetween,rest)
         local state={Running=true,SoloServerSearch={Ticket={LastBlockedUserId=2}}}
         local order={}
         local env=setmetatable({state=state,os={clock=function()return 0 end},game={PlaceId=10},player={},inBetween=inBetween,
-            kickFallback={Requested=function(id)assert(id==2);order[#order+1]="arm"end},
+            restTracker={Departure=function()return rest end},
+            kickFallback={Requested=function(id,seconds)assert(id==2 and seconds==rest);order[#order+1]="arm"end},
             TeleportService={Teleport=function()
                 order[#order+1]="request"
                 if yields then coroutine.yield()end
@@ -26,5 +27,8 @@ return function(helpers,hop)
         "The Between sends the confirmed block to the kick worker before any teleport request")
     state.SoloServerSearch.Ticket.LastBlockedUserId=nil
     assert(not pcall(run) and #order==1,"The Between must have a confirmed block before starting the kick worker")
+    state,order,run=fixture(false,false,false,2437)
+    assert(pcall(run) and table.concat(order,",")=="arm" and not state.SafeRejoinRequested,
+        "A rest replaces the immediate native rejoin with a scheduled post-kick attempt")
     print("PASS Direct rejoin: fallback armed before yielding request, confirmed target identity, refusal cleanup and no movement")
 end

@@ -60,7 +60,8 @@ return function(source)
         JoinFriendUsername="Friend",AutoJoinFriend=true,HealthVisible=true,
         FloorDestinations={A={Id="A",Kind="Boss",Name="Arena"},B={Id="B",Kind="Boss",Name="Arena"}},
         PlayerInventoryRows={{Name="Sword",Upgrade=3,Count=2}},
-        BetweenRooms={{Host="Host",Alt="",Mode="Private",Difficulty="Normal",Start=false}}}
+        BetweenRooms={{Host="Host",Alt="",Mode="Private",Difficulty="Normal",Start=false}},
+        AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60}}
     local catalog={Floors={{Id=11,Label="F1",Unlocked=true},{Id=22,Label="F2",Unlocked=false}},
         Spots={{Id="11/Boss",PlaceId=11,Name="Boss arena",Kind="Boss"},{Id="11/Mini",PlaceId=11,Name="Mini arena",Kind="Mini boss"},
             {Id="22/Boss",PlaceId=22,Name="Foreign arena",Kind="Boss"}},AddCurrent=function()end,Sort=function()end}
@@ -69,7 +70,7 @@ return function(source)
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
         NoSelfDamage="SetNoSelfDamage",AeganatosDodge="SetAeganatosDodge",AtheonUnlock="SetAtheonUnlock",CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
-        AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade"})do
+        AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade",AntiSuspicious="SetAntiSuspicious"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
     end
     for key,method in pairs({CreditWhitelistText="SetCreditWhitelist",SafeWhitelistText="SetSafeWhitelist",JoinFriendUsername="SetJoinFriendUsername",
@@ -77,6 +78,7 @@ return function(source)
         s[method]=function(value)record(method,value);s[key]=value end
     end
     function s.IsBetweenRoomHost(index)return s.BetweenRooms[index].Host=="Host"end
+    function s.SetAntiSuspiciousLimit(key,value)s.AntiSuspiciousLimits[key]=value end
     function s.SetBetweenRoomField(index,field,value)
         if field=="AutoRetry" and not s.IsBetweenRoomHost(index)then return end
         if field=="Alt"then value=value:gsub("%s+",", ") end
@@ -163,6 +165,9 @@ return function(source)
     assert(api.Tabs["Waves Defense"] and not api.Tabs["Challenge Floors"])
     assert(not (c.AutoCreateBetween or c.BetweenAccess or c.BetweenDifficulty or c.BetweenRoomStatus or c.BetweenPaceStatus))
     assert(c.BetweenPaceNormal and c.BetweenPaceHard and c.BetweenPaceElite)
+    assert(c.AntiSuspicious.Title=="Anti Suspicious" and c.AntiSuspiciousRest and c.AntiSuspiciousHops.Value.Default==10)
+    c.AntiSuspicious:Emit(true);assert(s.AntiSuspicious)
+    c.AntiSuspiciousWindow:Emit(15);assert(s.AntiSuspiciousLimits.Window==15)
     c.NoSelfDamage:Emit(true);assert(s.NoSelfDamage and calls[#calls].Name=="SetNoSelfDamage")
     c.AeganatosDodge:Emit(true);assert(s.AeganatosDodge)
     c.AtheonUnlock:Emit(true);assert(s.AtheonUnlock)

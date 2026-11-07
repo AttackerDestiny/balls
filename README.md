@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.8**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.9**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -324,6 +324,8 @@ Trading pauses conflicting farming, attacks, gear changes, and crafting/dismantl
 - Restores saved farming preferences when progression is switched off.
 
 Streaming loss, an unrelated miniboss, or an uncredited corpse is not a completed main-boss kill. The script cannot grant a floor unlock the server has not awarded. **F12 is the endpoint**; Atheon and Atlantis are not additional progression stages.
+
+**Anti Suspicious** starts counting Safe Mode departure attempts after the account reaches its first protected server. A rejoin and its fallback kick count as one attempt. The default threshold is **10 departures in 10 minutes**. Set a **Rest time** range up to **200 minutes**. At the limit, Feather saves a randomly selected deadline down to the second, kicks the local account, and attempts a rejoin when the timer ends if the executor is still running. The account's deadline is retained across reloads. If the kick stops the executor, reopen Roblox manually after the rest.
 
 ## Dodge
 

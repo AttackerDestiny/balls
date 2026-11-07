@@ -5,6 +5,7 @@ return function(source)
         local f={Clock=0,Active=true,People={target},White={},Threads={},Order={},Blocks=0,Kicks=0,Rejoins=0,Confirmed=true,Job="A"}
         local function spawn(fn)local t=coroutine.create(fn);table.insert(f.Threads,t);assert(coroutine.resume(t))end
         f.Api=make({InitialJob="A",Job=function()return f.Job end,Now=function()return f.Clock end,
+            WallTime=function()return f.Clock end,CommitRest=function(seconds)if not f.RestFail then return f.Clock+seconds end end,
             Active=function()return f.Active end,Players=function()return f.People end,Allowed=function(p)return f.White[p.UserId]end,
             Present=function(p)for _,person in ipairs(f.People)do if person==p then return true end end;return false end,
             Started=function()return f.Started end,
@@ -46,5 +47,11 @@ return function(source)
     f=fixture();f.Request();f.Job="B";f.Resume(1);assert(f.Blocks==0)
     f=fixture();f.Request();f.Resume(1);for _=1,4 do f.Resume(2)end
     assert(f.Rejoins==3,"Post-kick recovery remains bounded")
+    f=fixture();f.Api.Requested(2,2437);f.Resume(1)
+    assert(f.Kicks==1 and f.Rejoins==0,"Rest starts by kicking immediately")
+    f.Resume(2);f.Clock=2436;f.Resume(2);assert(f.Rejoins==0,"Never request a rejoin before the saved deadline")
+    f.Clock=2437;f.Resume(2);assert(f.Rejoins==1,"Attempt rejoin at the deadline")
+    f=fixture();f.RestFail=true;f.Api.Requested(2,60);f.Resume(1)
+    assert(f.Kicks==0 and f.Rejoins==0,"Do not kick when the rest deadline cannot be stored")
     print("PASS Immediate Safe fallback: dispatch required, 5 FPS scheduler turn, confirmed-block/queue guards, native start cancellation, whitelist, departure, limits and bounded recovery")
 end

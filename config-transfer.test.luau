@@ -2,6 +2,7 @@ return function(source)
     local make=assert(loadstring(source))()
     local clipboard,applied,encoded
     local settings={Version=1,Enabled=true,SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
+        AntiSuspicious=true,AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60},
         BetweenRooms={{Host="Host",Alt="Alt, 123",Mode="Friends",Difficulty="Hard",Start=true,AutoRetry=true},{Host="Legacy",Alt=""}},
         BetweenPace={Normal=35,Hard={Min=35,Max=38},Elite={Min=0,Max=0}},
         AutoFarm=false,CreditCheck=true,CreditWhitelistText="Friend, 123",BossOnly=true,MultiSpotOrder={"b","a"},AutoCraft={["Rare Upgrade Crystal"]=true},TradeItems={Gem=true},MultiSpotSelected={arena=true},
@@ -20,6 +21,7 @@ return function(source)
     settings.Unknown=true;invalid(encoded);settings.Unknown=nil
     settings.BetweenRooms[1].Start="yes";invalid(encoded);settings.BetweenRooms[1].Start=true
     settings.BetweenRooms[1].AutoRetry="yes";invalid(encoded);settings.BetweenRooms[1].AutoRetry=true
+    settings.AntiSuspiciousLimits.Max=201;invalid(encoded);settings.AntiSuspiciousLimits.Max=60
     settings.BetweenPace.Hard.Max=34;invalid(encoded);settings.BetweenPace.Hard.Max=38
     spots["../escape"]={};invalid(encoded);spots["../escape"]=nil
     spots["11"][1].Position[1]=math.huge;invalid(encoded);spots["11"][1].Position[1]=1

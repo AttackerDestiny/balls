@@ -21,6 +21,7 @@ return function(ctx)
         session.adopted=false;session.retries=0;session.retryAt=nil;session.protectedAt=nil
         api.Seeking=false;api.Paused=false;api.PauseReason=nil
         if ctx.ReleasePanic then ctx.ReleasePanic()end
+        if ctx.Protected then ctx.Protected()end
         ctx.Status(protectedMessage)
     end
     function api.AdoptSearch()session.adopted=true end

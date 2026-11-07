@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.safe-mode-between-v3.0.8"
-local VERSION="3.0.8"
+local BUILD="2026-11-07.anti-suspicious-rest-v3.0.9"
+local VERSION="3.0.9"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -25,7 +25,7 @@ return function(previous,userId)
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
         "MultiSpotPending","MultiSpotSelected","OffsetProfiles","PerformanceBoosters","ProgressionBossCleared",
         "ProgressionBossClearedName","ProgressionComplete","ProgressionFloor","ProgressionRestore","ResumeFeatures",
-        "ResumeRequested","SafeFloorId","SafeMode","SafeWhitelistIds","SafeWhitelistText","SelectedMiscSkill",
+        "ResumeRequested","SafeFloorId","SafeMode","SafeWhitelistIds","SafeWhitelistText","AntiSuspicious","AntiSuspiciousLimits","SelectedMiscSkill",
         "SelectedPlayerId","SelectedSkill","SkillAura","SkillPerWeapon","SkillPerWeaponVersion","StopEverything",
         "Theme","TradeItems","TradeMode","UnsafeOffsetProfiles","UserId","ViewingPlayer","ViewingPlayerInventory","WindUIPosition"}
     local result={}
@@ -294,7 +294,7 @@ if filePersistence then
 return function(ctx)
     local file="SB2Codex/shared-settings.json"
     local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}
         for _,name in ipairs(fields)do result[name]=settings[name]end
@@ -383,11 +383,11 @@ local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
 local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
-    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false}
+    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false}
 for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
 local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
 for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
-for _,key in ipairs({"BetweenRooms","BetweenPace","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
+for _,key in ipairs({"BetweenRooms","BetweenPace","AntiSuspiciousLimits","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
     local value=preference(key,{})
     restore[key]=type(value)=="table"and value or {}
 end
@@ -524,7 +524,7 @@ local state={
 }
 for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
     "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
-    "SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
+    "SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
     "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
     state[key]=restore[key]
 end
@@ -1371,7 +1371,7 @@ function state.SetUIVisible(requested)
 end
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
 local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
-    "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","MultiSpot","MultiSpotSelected",
+    "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
     "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
@@ -5903,7 +5903,7 @@ end
     local credit,lastWarning=0,0
     bind(RunService.Heartbeat,function(delta)
         local now=os.clock();frameTiming.Sample(delta,now)
-        if not state.Running or state.StopEverything or not gui.Parent then return end
+        if not state.Running or state.StopEverything or state.AntiSuspiciousRestUntil or not gui.Parent then return end
         state.RuntimeRecovery.CheckPending(now)
         credit+=delta
         local period
@@ -6935,6 +6935,7 @@ return function(ctx)
         session.adopted=false;session.retries=0;session.retryAt=nil;session.protectedAt=nil
         api.Seeking=false;api.Paused=false;api.PauseReason=nil
         if ctx.ReleasePanic then ctx.ReleasePanic()end
+        if ctx.Protected then ctx.Protected()end
         ctx.Status(protectedMessage)
     end
     function api.AdoptSearch()session.adopted=true end
@@ -7804,7 +7805,42 @@ end
         if not sent then fail(reason)end
         return sent,state.LastFloorTravelError
     end
-    local kickFallback
+    local kickFallback,restTracker
+    if ctx.MakeRest then
+        local path="SB2Codex/anti-suspicious_"..player.UserId..".json"
+        local function integer(value,fallback,maximum)
+            return type(value)=="number" and value==value and math.clamp(math.round(value),1,maximum)or fallback
+        end
+        local limits=state.AntiSuspiciousLimits or {}
+        state.AntiSuspiciousLimits=limits
+        limits.Hops=integer(limits.Hops,10,100);limits.Window=integer(limits.Window,10,200)
+        limits.Min=integer(limits.Min,40,200);limits.Max=math.max(limits.Min,integer(limits.Max,60,200))
+        function state.SetAntiSuspicious(value)
+            state.AntiSuspicious=value==true
+            ctx.SavePreferences()
+        end
+        function state.SetAntiSuspiciousLimit(key,value,maximum)
+            if key=="Hops"then limits.Hops=integer(value,limits.Hops,100)
+            elseif key=="Window"then limits.Window=integer(value,limits.Window,200)
+            elseif key=="Rest"then
+                limits.Min=integer(value,limits.Min,200)
+                limits.Max=math.max(limits.Min,integer(maximum,limits.Max,200))
+            else return end
+            ctx.SavePreferences()
+        end
+        restTracker=ctx.MakeRest({Now=os.time,Random=math.random,Enabled=function()return state.AntiSuspicious end,
+            Limits=function()return limits end,
+            Load=function()
+                if type(isfile)~="function" or not isfile(path)then return end
+                local bytes=readfile(path)
+                if #bytes<8192 then return HttpService:JSONDecode(bytes)end
+            end,
+            Save=function(ledger)
+                if state.StorageBootstrap then local ready,reason=state.StorageBootstrap.Ensure(true);assert(ready,reason)end
+                writefile(path,HttpService:JSONEncode(ledger))
+            end})
+        state.AntiSuspiciousRestUntil=restTracker.Deadline()
+    end
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
         Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
@@ -7823,10 +7859,11 @@ end
         Queue=function()state.QueueAutomation()end,
         Hop=function()
             local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
-            if inBetween then
+            local rest=kickFallback and restTracker and restTracker.Departure()
+            if inBetween or rest then
                 assert(kickFallback and ticket and ticket.LastBlockedUserId,"Confirmed-block rejoin unavailable")
                 state.ServerTeleportStarted=false
-                kickFallback.Requested(ticket.LastBlockedUserId)
+                kickFallback.Requested(ticket.LastBlockedUserId,rest)
                 return
             end
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40;state.SafeRejoinRequested=true
@@ -7843,6 +7880,7 @@ end
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         Suspended=function()
+            if state.AntiSuspiciousRestUntil then return true end
             if not waitingForBetween()then return false end
             if state.SafeMode and not state.SafeWhitelistResolving then state.SafeModeStatus="Waiting to enter The Between through a room"end
             return true
@@ -7853,6 +7891,7 @@ end
             if inBetween then return end
             if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
         end,
+        Protected=function()if restTracker then restTracker.ObserveProtected()end end,
         ReleasePanic=function()state.ReleaseSafePanic()end,Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(message)state.SafeModeStatus=message end,Save=state.SaveNow})
     state.SafeController=safe
@@ -7926,7 +7965,7 @@ end
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id)then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id
         state.SaveNow();refresh()
-        if state.SafeMode then
+        if state.SafeMode and not state.AntiSuspiciousRestUntil then
             if waitingForBetween()then
                 if state.SafeKickFallback then state.SafeKickFallback.Reset()end
                 state.ReleaseSafePanic()
@@ -8068,7 +8107,7 @@ end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
-    local function fallbackTicket()
+    local function fallbackTicket(rest)
         local ticket=api.Ticket
         if not ticket then
             local ok,value=pcall(readTicket)
@@ -8077,12 +8116,17 @@ end
         if ticket then
             assert(ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId,"Saved search scope mismatch · no fallback kick")
             assert(type(ticket.StartedAt)=="number"and os.time()-ticket.StartedAt<900
-                and type(ticket.Hops)=="number"and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no fallback kick")
+                and type(ticket.Hops)=="number"and ticket.Hops<((inBetween or rest) and 13 or 12),"Safe Mode search limit reached · no fallback kick")
         end
         return ticket
     end
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
+            WallTime=os.time,CommitRest=function(seconds)
+                local untilAt=restTracker.Commit(seconds)
+                state.AntiSuspiciousRestUntil=untilAt
+                return untilAt
+            end,
             Active=function()return state.Running and state.SafeMode and not waitingForBetween()and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
             Started=function()return state.ServerTeleportStarted==true end,
@@ -8093,10 +8137,10 @@ end
                 end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
-            Prepare=function(person)
-                local ticket=fallbackTicket()or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
+            Prepare=function(person,rest)
+                local ticket=fallbackTicket(rest)or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
-                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no kick")
+                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<((inBetween or rest) and 13 or 12),"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
                 ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
@@ -8123,7 +8167,8 @@ end
         if resumeFeatures then restoreFeatures(resumeFeatures)end
         local ok,resume=pcall(readTicket)
         if queuedResume then ok,resume=true,queuedResume end
-        local resumeAllowed=not state.ModeratorBlocking and state.SafeMode and (inBetween or state.AccountProgression or state.SafeFloorId==game.PlaceId)
+        local resumeAllowed=not state.AntiSuspiciousRestUntil and not state.ModeratorBlocking and state.SafeMode
+            and (inBetween or state.AccountProgression or state.SafeFloorId==game.PlaceId)
         if resumeAllowed and ok and type(resume)=="table"and resume.Active==true and resume.PlaceId==game.PlaceId then
             api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end
         end
@@ -8131,6 +8176,10 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
+                if state.AntiSuspiciousRestUntil then
+                    if os.time()<state.AntiSuspiciousRestUntil or kickFallback and kickFallback.Armed then return end
+                    state.AntiSuspiciousRestUntil=nil
+                end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
                 if inBetween then safe.Update();return end
                 friend.Update(os.clock());safe.Update()
@@ -8370,20 +8419,20 @@ end
 -- Recovery starts only after the normal confirmed-block rejoin was dispatched.
 return function(ctx)
     local api={Armed=false,Attempts=0,Started=false}
-    local pendingId
+    local pendingId,pendingRest
     local epoch=0
     local executing=false
     local failures,retryDue=0,0
     local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
     local function started()return api.Started or ctx.Started and ctx.Started()end
     function api.Reset()
-        epoch+=1;pendingId=nil;failures=0;retryDue=0
+        epoch+=1;pendingId=nil;pendingRest=nil;failures=0;retryDue=0
         api.Armed=false;api.Started=false;api.Attempts=0
     end
     function api.MarkStarted()api.Started=true end
-    function api.Requested(userId)
+    function api.Requested(userId,restSeconds)
         if executing or api.Armed then return end
-        pendingId=userId;api.Started=false
+        pendingId=userId;pendingRest=restSeconds;api.Started=false
         api.Update(ctx.Now())
     end
     function api.TeleportFailed()
@@ -8395,15 +8444,24 @@ return function(ctx)
         for _,person in ipairs(ctx.Players())do
             if person.UserId==pendingId and not ctx.Allowed(person)then target=person;break end
         end
-        if not target then pendingId=nil;failures=0;retryDue=0;return end
+        if not target then pendingId=nil;pendingRest=nil;failures=0;retryDue=0;return end
         if executing or failures>=3 or now<retryDue then return end
         executing=true
         local token=epoch
+        local restSeconds,restUntil,kicked=pendingRest
         local function valid()
             return token==epoch and enabled()and ctx.Present(target)and not ctx.Allowed(target)
         end
         local function recovery()
             ctx.Sleep(.2)
+            if restUntil then
+                if not kicked then return end
+                while token==epoch and enabled()and not started()do
+                    local remaining=restUntil-ctx.WallTime()
+                    if remaining<=0 then break end
+                    ctx.Sleep(math.min(remaining,30))
+                end
+            end
             for attempt=1,3 do
                 if token~=epoch or not enabled()or started()then return end
                 api.Attempts=attempt
@@ -8417,17 +8475,22 @@ return function(ctx)
             local ok,reason=pcall(function()
                 ctx.Sleep(0)
                 if not valid()or started()then return end
-                if ctx.CheckLimits then ctx.CheckLimits()end
+                if ctx.CheckLimits then ctx.CheckLimits(restSeconds)end
                 ctx.Pause()
                 if not valid()then return end
                 assert(ctx.Block(target,valid)==true,"Native block was not confirmed · no kick")
                 if not valid()then return end
-                ctx.Prepare(target)
+                ctx.Prepare(target,restSeconds)
                 if not valid()or started()then return end
+                if restSeconds then
+                    restUntil=ctx.CommitRest(restSeconds)
+                    assert(restUntil,"Rest deadline could not be saved · no kick")
+                end
                 api.Armed=true
-                ctx.Status("Blocked · rejoin not started · kicking and rejoining")
+                ctx.Status(restUntil and "Blocked · kicking for Anti Suspicious rest"or "Blocked · rejoin not started · kicking and rejoining")
                 ctx.Spawn(recovery)
                 ctx.Kick("Safe Mode: blocked @"..target.Name.." before automatic rejoin.")
+                kicked=true
             end)
             executing=false;ctx.Finish()
             if not ok then
@@ -8441,7 +8504,68 @@ end
 
 -- END BUNDLED SAFE KICK FALLBACK
     end)()
-    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    local makeRest=(function()
+-- BEGIN BUNDLED ANTI SUSPICIOUS
+-- Account-scoped rolling history and an absolute rest deadline.
+return function(ctx)
+    local maxWindow=200*60
+    local maxHops=100
+    local ledger={Version=1,Armed=false,Hops={}}
+    local function prune(hops,now)
+        local recent={}
+        for i=math.max(1,#hops-maxHops+1),#hops do
+            local at=hops[i]
+            if type(at)=="number" and at<=now and at>now-maxWindow then recent[#recent+1]=at end
+        end
+        return recent
+    end
+    local ok,saved=pcall(ctx.Load)
+    if ok and type(saved)=="table" and saved.Version==1 and type(saved.Hops)=="table" then
+        local now=ctx.Now()
+        ledger.Armed=saved.Armed==true
+        ledger.Hops=prune(saved.Hops,now)
+        if type(saved.Until)=="number" and saved.Until>now and saved.Until<=now+maxWindow then
+            ledger.Until=saved.Until
+        end
+    end
+    local api={}
+    local retryAt=0
+    local function persist(nextLedger)
+        local ok,result=pcall(ctx.Save,nextLedger)
+        local written=ok and result~=false
+        if written then ledger=nextLedger end
+        return written
+    end
+    function api.Deadline()
+        local untilAt=ledger.Until
+        return untilAt and untilAt>ctx.Now() and untilAt or nil
+    end
+    function api.ObserveProtected()
+        if not ctx.Enabled() or ledger.Armed or api.Deadline() or ctx.Now()<retryAt then return end
+        local nextLedger={Version=1,Armed=true,Hops=ledger.Hops}
+        if not persist(nextLedger) then retryAt=ctx.Now()+30 end
+    end
+    function api.Departure()
+        if not ctx.Enabled() or not ledger.Armed or api.Deadline() then return end
+        local now,limits=ctx.Now(),ctx.Limits()
+        local hops=prune(ledger.Hops,now)
+        if #hops>=maxHops then table.remove(hops,1)end
+        hops[#hops+1]=now
+        if not persist({Version=1,Armed=true,Hops=hops})then return end
+        local count=0
+        for _,at in ipairs(hops)do if at>now-limits.Window*60 then count+=1 end end
+        if count>=limits.Hops then return ctx.Random(limits.Min*60,limits.Max*60) end
+    end
+    function api.Commit(seconds)
+        local deadline=ctx.Now()+seconds
+        if persist({Version=1,Armed=false,Hops={},Until=deadline})then return deadline end
+    end
+    return api
+end
+
+-- END BUNDLED ANTI SUSPICIOUS
+    end)()
+    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end
@@ -9489,10 +9613,10 @@ do
 return function(ctx)
     local schema={}
     local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
-        table={"BetweenRooms","BetweenPace","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
+        table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
     local function data(value,depth,path)
@@ -9539,6 +9663,12 @@ return function(ctx)
         for mode,range in pairs(value.BetweenPace or {})do
             assert(difficulties[mode] and (minute(range) or (type(range)=="table"
                 and minute(range.Min) and minute(range.Max) and range.Min<=range.Max)),"Invalid Between completion time")
+        end
+        local limits=value.AntiSuspiciousLimits
+        if limits then
+            local function integer(v,max)return type(v)=="number" and v%1==0 and v>=1 and v<=max end
+            assert(integer(limits.Hops,100) and integer(limits.Window,200) and integer(limits.Min,200)
+                and integer(limits.Max,200) and limits.Min<=limits.Max,"Invalid Anti Suspicious limits")
         end
     end
     local function arenas(value)
@@ -27706,12 +27836,14 @@ return function(ctx)
         local label=gui("TextLabel",row,{Position=UDim2.fromOffset(0,20),Size=UDim2.new(1,0,0,12),
             BackgroundTransparency=1,TextSize=12,FontFace=elements.Title.FontFace,TextXAlignment=Enum.TextXAlignment.Right})
         local minimum,maximum=definition.Value.Min,definition.Value.Max
+        local first,last=definition.Minimum or 0,definition.Maximum or 100
+        local span=last-first
         local function draw()
             local color=elements.Title.TextColor3
             low.BackgroundColor3=color;high.BackgroundColor3=color
             fill.BackgroundColor3=color;track.BackgroundColor3=color;label.TextColor3=color
-            low.Position=UDim2.fromScale(minimum/100,.5);high.Position=UDim2.fromScale(maximum/100,.5)
-            fill.Position=UDim2.fromScale(minimum/100,0);fill.Size=UDim2.fromScale((maximum-minimum)/100,1)
+            low.Position=UDim2.fromScale((minimum-first)/span,.5);high.Position=UDim2.fromScale((maximum-first)/span,.5)
+            fill.Position=UDim2.fromScale((minimum-first)/span,0);fill.Size=UDim2.fromScale((maximum-minimum)/span,1)
             label.Text=maximum==0 and "Off" or string.format("%d – %d min",minimum,maximum)
         end
         draw()
@@ -27725,7 +27857,8 @@ return function(ctx)
             local touch=inputObject.UserInputType==Enum.UserInputType.Touch
             if not api.Ready or changed or (not touch and inputObject.UserInputType~=Enum.UserInputType.MouseButton1) then return end
             local function position(input)
-                return math.clamp((input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)*100,0,100)
+                local ratio=(input.Position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X)
+                return first+math.clamp(ratio,0,1)*span
             end
             local point=position(inputObject)
             local lower=point<(minimum+maximum)/2
@@ -27767,6 +27900,11 @@ return function(ctx)
         elseif kind=="Input"then
             options.Type="Input";options.Value=definition.Value or "";options.Placeholder="Enter here..."
             options.Callback=safe(function(text)if api.Ready and not projection.Syncing then definition.Write(text)end end)
+        elseif kind=="Slider"then
+            options.Value={Min=1,Max=definition.Maximum,Default=definition.Read()};options.Step=1
+            options.Callback=safe(function(value)
+                if api.Ready and value~=definition.Read()then definition.Write(value)end
+            end)
         elseif kind=="Dropdown"then
             local view=definition.Read()
             projection.Map=view.Map or {};projection.Options=signature(view.Options)
@@ -27970,6 +28108,23 @@ return function(ctx)
             return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
         end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
         toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        section("Speacial","AntiSuspiciousSection","Anti Suspicious")
+        toggle("Speacial","AntiSuspicious","Anti Suspicious","SetAntiSuspicious")
+        local limits=state.AntiSuspiciousLimits or {Hops=10,Window=10,Min=40,Max=60}
+        for _,setting in ipairs({{"Hops","Rejoin / kick limit",100},{"Window","Tracking window (minutes)",200}})do
+            local key,title,maximum=table.unpack(setting)
+            register("Speacial",{Kind="Slider",Key="AntiSuspicious"..key,Title=title,Maximum=maximum,
+                Read=function()return limits[key]end,
+                Write=function(value)action("SetAntiSuspiciousLimit",key,value)end})
+        end
+        register("Speacial",{Kind="RangeSlider",Key="AntiSuspiciousRest",Title="Rest time (minutes)",Minimum=1,Maximum=200,
+            Value=limits,Write=function(minimum,maximum)action("SetAntiSuspiciousLimit","Rest",minimum,maximum)end})
+        paragraph("Speacial","AntiSuspiciousStatus","Rest Status",function()
+            local untilAt=state.AntiSuspiciousRestUntil
+            if not untilAt then return state.AntiSuspicious and "Watching Safe Mode departures"or "Off"end
+            local seconds=math.max(0,untilAt-os.time())
+            return seconds>0 and string.format("%d:%02d remaining",math.floor(seconds/60),seconds%60)or "Rest finished · waiting for rejoin"
+        end)
         toggle("Dodge","NoSelfDamage","No Self Damage (enemy skills)","SetNoSelfDamage","Blocks the native client-reported enemy-skill DamageSelf path. Server-applied damage can still occur.")
         toggle("Dodge","AeganatosDodge","Aeganatos Dodge","SetAeganatosDodge")
         toggle("Dodge","AtheonDodge","Atheon Dodge","SetAtheonDodge")

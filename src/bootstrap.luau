@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.safe-mode-between-v3.0.8"
-local VERSION="3.0.8"
+local BUILD="2026-11-07.anti-suspicious-rest-v3.0.9"
+local VERSION="3.0.9"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -139,11 +139,11 @@ local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
 local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
-    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false}
+    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false}
 for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
 local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
 for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
-for _,key in ipairs({"BetweenRooms","BetweenPace","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
+for _,key in ipairs({"BetweenRooms","BetweenPace","AntiSuspiciousLimits","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
     local value=preference(key,{})
     restore[key]=type(value)=="table"and value or {}
 end

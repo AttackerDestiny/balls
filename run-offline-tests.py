@@ -61,6 +61,7 @@ def main():
         ("BETWEEN ROOM", "between-room.module.luau"),
         ("BETWEEN PACE", "between-pace.module.luau"),
         ("BETWEEN RETRY", "between-retry.module.luau"),
+        ("ANTI SUSPICIOUS", "anti-suspicious.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
         ("SELECTED FARM SPOTS", "selected-farm-spots.module.luau"),
         ("BLOCK UI MASK", "block-ui-mask.module.luau"),
@@ -130,7 +131,7 @@ def main():
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + quote(read("between-room.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("between-pace.test.luau")) + "))()(" + quote(read("between-pace.module.luau")) + ")\n"
-    for name in ("atheon-unlock", "between-retry", "wave-dodge", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
+    for name in ("atheon-unlock", "between-retry", "anti-suspicious", "wave-dodge", "pad-slot", "selected-farm-spots", "block-ui-mask", "safe-mode-suspended", "self-damage-protection"):
         module = "safe-mode" if name == "safe-mode-suspended" else name
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(module + ".module.luau")) + ")\n"
     for name in ("enemy-registry", "work-scheduler", "runtime-scope", "movement-owner", "settings-snapshot", "instance-queue"):
@@ -234,7 +235,7 @@ def main():
     selection = adapter[selection_start:adapter.index("    local whitelistGeneration", selection_start)]
     fixture += "assert(loadstring(" + quote(read("floor-unlocks.test.luau")) + "))()(" + ",".join(quote(value) for value in (unlock, selection, read("automation-ui.module.luau"))) + ")\n"
     floor_start = adapter.index("    function state.ChangeAutomationFloor(placeId)")
-    floor = adapter[floor_start:adapter.index("    local api=ctx.Make({", floor_start)]
+    floor = adapter[floor_start:adapter.index("    local kickFallback,restTracker", floor_start)]
     fixture += "assert(loadstring(" + quote(read("floor-transition.test.luau")) + "))()(" + quote(floor) + ")\n"
     destination_start = script.index("function state.RegisterAutomationDestination(spot)")
     destination = script[destination_start:script.index("travelHeading.Text", destination_start)]
