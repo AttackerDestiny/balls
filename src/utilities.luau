@@ -560,6 +560,15 @@ local function installBetweenAutomation()
         requestSave()
         return #rooms
     end
+    function state.RemoveBetweenRoom(index)
+        if not rooms[index]then return false end
+        local previous=assignment.Room
+        table.remove(rooms,index)
+        updateAssignment()
+        if assignment.Room~=previous then controller.Reset()end
+        requestSave()
+        return true
+    end
     function state.SetBetweenRoomField(index,field,value)
         local entry=rooms[index]
         if not entry then return end

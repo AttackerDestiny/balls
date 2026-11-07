@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.9**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.10**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -202,6 +202,8 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 ## Waves Defense
 
 Use **Create Room** to add a numbered setup with **Host**, **Alt**, **Difficulty**, **Mode**, and **Start**. Paste up to seven Alt usernames or IDs and Feather formats them with commas and spaces. Enable the same room setup on the assigned accounts in the same server. The host creates and configures the room, then starts after every listed Alt joins. An empty Alt list starts a solo room. The game's access rules still apply. A failed start pauses that setup until you toggle **Start** again.
+
+Use the **X** on a room header to delete its saved setup. The remaining setups are renumbered.
 
 The Between automatically uses free revives while the server reports lives remaining. **Auto Retry** appears only for the configured host. Enable it to create a new room from inside The Between after everyone is down with no free revives left, or after Feather observes the Wave 100 reward chest being opened. The host waits for all configured Alts again. **Start** must be enabled on each assigned account.
 

@@ -74,6 +74,14 @@ do
         button.Parent=host;bind(button.Activated,callback)
         return button
     end
+    local function roomDeleteButton(section,callback)
+        local header=section.ElementFrame.Outline
+        local button=library.Creator.New("TextButton",{Name="DeleteRoom",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
+            BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(30,34),Position=UDim2.new(1,-12,.5,0),
+            AnchorPoint=Vector2.new(1,.5),ThemeTag={TextColor3="Text"},ZIndex=header.ZIndex+2},nil)
+        button.Parent=header;bind(button.Activated,callback)
+        return button
+    end
     local function visible(show)
         if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(show)end
         showUI.Visible=state.Running==true
@@ -101,7 +109,7 @@ do
         local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,InputService=UserInputService,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
-            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,
+            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,AddRoomDelete=roomDeleteButton,
             DestroyRoots=function()roots(function(root)root:Destroy()end)end,
             FriendPresent=function(name)
                 if name==""then return false end

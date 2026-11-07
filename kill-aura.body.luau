@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.anti-suspicious-rest-v3.0.9"
-local VERSION="3.0.9"
+local BUILD="2026-11-07.delete-between-room-v3.0.10"
+local VERSION="3.0.10"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -9841,9 +9841,11 @@ return function(ctx)
     local attempts=0
     local joinRoom,joinStatus,joinAttempts,nextJoin
     local starting=false
+    local revision=0
     local leavingUntil
     local function stop(message)phase="Stopped";ctx.Status(message)end
     function api.Reset()
+        revision+=1
         phase="Setup";waiting=nil;attempts=0;leavingUntil=nil
         joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
     end
@@ -9909,13 +9911,14 @@ return function(ctx)
             return
         end
         starting=true
+        local requestRevision=revision
         phase="Starting";ctx.Status("Starting The Between · "..access.." · "..difficulty)
         ctx.Spawn(function()
             if ctx.PrepareStart then ctx.PrepareStart() end
             local current=ctx.Read()
             local selected=ctx.Assignment and ctx.Assignment()
             local desiredAccess,desiredMode=ctx.Selection()
-            if not ctx.Active() or not current or current.Id~=room.Id or current.Host~=ctx.UserId
+            if requestRevision~=revision or not ctx.Active() or not current or current.Id~=room.Id or current.Host~=ctx.UserId
                 or current.PlaceId~=ctx.PlaceId or current.Status~=desiredAccess or current.Mode~=desiredMode
                 or selected and (selected.Role~="Host" or #ctx.MissingAlts(current,selected.Alts)>0) then
                 starting=false;phase="Setup"
@@ -10271,6 +10274,15 @@ end
         rooms[#rooms+1]={Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false,AutoRetry=false}
         requestSave()
         return #rooms
+    end
+    function state.RemoveBetweenRoom(index)
+        if not rooms[index]then return false end
+        local previous=assignment.Room
+        table.remove(rooms,index)
+        updateAssignment()
+        if assignment.Room~=previous then controller.Reset()end
+        requestSave()
+        return true
     end
     function state.SetBetweenRoomField(index,field,value)
         local entry=rooms[index]
@@ -28012,6 +28024,7 @@ return function(ctx)
         if ctx.MarkAutoHide then ctx.MarkAutoHide(api.Controls.AutoHideUI,state.AutoHideUI)end
     end
     local boostNames={"No damage text","No damage particles","Delete dead mobs","No vel obtained in chat","Hide players","Hide effects","Delete map","Remove animations","Disable rendering","Limit FPS","Remove everything"}
+    local synchronize
     local function rest()
         for _,row in ipairs({{"Enabled","Kill Aura","SetEnabled"},{"AutoFarm","Auto Farm","SetAutoFarm"},{"BossOnly","Boss Only","SetBossOnly"},{"CreditCheck","Credit Check","SetCreditCheck"}})do toggle("Combat",row[1],row[2],row[3])end
         input("Combat","CreditWhitelist","Credit Whitelist",state.CreditWhitelistText,function(text)if text~=state.CreditWhitelistText then action("SetCreditWhitelist",text)end end,"Input A List Of User")
@@ -28025,40 +28038,74 @@ return function(ctx)
                 Value=state.BetweenPace and state.BetweenPace[mode] or {Min=0,Max=0},
                 Write=function(minimum,maximum)action("SetBetweenPace",mode,minimum,maximum)end})
         end
-        local function room(index)
-            local key="BetweenRoom"..index
+        local roomViews={}
+        local function refreshRoom(index)
+            local view=roomViews[index]
+            if not view then return end
             local entry=state.BetweenRooms[index]
-            local retry
+            local frame=view.Heading.ElementFrame
+            if frame then frame.Visible=entry~=nil end
+            for field,projection in pairs(view.Fields)do
+                local control=projection.Control
+                if control.ElementFrame then
+                    control.ElementFrame.Visible=entry~=nil and (field~="AutoRetry" or state.IsBetweenRoomHost(index))
+                end
+                if entry then
+                    if field=="Host" or field=="Alt"then
+                        if control.Value~=entry[field]then
+                            projection.Syncing=true;control:Set(entry[field]);projection.Syncing=false
+                        end
+                    else
+                        synchronize(projection,true)
+                    end
+                end
+            end
+        end
+        local function room(index)
+            if roomViews[index]then refreshRoom(index);return end
+            local key="BetweenRoom"..index
+            local function entry()return state.BetweenRooms[index] or {}end
+            local fields={}
             local function refreshRetry()
-                local frame=retry and retry.Control.ElementFrame
+                local frame=fields.AutoRetry and fields.AutoRetry.Control.ElementFrame
                 if frame then frame.Visible=state.IsBetweenRoomHost(index)end
             end
             section(wavesTab,key,"Room "..index)
-            input(wavesTab,key.."Host","Host",entry.Host,function(text)
+            local heading=api.Controls[key]
+            fields.Host=input(wavesTab,key.."Host","Host",entry().Host,function(text)
+                if text==entry().Host then return end
                 action("SetBetweenRoomField",index,"Host",text)
                 refreshRetry()
             end,"Roblox username or user ID")
-            local alt
-            alt=input(wavesTab,key.."Alt","Alt",entry.Alt,function(text)
-                if text==entry.Alt then return end
+            fields.Alt=input(wavesTab,key.."Alt","Alt",entry().Alt,function(text)
+                if text==entry().Alt then return end
                 local formatted=action("SetBetweenRoomField",index,"Alt",text)
                 if formatted and formatted~=text then
+                    local alt=fields.Alt
                     alt.Syncing=true;alt.Control:Set(formatted);alt.Syncing=false
                 end
             end,"Up to seven usernames or IDs")
-            dropdown(wavesTab,key.."Difficulty","Difficulty",function()
-                return {Options=difficulties,Value=entry.Difficulty}
+            fields.Difficulty=dropdown(wavesTab,key.."Difficulty","Difficulty",function()
+                return {Options=difficulties,Value=entry().Difficulty}
             end,function(value)action("SetBetweenRoomField",index,"Difficulty",value)end)
-            dropdown(wavesTab,key.."Mode","Mode",function()
-                return {Options={"Private","Friends","Game Party"},Value=entry.Mode}
+            fields.Mode=dropdown(wavesTab,key.."Mode","Mode",function()
+                return {Options={"Private","Friends","Game Party"},Value=entry().Mode}
             end,function(value)action("SetBetweenRoomField",index,"Mode",value)end)
-            register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
-                Read=function()return entry.Start end,
+            fields.Start=register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
+                Read=function()return entry().Start==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
-            retry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
-                Read=function()return entry.AutoRetry==true end,
+            fields.AutoRetry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
+                Read=function()return entry().AutoRetry==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"AutoRetry",value)end})
-            refreshRetry()
+            roomViews[index]={Heading=heading,Fields=fields}
+            if ctx.AddRoomDelete then
+                api.Controls[key.."Delete"]=ctx.AddRoomDelete(heading,safe(function()
+                    if action("RemoveBetweenRoom",index)then
+                        for slot=index,#state.BetweenRooms+1 do refreshRoom(slot)end
+                    end
+                end))
+            end
+            refreshRoom(index)
         end
         button(wavesTab,"CreateBetweenRoom","Create Room",function()
             local index=action("AddBetweenRoom")
@@ -28138,7 +28185,7 @@ return function(ctx)
             if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
         end)
     end
-    local function synchronize(projection,choices)
+    function synchronize(projection,choices)
         local definition=projection.Definition
         if definition.Kind=="Toggle"then
             local value=definition.Read();if value~=projection.Value then projection.Value=value;projection.Control:Set(value,false)end
@@ -28327,6 +28374,14 @@ end
         button.Parent=host;bind(button.Activated,callback)
         return button
     end
+    local function roomDeleteButton(section,callback)
+        local header=section.ElementFrame.Outline
+        local button=library.Creator.New("TextButton",{Name="DeleteRoom",Text="X",TextSize=16,Font=Enum.Font.GothamBold,
+            BackgroundTransparency=1,AutoButtonColor=true,Size=UDim2.fromOffset(30,34),Position=UDim2.new(1,-12,.5,0),
+            AnchorPoint=Vector2.new(1,.5),ThemeTag={TextColor3="Text"},ZIndex=header.ZIndex+2},nil)
+        button.Parent=header;bind(button.Activated,callback)
+        return button
+    end
     local function visible(show)
         if state.PerformanceBoost then state.PerformanceBoost.SetUIVisible(show)end
         showUI.Visible=state.Running==true
@@ -28354,7 +28409,7 @@ end
         local controller=make({State=state,WindUI=library,Memory=uiMemory,PlaceId=game.PlaceId,Defer=task.defer,InputService=UserInputService,
             Size=UDim2.fromOffset(math.min(640,math.max(320,size.X-24)),math.min(520,math.max(280,size.Y-70))),
             MinSize=Vector2.new(300,240),SideBarWidth=size.X<500 and 110 or 155,
-            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,
+            Visibility=visible,MarkAutoHide=mark,AddWhitelistClear=clearButton,AddRoomDelete=roomDeleteButton,
             DestroyRoots=function()roots(function(root)root:Destroy()end)end,
             FriendPresent=function(name)
                 if name==""then return false end

@@ -89,6 +89,11 @@ return function(source)
         table.insert(s.BetweenRooms,{Host="",Alt="",Mode="Private",Difficulty="Normal",Start=false})
         return #s.BetweenRooms
     end
+    function s.RemoveBetweenRoom(index)
+        if not s.BetweenRooms[index]then return false end
+        table.remove(s.BetweenRooms,index)
+        return true
+    end
     function s.IsAutomationFloorUnlocked(id)return id==11 or catalog.Floors[2].Unlocked end
     function s.SetSafeFloor(id)record("SetSafeFloor",id);if s.IsAutomationFloorUnlocked(id)then s.SafeFloorId=id end end
     function s.SetMultiSpotSelections(value,order)
@@ -117,7 +122,8 @@ return function(source)
     local yields=0
     local api=make({AddWhitelistClear=function(control,clear)
         return {Callback=clear}
-    end,Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()friendReads+=1;return present end,Visibility=function(value)visible=value end})
+    end,AddRoomDelete=function(_,callback)return {Callback=callback}end,
+    Yield=function()yields+=1 end,State=s,WindUI=wind,PlaceId=11,FriendPresent=function()friendReads+=1;return present end,Visibility=function(value)visible=value end})
     assert(yields>=40,"UI construction must offer frame-budget yield points")
     local c=api.Controls
     assert(c.AutoJoinFriendStatus.Title=="Status"and c.AutoJoinFriendStatus.Desc=="Friend Unappeared")
@@ -184,6 +190,14 @@ return function(source)
     c.BetweenRoom1Alt:Emit("One Two");assert(c.BetweenRoom1Alt.Value=="One, Two")
     c.CreateBetweenRoom.Callback()
     assert(c.BetweenRoom2Host and c.BetweenRoom2Mode and not c.BetweenRoom2Start.Value and not c.BetweenRoom2AutoRetry.ElementFrame.Visible)
+    c.BetweenRoom2Host:Emit("OtherHost")
+    c.BetweenRoom2Mode:Emit("Game Party")
+    c.BetweenRoom1Delete.Callback();flush()
+    assert(#s.BetweenRooms==1 and c.BetweenRoom1Host.Value=="OtherHost" and c.BetweenRoom1Mode.Value=="Game Party"
+        and not c.BetweenRoom1Start.Value and not c.BetweenRoom2.ElementFrame.Visible,"Deletion compacts the remaining setup into Room 1")
+    c.CreateBetweenRoom.Callback();flush()
+    assert(c.BetweenRoom2.ElementFrame.Visible and c.BetweenRoom2Host.Value=="" and c.BetweenRoom2Mode.Value=="Private",
+        "Adding after deletion reuses a clean slot")
     c.BossOnly:Emit(true);assert(s.BossOnly and calls[#calls].Name=="SetBossOnly")
     c.AutoHideUI.Callback();assert(s.AutoHideUI,"Top-bar auto-hide preference is saved through the setter")
     c.SafeWhitelist:Emit("Other, 456");assert(s.SafeWhitelistText=="Other, 456")

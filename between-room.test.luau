@@ -82,5 +82,11 @@ return function(source)
     controller.Update(13)
     run=worker;worker=nil;run()
     assert(starts==3,"Start the fresh room once its roster is present")
+    controller.Reset()
+    room.Id="another"
+    controller.Update(14)
+    controller.Reset()
+    run=worker;worker=nil;run()
+    assert(starts==3,"Removing or changing an assignment cancels a start waiting to dispatch")
     print("PASS The Between starts once after both room settings are confirmed")
 end

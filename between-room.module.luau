@@ -6,9 +6,11 @@ return function(ctx)
     local attempts=0
     local joinRoom,joinStatus,joinAttempts,nextJoin
     local starting=false
+    local revision=0
     local leavingUntil
     local function stop(message)phase="Stopped";ctx.Status(message)end
     function api.Reset()
+        revision+=1
         phase="Setup";waiting=nil;attempts=0;leavingUntil=nil
         joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
     end
@@ -74,13 +76,14 @@ return function(ctx)
             return
         end
         starting=true
+        local requestRevision=revision
         phase="Starting";ctx.Status("Starting The Between · "..access.." · "..difficulty)
         ctx.Spawn(function()
             if ctx.PrepareStart then ctx.PrepareStart() end
             local current=ctx.Read()
             local selected=ctx.Assignment and ctx.Assignment()
             local desiredAccess,desiredMode=ctx.Selection()
-            if not ctx.Active() or not current or current.Id~=room.Id or current.Host~=ctx.UserId
+            if requestRevision~=revision or not ctx.Active() or not current or current.Id~=room.Id or current.Host~=ctx.UserId
                 or current.PlaceId~=ctx.PlaceId or current.Status~=desiredAccess or current.Mode~=desiredMode
                 or selected and (selected.Role~="Host" or #ctx.MissingAlts(current,selected.Alts)>0) then
                 starting=false;phase="Setup"

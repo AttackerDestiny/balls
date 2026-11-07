@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.anti-suspicious-rest-v3.0.9"
-local VERSION="3.0.9"
+local BUILD="2026-11-07.delete-between-room-v3.0.10"
+local VERSION="3.0.10"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
