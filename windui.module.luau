@@ -227,7 +227,6 @@ return function(ctx)
         toggle("Challenge Floors","AutoCreateBetween","Auto Create","SetAutoCreateBetween")
         dropdown("Challenge Floors","BetweenAccess","Room Mode",function()return {Options={"Private","Friends","Game Party"},Value=state.BetweenAccess or "Private"}end,function(value)action("SetBetweenAccess",value)end)
         dropdown("Challenge Floors","BetweenDifficulty","Difficulty",function()return {Options={"Normal","Hard","Elite"},Value=state.BetweenDifficulty or "Normal"}end,function(value)action("SetBetweenDifficulty",value)end)
-        paragraph("Challenge Floors","BetweenRoomStatus","Room Status",function()return state.BetweenRoomStatus or "Auto Create is off"end)
         section("Challenge Floors","BetweenPaceSection","Completion Time")
         for _,mode in ipairs({"Normal","Hard","Elite"})do
             register("Challenge Floors",{Kind="Slider",Key="BetweenPace"..mode,Title=mode.." (minutes)",

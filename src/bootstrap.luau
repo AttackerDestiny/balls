@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.between-room-rosters-v3.0.1"
-local VERSION="3.0.1"
+local BUILD="2026-11-07.hide-between-room-status-v3.0.2"
+local VERSION="3.0.2"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
