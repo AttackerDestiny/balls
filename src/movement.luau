@@ -525,7 +525,7 @@ local waveDodge=(function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
 end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,Mobs=trackedMobs,MobData=getMobData,
-    Hold=function(point,farmIdle)
+    Hold=function(point,farmIdle,force)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
         local human=character and character:FindFirstChildOfClass("Humanoid")
@@ -533,7 +533,7 @@ end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeContr
         if movementRoot and movementRoot~=root then stopMovement(nil,true)end
         ensureMovementController(character,root,human,point)
         positionAlign.Enabled=true;orientationAlign.Enabled=true;positionAlign.Position=point
-        if (root.Position-point).Magnitude>1.25 then
+        if force or (root.Position-point).Magnitude>1.25 then
             if farmIdle and state.AutoFarm then tweenFarmRoot(root,point)else pivotRoot(root,point)end
             state.TeleportsSent+=1
         end

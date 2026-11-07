@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.host-only-auto-retry-v3.0.6"
-local VERSION="3.0.6"
+local BUILD="2026-11-07.darkness-inner-light-v3.0.7"
+local VERSION="3.0.7"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.host-only-auto-retry-v3.0.6"
-local VERSION="3.0.6"
+local BUILD="2026-11-07.darkness-inner-light-v3.0.7"
+local VERSION="3.0.7"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -3372,9 +3372,9 @@ return function(ctx)
         if api.Active then ctx.Release()end
         api.Active=false;state.Dodging=false;state.BlackoutTarget=nil
     end
-    local function hold(point,kind,now)
+    local function hold(point,kind,now,force)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
-        api.Active=true;state.Dodging=true;ctx.Hold(point)
+        api.Active=true;state.Dodging=true;ctx.Hold(point,nil,force)
         if now-timing.LastMove>.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2)then
             timing.LastMove=now;api.Moves+=1
             if event then event.Moves=(event.Moves or 0)+1 end
@@ -3412,19 +3412,20 @@ return function(ctx)
     local function whiteLightTarget(root,humanoid,now)
         local orb=workspace:FindFirstChild("DarknerOrb");local part=orb and orb:FindFirstChild("Part")
         local light=part and part:FindFirstChildOfClass("PointLight")
-        if not light then return nil,Vector3.new(14,73,2) end
+        if not light or not light.Enabled then return nil,root.Position end
         local center=part.Position
         local duration=tonumber(orb:GetAttribute("LightDuration"))or light.Range
-        local radius=light.Enabled and math.max(0,math.min(duration,light.Range))or 0
-        local clearance=math.max(0,radius-3)
-        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center end
+        local radius=math.min(duration,light.Range)
+        if radius<=0 then return nil,root.Position end
+        local clearance=math.max(0,math.min(radius*.5,radius-3))
+        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center,center,radius end
         local function attackPoint(mob)
             local data=ctx.MobData(mob)
             if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
                 or data.Entity:FindFirstChild("Immortal") then return end
             local point=data.Root.Position
             local distance=(point-center).Magnitude
-            if distance>radius+6 then return end
+            if distance>=radius then return end
             local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
             local offset=elevated-center
             if offset.Magnitude>clearance then elevated=center+offset.Unit*clearance end
@@ -3433,7 +3434,7 @@ return function(ctx)
         local previous=state.BlackoutTarget
         local point=previous and attackPoint(previous)
         if point then return previous,point,center,radius end
-        if now<timing.ScanAt then return nil,center end
+        if now<timing.ScanAt then return nil,center,center,radius end
         timing.ScanAt=now+.12
         local best,bestPoint,distance
         for mob in pairs(ctx.Mobs)do
@@ -3456,7 +3457,8 @@ return function(ctx)
         observe(kind,health,now)
         local seen=0;for _ in pairs(api.Seen)do seen+=1 end
         local usable=root and humanoid and health and health.Value>0 and not state.TravelBusy
-        if usable and ctx.AeganatosDodge then
+        local blackout=kind=="Blackout" and state.AutoDodge
+        if usable and not blackout and ctx.AeganatosDodge then
             local point,reason=ctx.AeganatosDodge.Plan(root.Position,state.AutoOffsetDestination or root.Position)
             if point then
                 if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Aeganatos dodge")end
@@ -3465,7 +3467,7 @@ return function(ctx)
         end
         local target=state.FollowTarget;local targetRoot=target and target:FindFirstChild("HumanoidRootPart")
         local desired=root and targetRoot and Vector3.new(targetRoot.Position.X,root.Position.Y,targetRoot.Position.Z)or root and root.Position
-        if usable and ctx.AtheonDodge then
+        if usable and not blackout and ctx.AtheonDodge then
             local point,reason=ctx.AtheonDodge.Plan(root.Position,desired,api.FloorY)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
@@ -3474,13 +3476,15 @@ return function(ctx)
             local mob,point,center,radius
             if kind=="Blackout"then mob,point,center,radius=whiteLightTarget(root,humanoid,now)
             else point=Vector3.new(10,-19,-5)end
-            state.BlackoutTarget=mob
-            if hold(point,kind.." shelter",now)then
-                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<=radius then
+            local outsideLight=center and (root.Position-center).Magnitude>=radius
+            if hold(point,kind.." shelter",now,outsideLight)then
+                state.BlackoutTarget=mob
+                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<radius then
                     state.FollowTarget=mob;state.Dodging=false
                 end
                 ctx.Status(kind..(mob and " · attacking inside white light"or " · sheltering"));return true
             end
+            if blackout then state.BlackoutTarget=nil;state.Dodging=true;return true end
         end
         state.BlackoutTarget=nil
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
@@ -3508,7 +3512,7 @@ end
 
 -- END BUNDLED WAVE DODGE
 end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,Mobs=trackedMobs,MobData=getMobData,
-    Hold=function(point,farmIdle)
+    Hold=function(point,farmIdle,force)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
         local human=character and character:FindFirstChildOfClass("Humanoid")
@@ -3516,7 +3520,7 @@ end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeContr
         if movementRoot and movementRoot~=root then stopMovement(nil,true)end
         ensureMovementController(character,root,human,point)
         positionAlign.Enabled=true;orientationAlign.Enabled=true;positionAlign.Position=point
-        if (root.Position-point).Magnitude>1.25 then
+        if force or (root.Position-point).Magnitude>1.25 then
             if farmIdle and state.AutoFarm then tweenFarmRoot(root,point)else pivotRoot(root,point)end
             state.TeleportsSent+=1
         end
