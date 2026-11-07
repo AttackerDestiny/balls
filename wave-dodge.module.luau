@@ -4,9 +4,9 @@ return function(ctx)
     local player=game.Players.LocalPlayer
     local api={Active=false,Seen={},History={},Moves=0}
     local eventNames={"Lava","Tempest","Blackout","Horde","Rift","Wisp","Meme","Bob"}
-    local flat=Vector3.new(1,0,1)
     local closed=false
-    local timing={UpdateAt=0,ScanAt=0,LastMove=0,EvadeUntil=0}
+    local timing={UpdateAt=0,LastMove=0}
+    local darknessShelter=Vector3.new(12,37,3)
     local terrain={Environment=nil,Floor=nil,Refuge=nil,RefugeUntil=0}
     local event,lastEvent,lastHealth
     local path="SB2Codex/wave-tests_"..player.UserId..".json"
@@ -29,7 +29,6 @@ return function(ctx)
             writefile(path,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
         end)
     end
-    local function horizontal(a,b)local delta=(a-b)*flat;return delta:Dot(delta)end
     local function environment()return tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")end
     local function detect()
         local text=(tostring(workspace:GetAttribute("WaveDefenseArea")or "").." "..environment().." "..tostring(workspace:GetAttribute("SpecialWave")or "")):lower()
@@ -110,7 +109,7 @@ return function(ctx)
     function api.IsHazardPart(part)return ctx.BossDodge and ctx.BossDodge.IsHazardPart(part)end
     local function release()
         if api.Active then ctx.Release()end
-        api.Active=false;state.Dodging=false;state.BlackoutTarget=nil
+        api.Active=false;state.Dodging=false;state.BlackoutHolding=false
     end
     local function hold(point,kind,now,force)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
@@ -149,42 +148,6 @@ return function(ctx)
         if kind=="Horde"or kind=="Rift"or kind=="Wisp"or kind=="Meme"or kind=="Bob"then return true end
         return kind~="Lava"and kind~="Tempest"and kind~="Blackout"and (tonumber(workspace:GetAttribute("MobsLeft"))or 0)>0
     end
-    local function whiteLightTarget(root,humanoid,now)
-        local orb=workspace:FindFirstChild("DarknerOrb");local part=orb and orb:FindFirstChild("Part")
-        local light=part and part:FindFirstChildOfClass("PointLight")
-        if not light or not light.Enabled then return nil,root.Position end
-        local center=part.Position
-        local duration=tonumber(orb:GetAttribute("LightDuration"))or light.Range
-        local radius=math.min(duration,light.Range)
-        if radius<=0 then return nil,root.Position end
-        local clearance=math.max(0,math.min(radius*.5,radius-3))
-        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center,center,radius end
-        local function attackPoint(mob)
-            local data=ctx.MobData(mob)
-            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
-                or data.Entity:FindFirstChild("Immortal") then return end
-            local point=data.Root.Position
-            local distance=(point-center).Magnitude
-            if distance>=radius then return end
-            local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
-            local offset=elevated-center
-            if offset.Magnitude>clearance then elevated=center+offset.Unit*clearance end
-            return elevated,distance
-        end
-        local previous=state.BlackoutTarget
-        local point=previous and attackPoint(previous)
-        if point then return previous,point,center,radius end
-        if now<timing.ScanAt then return nil,center,center,radius end
-        timing.ScanAt=now+.12
-        local best,bestPoint,distance
-        for mob in pairs(ctx.Mobs)do
-            local candidate,gap=attackPoint(mob)
-            if candidate and (not distance or gap<distance)then
-                best,bestPoint,distance=mob,candidate,gap
-            end
-        end
-        return best,bestPoint or center,center,radius
-    end
     function api.Update()
         if closed or state.StopEverything then return false end
         local now=os.clock();if now<timing.UpdateAt then return api.Active end
@@ -212,21 +175,18 @@ return function(ctx)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
         if not state.AutoDodge or not usable then release();ctx.Status((state.AutoDodge and "Ready"or "Off").." · events "..seen.."/8");return false end
-        if kind and (kind=="Blackout"or not needsKills(kind))then
-            local mob,point,center,radius
-            if kind=="Blackout"then mob,point,center,radius=whiteLightTarget(root,humanoid,now)
-            else point=Vector3.new(10,-19,-5)end
-            local outsideLight=center and (root.Position-center).Magnitude>=radius
-            if hold(point,kind.." shelter",now,outsideLight)then
-                state.BlackoutTarget=mob
-                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<radius then
-                    state.FollowTarget=mob;state.Dodging=false
-                end
-                ctx.Status(kind..(mob and " · attacking inside white light"or " · sheltering"));return true
-            end
-            if blackout then state.BlackoutTarget=nil;state.Dodging=true;return true end
+        if blackout then
+            local entering=not state.BlackoutHolding
+            if entering then state.FollowTarget=nil end
+            state.BlackoutHolding=true
+            local held=hold(darknessShelter,"Blackout shelter",now,entering)
+            state.Dodging=not held or (root.Position-darknessShelter).Magnitude>1.25
+            ctx.Status("Blackout · holding fixed position")
+            return true
         end
-        state.BlackoutTarget=nil
+        if kind and not needsKills(kind)and hold(Vector3.new(10,-19,-5),kind.." shelter",now)then
+            ctx.Status(kind.." · sheltering");return true
+        end
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
             local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
             if point then hold(point,"Boss evade: "..tostring(reason),now);ctx.Status("Boss attack · outside danger zone");return true end

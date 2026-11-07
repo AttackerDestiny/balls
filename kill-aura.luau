@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.delete-between-room-v3.0.10"
-local VERSION="3.0.10"
+local BUILD="2026-11-07.fixed-darkness-shelter-v3.0.11"
+local VERSION="3.0.11"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2021,7 +2021,7 @@ return function(state)
         {"Floor travel",function()return state.AutomationTeleporting end},
         {"Trade",function()return state.AutoTradeBusy end},
         {"Arena travel",function()return state.TravelBusy or state.MultiSpotOwnsTravel end},
-        {"Dodge",function()return state.Dodging end},
+        {"Dodge",function()return state.Dodging or state.BlackoutHolding end},
         {"Recovery",function(now)return state.Recovering or now<(state.FarmPauseUntil or 0)end},
         {"Farm",function()return state.AutoFarm end},
     }
@@ -2492,20 +2492,18 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
-    local blackout=state.BlackoutTarget
-    if blackout and mob~=blackout then return nil end
     local data=getMobData(mob)
     if not data then return nil end
     if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
-    if not blackout then
+    if not state.BlackoutHolding then
         local rank=targetPriority.Rank(mob)
         if state.AutoFarm and state.BossOnly and rank>2 then return nil end
         if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
         if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
         local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
         if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-        if os.clock()<(data.SkipUntil or 0)then return nil end
     end
+    if os.clock()<(data.SkipUntil or 0)then return nil end
     return data.Root
 end
 function state.IsFarmEnemyAlive()
@@ -3264,9 +3262,9 @@ return function(ctx)
     local player=game.Players.LocalPlayer
     local api={Active=false,Seen={},History={},Moves=0}
     local eventNames={"Lava","Tempest","Blackout","Horde","Rift","Wisp","Meme","Bob"}
-    local flat=Vector3.new(1,0,1)
     local closed=false
-    local timing={UpdateAt=0,ScanAt=0,LastMove=0,EvadeUntil=0}
+    local timing={UpdateAt=0,LastMove=0}
+    local darknessShelter=Vector3.new(12,37,3)
     local terrain={Environment=nil,Floor=nil,Refuge=nil,RefugeUntil=0}
     local event,lastEvent,lastHealth
     local path="SB2Codex/wave-tests_"..player.UserId..".json"
@@ -3289,7 +3287,6 @@ return function(ctx)
             writefile(path,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
         end)
     end
-    local function horizontal(a,b)local delta=(a-b)*flat;return delta:Dot(delta)end
     local function environment()return tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")end
     local function detect()
         local text=(tostring(workspace:GetAttribute("WaveDefenseArea")or "").." "..environment().." "..tostring(workspace:GetAttribute("SpecialWave")or "")):lower()
@@ -3370,7 +3367,7 @@ return function(ctx)
     function api.IsHazardPart(part)return ctx.BossDodge and ctx.BossDodge.IsHazardPart(part)end
     local function release()
         if api.Active then ctx.Release()end
-        api.Active=false;state.Dodging=false;state.BlackoutTarget=nil
+        api.Active=false;state.Dodging=false;state.BlackoutHolding=false
     end
     local function hold(point,kind,now,force)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
@@ -3409,42 +3406,6 @@ return function(ctx)
         if kind=="Horde"or kind=="Rift"or kind=="Wisp"or kind=="Meme"or kind=="Bob"then return true end
         return kind~="Lava"and kind~="Tempest"and kind~="Blackout"and (tonumber(workspace:GetAttribute("MobsLeft"))or 0)>0
     end
-    local function whiteLightTarget(root,humanoid,now)
-        local orb=workspace:FindFirstChild("DarknerOrb");local part=orb and orb:FindFirstChild("Part")
-        local light=part and part:FindFirstChildOfClass("PointLight")
-        if not light or not light.Enabled then return nil,root.Position end
-        local center=part.Position
-        local duration=tonumber(orb:GetAttribute("LightDuration"))or light.Range
-        local radius=math.min(duration,light.Range)
-        if radius<=0 then return nil,root.Position end
-        local clearance=math.max(0,math.min(radius*.5,radius-3))
-        if not state.AutoFarm or not(state.Enabled or state.SkillAura)or not ctx.Mobs then return nil,center,center,radius end
-        local function attackPoint(mob)
-            local data=ctx.MobData(mob)
-            if not data or data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)
-                or data.Entity:FindFirstChild("Immortal") then return end
-            local point=data.Root.Position
-            local distance=(point-center).Magnitude
-            if distance>=radius then return end
-            local elevated=point+Vector3.new(0,(data.BodyAbove or data.Root.Size.Y/2)+humanoid.HipHeight+root.Size.Y/2+1,0)
-            local offset=elevated-center
-            if offset.Magnitude>clearance then elevated=center+offset.Unit*clearance end
-            return elevated,distance
-        end
-        local previous=state.BlackoutTarget
-        local point=previous and attackPoint(previous)
-        if point then return previous,point,center,radius end
-        if now<timing.ScanAt then return nil,center,center,radius end
-        timing.ScanAt=now+.12
-        local best,bestPoint,distance
-        for mob in pairs(ctx.Mobs)do
-            local candidate,gap=attackPoint(mob)
-            if candidate and (not distance or gap<distance)then
-                best,bestPoint,distance=mob,candidate,gap
-            end
-        end
-        return best,bestPoint or center,center,radius
-    end
     function api.Update()
         if closed or state.StopEverything then return false end
         local now=os.clock();if now<timing.UpdateAt then return api.Active end
@@ -3472,21 +3433,18 @@ return function(ctx)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
         end
         if not state.AutoDodge or not usable then release();ctx.Status((state.AutoDodge and "Ready"or "Off").." · events "..seen.."/8");return false end
-        if kind and (kind=="Blackout"or not needsKills(kind))then
-            local mob,point,center,radius
-            if kind=="Blackout"then mob,point,center,radius=whiteLightTarget(root,humanoid,now)
-            else point=Vector3.new(10,-19,-5)end
-            local outsideLight=center and (root.Position-center).Magnitude>=radius
-            if hold(point,kind.." shelter",now,outsideLight)then
-                state.BlackoutTarget=mob
-                if mob and (root.Position-point).Magnitude<=1.25 and (root.Position-center).Magnitude<radius then
-                    state.FollowTarget=mob;state.Dodging=false
-                end
-                ctx.Status(kind..(mob and " · attacking inside white light"or " · sheltering"));return true
-            end
-            if blackout then state.BlackoutTarget=nil;state.Dodging=true;return true end
+        if blackout then
+            local entering=not state.BlackoutHolding
+            if entering then state.FollowTarget=nil end
+            state.BlackoutHolding=true
+            local held=hold(darknessShelter,"Blackout shelter",now,entering)
+            state.Dodging=not held or (root.Position-darknessShelter).Magnitude>1.25
+            ctx.Status("Blackout · holding fixed position")
+            return true
         end
-        state.BlackoutTarget=nil
+        if kind and not needsKills(kind)and hold(Vector3.new(10,-19,-5),kind.." shelter",now)then
+            ctx.Status(kind.." · sheltering");return true
+        end
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
             local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
             if point then hold(point,"Boss evade: "..tostring(reason),now);ctx.Status("Boss attack · outside danger zone");return true end
@@ -3511,7 +3469,7 @@ return function(ctx)
 end
 
 -- END BUNDLED WAVE DODGE
-end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,Mobs=trackedMobs,MobData=getMobData,
+end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,
     Hold=function(point,farmIdle,force)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
@@ -4616,7 +4574,6 @@ local function updateMovement(now)
     if now<nextMovementUpdate then return end
     nextMovementUpdate=now+.08
     if not state.MovementOwnership.CanFarm(now)then return end
-    if state.BlackoutTarget then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return
@@ -4803,7 +4760,7 @@ local swingThread
 local swingTrack
 local swingClock={Due=0,Index=0}
 local function swingAllowed()
-    if state.BetweenPaceHolding then return false end
+    if state.BetweenPaceHolding or state.BlackoutHolding then return false end
     return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations and not state.SkillCastRunning
 end
 local function stopSword(force)
@@ -5511,6 +5468,7 @@ normalScheduler.Bind({GetData=function(mob)
     Damage=function(mob)
         if state.BetweenPaceHolding then return false end
         local data=getMobData(mob)
+        if state.BlackoutHolding and (mob~=state.SkillRegistrationTarget or state.ReadOwnDamage(data.Health)~=nil)then return false end
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"Normal")then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation()end
         local sample=pendingDamage[mob]
@@ -5561,6 +5519,7 @@ local function scan()
     if state.BetweenPaceHolding then return "Between · waiting for completion pace" end
     local now=os.clock()
     if state.Dodging or now<(state.FarmPauseUntil or 0)then finishAttackBurst("Dodging or repositioning");return end
+    if state.BlackoutHolding and not state.SkillRegistrationTarget then finishAttackBurst("Blackout · skill damage only");return end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local entity=character and character:FindFirstChild("Entity")

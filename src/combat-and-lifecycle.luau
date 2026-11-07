@@ -2,7 +2,7 @@ local swingThread
 local swingTrack
 local swingClock={Due=0,Index=0}
 local function swingAllowed()
-    if state.BetweenPaceHolding then return false end
+    if state.BetweenPaceHolding or state.BlackoutHolding then return false end
     return state.Running and state.Enabled and state.AutoSwing and not state.StopEverything and not state.RemovingAnimations and not state.SkillCastRunning
 end
 local function stopSword(force)
@@ -442,6 +442,7 @@ normalScheduler.Bind({GetData=function(mob)
     Damage=function(mob)
         if state.BetweenPaceHolding then return false end
         local data=getMobData(mob)
+        if state.BlackoutHolding and (mob~=state.SkillRegistrationTarget or state.ReadOwnDamage(data.Health)~=nil)then return false end
         if state.CreditController and not state.CreditController.AllowAction(mob,data,"Normal")then return false end
         if state.FinishSkillObservation then state.FinishSkillObservation()end
         local sample=pendingDamage[mob]
@@ -492,6 +493,7 @@ local function scan()
     if state.BetweenPaceHolding then return "Between · waiting for completion pace" end
     local now=os.clock()
     if state.Dodging or now<(state.FarmPauseUntil or 0)then finishAttackBurst("Dodging or repositioning");return end
+    if state.BlackoutHolding and not state.SkillRegistrationTarget then finishAttackBurst("Blackout · skill damage only");return end
     local character=player.Character
     local root=character and character:FindFirstChild("HumanoidRootPart")
     local entity=character and character:FindFirstChild("Entity")

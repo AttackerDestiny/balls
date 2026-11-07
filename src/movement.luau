@@ -310,20 +310,18 @@ function state.IsSelectedFarmMob(mob,data)
 end
 local function validMob(mob, mobs)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
-    local blackout=state.BlackoutTarget
-    if blackout and mob~=blackout then return nil end
     local data=getMobData(mob)
     if not data then return nil end
     if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
-    if not blackout then
+    if not state.BlackoutHolding then
         local rank=targetPriority.Rank(mob)
         if state.AutoFarm and state.BossOnly and rank>2 then return nil end
         if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
         if state.AutoFarm and state.MultiSpot and not state.IsSelectedFarmMob(mob,data)then return nil end
         local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
         if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
-        if os.clock()<(data.SkipUntil or 0)then return nil end
     end
+    if os.clock()<(data.SkipUntil or 0)then return nil end
     return data.Root
 end
 function state.IsFarmEnemyAlive()
@@ -524,7 +522,7 @@ end
 local waveDodge=(function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
-end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,Mobs=trackedMobs,MobData=getMobData,
+end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,
     Hold=function(point,farmIdle,force)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")
@@ -1032,7 +1030,6 @@ local function updateMovement(now)
     if now<nextMovementUpdate then return end
     nextMovementUpdate=now+.08
     if not state.MovementOwnership.CanFarm(now)then return end
-    if state.BlackoutTarget then return end
     if not state.AutoFarm then
         if state.Moving or state.TravelHold or (state.ArenaFloat and state.ArenaFloat.Root)then stopMovement("Manual controls restored")end
         return

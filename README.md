@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.10**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.11**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -209,7 +209,7 @@ The Between automatically uses free revives while the server reports lives remai
 
 **Completion Time** has a two-handle range for each difficulty, up to 100 minutes. Set both ends to zero to turn pacing off. Feather picks a time down to the second inside the range, shared by accounts using the same range in the same run. It spreads kills across the 100 waves and pauses automated attacks when ahead. Actual completion depends on wave timers and available damage.
 
-**Auto Dodge** holds at `(10, -19, -5)` during other survival special waves. During Blackout, it stays within the inner half of the gate's shrinking light. With Auto Farm and an attack aura active, it targets enemies only once they enter the light to replenish souls. Default ON.
+**Auto Dodge** holds at `(10, -19, -5)` during other survival special waves. During Blackout it holds at `(12, 37, 3)`. Skill Aura, when enabled, hits enemies that come into range. Auto Farm movement and ordinary Kill Aura hits pause until Blackout ends. Default ON.
 
 Extended camera zoom is applied while the runtime owns it.
 

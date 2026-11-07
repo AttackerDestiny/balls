@@ -9,7 +9,7 @@ return function(state)
         {"Floor travel",function()return state.AutomationTeleporting end},
         {"Trade",function()return state.AutoTradeBusy end},
         {"Arena travel",function()return state.TravelBusy or state.MultiSpotOwnsTravel end},
-        {"Dodge",function()return state.Dodging end},
+        {"Dodge",function()return state.Dodging or state.BlackoutHolding end},
         {"Recovery",function(now)return state.Recovering or now<(state.FarmPauseUntil or 0)end},
         {"Farm",function()return state.AutoFarm end},
     }
