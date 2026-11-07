@@ -298,9 +298,6 @@ return function(ctx)
                 Value=state.BetweenPace and state.BetweenPace[mode] or {Min=0,Max=0},
                 Write=function(minimum,maximum)action("SetBetweenPace",mode,minimum,maximum)end})
         end
-        paragraph(wavesTab,"BetweenPaceStatus","Pace Status",function()
-            return state.BetweenPaceStatus or "Pacing applies inside The Between"
-        end)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]

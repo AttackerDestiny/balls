@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.waves-defense-rooms-v3.0.3"
-local VERSION="3.0.3"
+local BUILD="2026-11-07.hide-pace-status-v3.0.4"
+local VERSION="3.0.4"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -27728,9 +27728,6 @@ return function(ctx)
                 Value=state.BetweenPace and state.BetweenPace[mode] or {Min=0,Max=0},
                 Write=function(minimum,maximum)action("SetBetweenPace",mode,minimum,maximum)end})
         end
-        paragraph(wavesTab,"BetweenPaceStatus","Pace Status",function()
-            return state.BetweenPaceStatus or "Pacing applies inside The Between"
-        end)
         local function room(index)
             local key="BetweenRoom"..index
             local entry=state.BetweenRooms[index]
