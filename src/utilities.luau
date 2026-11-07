@@ -496,6 +496,8 @@ local function installBetweenAutomation()
         if not id then return nil end
         local parties=ReplicatedStorage:FindFirstChild("LobbyParties")
         local party=parties and parties:FindFirstChild(tostring(id))
+        -- A finished run can leave PartyID set after the native party has gone.
+        if localFloor and not party then return nil end
         local view={Id=tostring(id),Instance=party}
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
@@ -514,16 +516,14 @@ local function installBetweenAutomation()
         local found=host and roomSnapshot(host)
         if found and found.Host==host.UserId and found.PlaceId==destination then return found end
     end
-    local priorRoom=localFloor and roomSnapshot() or nil
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
-        PriorRoomId=priorRoom and priorRoom.Id,
         Active=function()
             if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
             if not localFloor then return true end
             if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
                 local hostRoom=findHostRoom(assignment.Host)
-                return hostRoom~=nil and (not priorRoom or hostRoom.Id~=priorRoom.Id)
+                return hostRoom~=nil
                     and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
             end
             return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil

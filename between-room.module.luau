@@ -7,11 +7,10 @@ return function(ctx)
     local joinRoom,joinStatus,joinAttempts,nextJoin
     local starting=false
     local revision=0
-    local leavingUntil
     local function stop(message)phase="Stopped";ctx.Status(message)end
     function api.Reset()
         revision+=1
-        phase="Setup";waiting=nil;attempts=0;leavingUntil=nil
+        phase="Setup";waiting=nil;attempts=0
         joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
     end
     local function dispatch(action,field,room,now)
@@ -24,12 +23,6 @@ return function(ctx)
     function api.Update(now)
         if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
-        if ctx.PriorRoomId and room and room.Id==ctx.PriorRoomId then
-            if not leavingUntil then
-                leavingUntil=now+5;ctx.Send("LeaveParty")
-            elseif now>=leavingUntil then stop("Previous party did not close. Toggle Start to retry.")end
-            return
-        end
         local assignment=ctx.Assignment and ctx.Assignment()
         local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then

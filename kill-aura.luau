@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.rubricatus-dodge-v3.0.13"
-local VERSION="3.0.13"
+local BUILD="2026-11-07.between-in-place-retry-v3.0.14"
+local VERSION="3.0.14"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -9894,11 +9894,10 @@ return function(ctx)
     local joinRoom,joinStatus,joinAttempts,nextJoin
     local starting=false
     local revision=0
-    local leavingUntil
     local function stop(message)phase="Stopped";ctx.Status(message)end
     function api.Reset()
         revision+=1
-        phase="Setup";waiting=nil;attempts=0;leavingUntil=nil
+        phase="Setup";waiting=nil;attempts=0
         joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
     end
     local function dispatch(action,field,room,now)
@@ -9911,12 +9910,6 @@ return function(ctx)
     function api.Update(now)
         if phase~="Setup"or starting or not ctx.Active()then return end
         local room=ctx.Read()
-        if ctx.PriorRoomId and room and room.Id==ctx.PriorRoomId then
-            if not leavingUntil then
-                leavingUntil=now+5;ctx.Send("LeaveParty")
-            elseif now>=leavingUntil then stop("Previous party did not close. Toggle Start to retry.")end
-            return
-        end
         local assignment=ctx.Assignment and ctx.Assignment()
         local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then
@@ -10263,6 +10256,8 @@ end
         if not id then return nil end
         local parties=ReplicatedStorage:FindFirstChild("LobbyParties")
         local party=parties and parties:FindFirstChild(tostring(id))
+        -- A finished run can leave PartyID set after the native party has gone.
+        if localFloor and not party then return nil end
         local view={Id=tostring(id),Instance=party}
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
@@ -10281,16 +10276,14 @@ end
         local found=host and roomSnapshot(host)
         if found and found.Host==host.UserId and found.PlaceId==destination then return found end
     end
-    local priorRoom=localFloor and roomSnapshot() or nil
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
-        PriorRoomId=priorRoom and priorRoom.Id,
         Active=function()
             if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
             if not localFloor then return true end
             if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
                 local hostRoom=findHostRoom(assignment.Host)
-                return hostRoom~=nil and (not priorRoom or hostRoom.Id~=priorRoom.Id)
+                return hostRoom~=nil
                     and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
             end
             return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil

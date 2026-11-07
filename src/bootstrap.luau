@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.rubricatus-dodge-v3.0.13"
-local VERSION="3.0.13"
+local BUILD="2026-11-07.between-in-place-retry-v3.0.14"
+local VERSION="3.0.14"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

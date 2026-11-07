@@ -1,4 +1,4 @@
-return function(source)
+return function(source,snapshotSource)
     local make=assert(loadstring(source))()
     local room={Id=1,Host=10,PlaceId=20,Status="Private",Mode="Normal"}
     local requests={}
@@ -17,7 +17,10 @@ return function(source)
         FindHostRoom=function()return hostRoom end,
         Selection=function()return "Friends","Hard" end,
         Status=function()end,
-        Send=function(action,id)requests[#requests+1]=id and action..":"..id or action end,
+        Send=function(action,id)
+            assert(action~="LeaveParty" and action~="Return","Retry cannot send a lobby exit request")
+            requests[#requests+1]=id and action..":"..id or action
+        end,
         Spawn=function(fn)assert(not worker);worker=fn end,
         Start=function()starts+=1;return accepted end,
     }
@@ -66,27 +69,44 @@ return function(source)
     controller.Update(9.7)
     assert(#requests==3 and requests[3]=="JoinParty:3","Only request the configured host room and pace retries")
     assignment={Role="Host",Alts={"First","Second"}}
-    ctx.PriorRoomId="old"
     room={Id="old",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
     controller=make(ctx)
     controller.Update(10)
+    assert(#requests==3 and not worker,"Keep the retained party while waiting for its alts")
+    missing={}
     controller.Update(10.35)
-    assert(#requests==4 and requests[4]=="LeaveParty" and not worker,"Wait for the old party to close")
+    run=worker;worker=nil;run()
+    assert(starts==3,"The retained party can restart in place")
+
+    controller=make(ctx)
+    missing={"Second"}
     room=nil
     controller.Update(11)
-    assert(requests[5]=="CreateParty")
+    assert(requests[4]=="CreateParty")
     room={Id="new",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
     controller.Update(12)
     assert(not worker,"Wait for the roster again in the recreated room")
     missing={}
     controller.Update(13)
     run=worker;worker=nil;run()
-    assert(starts==3,"Start the fresh room once its roster is present")
+    assert(starts==4,"Start the fresh room once its roster is present")
     controller.Reset()
     room.Id="another"
     controller.Update(14)
     controller.Reset()
     run=worker;worker=nil;run()
-    assert(starts==3,"Removing or changing an assignment cancels a start waiting to dispatch")
+    assert(starts==4,"Removing or changing an assignment cancels a start waiting to dispatch")
+
+    local nativeParty
+    local snapshot=assert(loadstring(snapshotSource.."\nreturn roomSnapshot"))
+    local env={localFloor=true,player={GetAttribute=function()return 23 end},
+        ReplicatedStorage={FindFirstChild=function()return {FindFirstChild=function()return nativeParty end}end}}
+    setfenv(snapshot,setmetatable(env,{__index=getfenv()}))
+    local read=snapshot()
+    assert(not read(),"A stale PartyID cannot prevent room creation inside The Between")
+    nativeParty={GetAttribute=function(_,name)return name=="Host"and 10 or nil end}
+    assert(read().Host==10 and read().Id=="23","Recognize a real retained party")
+    nativeParty=nil;env.localFloor=false
+    assert(read().Id=="23","Keep waiting for the replicated party details in the lobby")
     print("PASS The Between starts once after both room settings are confirmed")
 end
