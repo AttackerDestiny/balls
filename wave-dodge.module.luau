@@ -113,7 +113,11 @@ return function(ctx)
     end
     local function hold(point,kind,now,force)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
-        api.Active=true;state.Dodging=true;ctx.Hold(point,nil,force)
+        api.Active=true;state.Dodging=true
+        if kind~="Blackout shelter"and (state.SkillCastRunning or state.ActiveSkillCast)and state.CancelSkillAura then
+            state.CancelSkillAura(kind)
+        end
+        ctx.Hold(point,nil,force)
         if now-timing.LastMove>.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2)then
             timing.LastMove=now;api.Moves+=1
             if event then event.Moves=(event.Moves or 0)+1 end
@@ -164,12 +168,14 @@ return function(ctx)
         if usable and not blackout and ctx.AeganatosDodge then
             local point,reason=ctx.AeganatosDodge.Plan(root.Position,state.AutoOffsetDestination or root.Position)
             if point then
-                if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Aeganatos dodge")end
                 hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true
             end
         end
         local target=state.FollowTarget;local targetRoot=target and target:FindFirstChild("HumanoidRootPart")
         local desired=root and targetRoot and Vector3.new(targetRoot.Position.X,root.Position.Y,targetRoot.Position.Z)or root and root.Position
+        if state.AutoFarm and targetRoot and state.AutoOffsetTarget==target and state.AutoOffsetDestination then
+            desired=state.AutoOffsetDestination
+        end
         if usable and not blackout and ctx.AtheonDodge then
             local point,reason=ctx.AtheonDodge.Plan(root.Position,desired,api.FloorY)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
@@ -190,7 +196,14 @@ return function(ctx)
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
             local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
             if point then hold(point,"Boss evade: "..tostring(reason),now);ctx.Status("Boss attack · outside danger zone");return true end
-            if ctx.BossDodge.Blocked then local refuge=api.BlackoutPoint(root.Position);if refuge then hold(refuge,"Boss evade below map bottom",now);return true end end
+            if ctx.BossDodge.Blocked then
+                if not ctx.BossDodge.RequiresCover then
+                    local refuge=api.BlackoutPoint(root.Position)
+                    if refuge then hold(refuge,"Boss evade below map bottom",now);return true end
+                end
+                hold(root.Position,"Boss evade waiting for safe route",now)
+                ctx.Status(ctx.BossDodge.LastReason or "Boss attack · waiting for a safe route");return true
+            end
         end
         release();ctx.Status((kind and kind.." · watching"or "Ready").." · events "..seen.."/8");return false
     end

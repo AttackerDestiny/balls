@@ -11,15 +11,17 @@ return function(ctx)
     local tags={"AegorSlam Rock","AegorSlam Slam","AegorSpike Spike","RiftDetonation Rift"}
     local final=ctx.FinalWave
     local wave=ctx.RubricatusWave or {}
+    local cover=ctx.RubricatusCover
+    local finalActive=false
     local laserColor=final and Color3.fromRGB(255,18,38)
     local function bind(signal,fn)bindings[#bindings+1]=signal:Connect(fn)end
-    local function register(object,kind,name,radius)
+    local function register(object,kind,name,radius,finalOnly)
         if closed then return end
         local entry=warnings[object]
         if not entry then
             local count=0;for _ in pairs(warnings)do count+=1 end
             if count>=48 then return end
-            entry={Kind=kind,Started=os.clock(),Name=name or object.Name};warnings[object]=entry
+            entry={Kind=kind,Started=os.clock(),Name=name or object.Name,FinalOnly=finalOnly};warnings[object]=entry
         end
         entry.Radius=radius or entry.Radius;api.HasHazards=true
     end
@@ -43,15 +45,17 @@ return function(ctx)
         if final and (group=="RedLightningDiscEffects" or group=="RedLightningLaserEffects" or group=="RedLightningEffects"
             or parent==ctx.Workspace and name=="Part")and final()then
             if group=="RedLightningDiscEffects" and name:match("^LightningDisc%d+$")and object:IsA("Model")then
-                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6);return
+                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6,true);return
             elseif group=="RedLightningLaserEffects" then
-                if name=="RedBeam" and object:IsA("BasePart")then register(object,"Laser","Red Lightning Laser",ctx.LaserRadius or 5)end
+                if name=="RedBeam"and object:IsA("BasePart")or name=="LockedAimWarning"and (object:IsA("BasePart")or object:IsA("Model"))then
+                    register(object,name=="RedBeam"and "Laser"or "Beam","Red Lightning Laser",ctx.LaserRadius or 5,true)
+                end
                 if name=="RedBeam" or name=="LockedAimWarning"then return end
             elseif group=="RedLightningEffects" and name=="LightningWaveAnchor" and object:IsA("BasePart")then
-                register(object,"Wave","Red Lightning Wave");return
+                register(object,"Wave","Red Lightning Wave",nil,true);return
             elseif parent==ctx.Workspace and name=="Part" and object:IsA("BasePart")and object.Color==laserColor then
                 task.defer(function()
-                    if object.Parent and object:FindFirstChild("Beam")then register(object,"Box","Rubricatus Lasers")end
+                    if not closed and object.Parent and final()and object:FindFirstChild("Beam")then register(object,"Box","Rubricatus Lasers",nil,true)end
                 end)
             end
         end
@@ -64,13 +68,13 @@ return function(ctx)
         if final and final()and phase=="Initial"and name=="RedLightningWave"and typeof(target)=="Vector3"then
             local origin=ctx.RubricatusOrigin and ctx.RubricatusOrigin()
             if not origin then return end
-            origin+=Vector3.new(0,wave.OriginHeight or 2.5,0)
+            origin+=Vector3.new(0,wave.OriginHeight or 1.5,0)
             local delta=target-origin
             delta=Vector3.new(delta.X,0,delta.Z)
             if delta.Magnitude<.01 then return end
             local direction=delta.Unit
             cone={Kind="Cone",Name="Red Lightning Wave",Origin=origin+direction*(wave.MuzzleOffset or 2.5),
-                Direction=direction,Until=os.clock()+(wave.ChargeTime or .9)+math.clamp(tonumber(duration)or 1.7,.65,10)+.35}
+                Direction=direction,Until=os.clock()+(wave.ChargeTime or .35)+(wave.ExpandTime or .45)+(wave.FireTime or 0)+(wave.FadeTime or .3)+.2}
         end
     end)end
     bind(ctx.Workspace.DescendantAdded,inspect)
@@ -83,7 +87,12 @@ return function(ctx)
     if final then
         for _,tag in ipairs({"RubricatusAttack Attack","RubricatusSlam Slam"})do
             local function tagged(object)
-                if final()and object.Name=="Box"and object:IsA("BasePart")then register(object,"Box",tag)end
+                if final()and object.Name=="Box"and object:IsA("BasePart")then
+                    register(object,"Box",tag,nil,true)
+                    local entry=warnings[object]
+                    local lifetime=tonumber(object:GetAttribute("Lifetime"))
+                    if entry and lifetime then entry.ExpiresAt=entry.Started+math.clamp(lifetime,0,10)+.2 end
+                end
             end
             bind(ctx.Collection:GetInstanceAddedSignal(tag),tagged)
             for _,object in ipairs(ctx.Collection:GetTagged(tag))do tagged(object)end
@@ -107,7 +116,7 @@ return function(ctx)
     local function sample(object,entry,time)
         if not object.Parent then entry.RemovedAt=entry.RemovedAt or time;return end
         entry.RemovedAt=nil
-        if entry.Kind=="Laser"and object.Shape~=Enum.PartType.Cylinder then return end
+        if entry.Kind=="Laser"and object.Shape~=Enum.PartType.Cylinder then entry.CFrame=nil;return end
         local ok,frame,size=pcall(function()
             if entry.Kind=="Disc"then
                 local root=object.PrimaryPart
@@ -119,7 +128,7 @@ return function(ctx)
             if object:IsA("Model")then return object:GetBoundingBox()end
             return object.CFrame,object.Size
         end)
-        if not ok or not frame or math.max(size.X,size.Z)<=.2 then return end
+        if not ok or not frame or math.max(size.X,size.Z)<=.2 then entry.CFrame=nil;entry.Velocity=nil;entry.SampleAt=nil;return end
         if (entry.Kind=="Projectile"or entry.Kind=="Disc")and entry.CFrame and time>(entry.SampleAt or time)then
             local motion=(frame.Position-entry.CFrame.Position)/(time-entry.SampleAt)
             entry.Velocity=motion.Magnitude<=400 and motion or Vector3.zero
@@ -130,9 +139,18 @@ return function(ctx)
         if closed then return end
         table.clear(snapshots)
         local time=os.clock()
+        local active=final and final()==true
+        if active and not finalActive then
+            for _,name in ipairs({"RedLightningDiscEffects","RedLightningLaserEffects","RedLightningEffects"})do
+                local folder=ctx.Workspace:FindFirstChild(name)
+                if folder then for _,object in ipairs(folder:GetChildren())do inspect(object)end end
+            end
+        end
+        finalActive=active
         for object,entry in pairs(warnings)do
             sample(object,entry,time)
-            if time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
+            if entry.FinalOnly and not active or (entry.ExpiresAt and time>=entry.ExpiresAt)
+                or time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
             elseif entry.CFrame then snapshots[#snapshots+1]=entry end
         end
         if cone and time<cone.Until and final()then snapshots[#snapshots+1]=cone else cone=nil end
@@ -148,12 +166,12 @@ return function(ctx)
         if entry.Kind=="Wave"or entry.Kind=="Cone"then
             if entry.Kind=="Wave"and cone then return false end
             local delta=point-(entry.Origin or frame.Position)
-            if math.abs(delta.Y)>(wave.Height or 12)*.5+margin then return false end
+            if math.abs(delta.Y)>(wave.Height or 6)*.5+margin then return false end
             delta=Vector3.new(delta.X,0,delta.Z)
-            if delta.Magnitude>(wave.Range or 52)+margin then return false end
+            if delta.Magnitude>(wave.Range or 100)+margin then return false end
             if not entry.Direction then return true end
             local forward=delta:Dot(entry.Direction)
-            return forward>=-margin and (delta-entry.Direction*forward).Magnitude<=math.max(0,forward)*math.tan(math.rad((wave.SpreadAngle or 80)/2))+margin
+            return forward>=-margin and (delta-entry.Direction*forward).Magnitude<=math.max(0,forward)*math.tan(math.rad((wave.SpreadAngle or 120)/2))+margin
         end
         if entry.Kind=="Box"or entry.Kind=="Laser"then
             local at=frame:PointToObjectSpace(point)
@@ -186,18 +204,18 @@ return function(ctx)
         return false
     end
     function api.IsHazardPart(part)
+        if ctx.PillarPart and ctx.PillarPart(part)then return true end
         local object=part
         while object and object~=ctx.Workspace do if warnings[object]then return true end;object=object.Parent end
         return false
     end
     function api.Plan(point,desired,region,extraThreat)
-        if closed or not ctx.State.AutoDodge then return nil end
+        api.Blocked=false;api.RequiresCover=false
+        if closed or not ctx.State.AutoDodge then escape.Point=nil;escape.Until=0;return nil end
         api.RefreshThreats()
         local time=os.clock()
         local danger,reason=api.IsThreatened(point)
         local targetDanger,targetReason=api.IsThreatened(desired or point)
-        api.Blocked=danger or targetDanger
-        if not api.Blocked and time>=escape.Until then escape.Point=nil;return nil end
         local function safe(candidate)
             if api.IsThreatened(candidate)or (extraThreat and extraThreat(candidate))then return false end
             if region then
@@ -206,6 +224,16 @@ return function(ctx)
             end
             return true
         end
+        if cover then
+            local point,reason=cover.Plan(point,safe)
+            if cover.Active then
+                api.Blocked=true;api.RequiresCover=true;api.LastReason=reason;escape.Point=nil
+                ctx.State.LastBossWarning=reason
+                return point,reason
+            end
+        end
+        api.Blocked=danger or targetDanger
+        if not api.Blocked and time>=escape.Until then escape.Point=nil;return nil end
         if escape.Point and safe(escape.Point)then return escape.Point,api.LastReason end
         if time<escape.SearchAt then return nil end
         local chosen=safe(point)and point or nil
@@ -226,6 +254,9 @@ return function(ctx)
     function api.Destroy()
         if closed then return end
         closed=true;api.HasHazards=false;api.ThreatCount=0
+        ctx.State.BossThreatCount=0
+        api.Blocked=false;api.RequiresCover=false
+        if cover then cover.Destroy()end
         for _,connection in ipairs(bindings)do connection:Disconnect()end
         table.clear(bindings);table.clear(warnings);table.clear(snapshots);table.clear(castWindows);escape.Point=nil;cone=nil
     end

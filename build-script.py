@@ -25,6 +25,7 @@ MODULES = {
     "SKILL DAMAGE BUDGET": "skill-damage-budget.module.luau",
     "UPRIGHT": "upright.module.luau",
     "BOSS DODGE": "boss-dodge.module.luau",
+    "RUBRICATUS COVER": "rubricatus-cover.module.luau",
     "HIDE PLAYERS": "hide-players.module.luau",
     "MOVEMENT OWNER": "movement-owner.module.luau",
     "ENEMY REGISTRY": "enemy-registry.module.luau",

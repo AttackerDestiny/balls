@@ -436,18 +436,67 @@ do
     local rubricatus=bosses and bosses:FindFirstChild(rubricatusName)
     local function attributes(name)
         local skill=rubricatus and rubricatus:FindFirstChild(name)
-        return skill and skill:GetAttributes()or {}
+        local values={}
+        if skill then
+            local ok,native=pcall(require,skill)
+            if ok and type(native)=="table"and type(native.Defaults)=="table"then
+                for key,value in pairs(native.Defaults)do if type(value)=="number"then values[key]=value end end
+            end
+            for key,value in pairs(skill:GetAttributes())do if type(value)=="number"then values[key]=value end end
+        end
+        return values
     end
+    local function finalWave()return game.PlaceId==78945654064532 and workspace:GetAttribute("Wave")==100 end
+    local function origin()
+        local mobs=workspace:FindFirstChild("Mobs")
+        local boss=mobs and mobs:FindFirstChild(rubricatusName)
+        return boss and boss:GetPivot().Position
+    end
+    local function pillarPart(part)
+        if not finalWave()or not part:IsA("BasePart")then return false end
+        local node=part
+        while node and node~=workspace do
+            local name=node.Name:lower()
+            if name=="pillarspawns"or name:match("^pillar%d*$")then return true end
+            node=node.Parent
+        end
+        return false
+    end
+    local makeCover=(function()
+-- BEGIN BUNDLED RUBRICATUS COVER
+-- END BUNDLED RUBRICATUS COVER
+    end)()
+    local cover=game.PlaceId==78945654064532 and makeCover({State=state,FinalWave=finalWave,Origin=origin,
+        Replicate=events and events.OnClientEvent,
+        Pillars=function()
+            local result={}
+            -- Search pillar containers only; never scan all arena descendants.
+            for _,root in ipairs(workspace:GetChildren())do
+                local name=root.Name:lower()
+                if name=="pillarspawns"or name:match("^pillar%d*$")then
+                    if root:IsA("BasePart")then result[#result+1]=root
+                    else
+                        for _,part in ipairs(root:QueryDescendants("BasePart"))do
+                            result[#result+1]=part;if #result==32 then break end
+                        end
+                    end
+                    if #result>=32 then break end
+                end
+            end
+            return result
+        end,
+        Covered=function(part,from,to)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Include
+            params.RespectCanCollide=true;params.FilterDescendantsInstances={part}
+            local hit=workspace:Raycast(from,to-from,params)
+            return hit and hit.Instance==part
+        end})or nil
     state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),
         Projectiles=projectiles,Replicate=events and events.OnClientEvent,
-        FinalWave=game.PlaceId==78945654064532 and function()return workspace:GetAttribute("Wave")==100 end or nil,
+        FinalWave=game.PlaceId==78945654064532 and finalWave or nil,RubricatusCover=cover,PillarPart=pillarPart,
         RubricatusWave=attributes("RedLightningWave"),DiscRadius=attributes("RedLightningDiscs").Radius,
         LaserRadius=attributes("RedLightningLaser").Radius,
-        RubricatusOrigin=function()
-            local mobs=workspace:FindFirstChild("Mobs")
-            local boss=mobs and mobs:FindFirstChild(rubricatusName)
-            return boss and boss:GetPivot().Position
-        end})
+        RubricatusOrigin=origin})
 end
 do
     local createPlanner=(function()
@@ -579,7 +628,7 @@ do
     local savedZoom=player.CameraMaxZoomDistance
     local restoringZoom=false
     local roots={}
-    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
+    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true,PillarSpawns=true}
     local function zoom()
         if not restoringZoom and state.Running and not state.StopEverything and player.CameraMaxZoomDistance<1000000 then player.CameraMaxZoomDistance=1000000 end
     end

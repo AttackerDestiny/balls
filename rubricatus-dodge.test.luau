@@ -48,6 +48,9 @@ return function(source)
     api.RefreshThreats();assert(not api.IsThreatened(v(-20,0,0)),"Unlaunched discs are harmless")
     first.LockedTarget=v(30,0,0)
     api.RefreshThreats();assert(api.IsThreatened(v(30,0,0)) and not api.IsThreatened(v(30,-20,0)))
+    first.LockedTarget=nil;api.RefreshThreats()
+    assert(not api.IsThreatened(v(30,0,0)),"An invalid or reset projectile must discard its old locked position")
+    first.LockedTarget=v(30,0,0);api.RefreshThreats()
     at+=.2;first.PrimaryPart.CFrame=frame(v(-10,0,0));api.RefreshThreats()
     assert(api.IsThreatened(v(3,0,0)),"Predict the moving hitbox along its current path")
     local nextDisc=disc(2,v(-20,0,0));nextDisc.LockedTarget=v(42,0,20)
@@ -59,13 +62,25 @@ return function(source)
         Size=v(50,10,10),Shape="Cylinder",IsA=function(_,kind)return kind=="BasePart"end}
     world.DescendantAdded:Fire(laser);api.RefreshThreats()
     assert(api.IsThreatened(v(20,12,0)) and not api.IsThreatened(v(20,-12,0)),"Use the laser's actual axis and elevation")
+    local charge={Name="LockedAimWarning",Parent=laser.Parent,CFrame=frame(v(0,12,0)),Size=v(100,1,10),IsA=laser.IsA}
+    world.DescendantAdded:Fire(charge);api.RefreshThreats()
+    assert(api.IsThreatened(v(45,12,0)),"Evade during the one-second laser charge before the cylinder appears")
+    charge.Parent=nil
     laser.Parent=nil;api.RefreshThreats();at+=1
     replicate:Fire(1,"Initial","RedLightningWave",1.7,v(50,0,0));api.RefreshThreats()
     assert(api.IsThreatened(v(25,2,0)) and not api.IsThreatened(v(-25,2,0)),"Use the cone's replicated direction")
-    at+=4;api.RefreshThreats();assert(not api.IsThreatened(v(25,2,0)),"Expired cones release farming")
-    local hitbox={Name="Box",Parent=world,CFrame=frame(v(0,0,0)),Size=v(16,8,6),IsA=laser.IsA}
+    assert(api.IsThreatened(v(65,2,60))and not api.IsThreatened(v(115,2,0)),"Use the native 100-stud range and 120-degree cone when attributes are absent")
+    at+=1.5;api.RefreshThreats();assert(not api.IsThreatened(v(25,2,0)),"Use the native short charge/expansion/fade to release farming")
+    local hitbox={Name="Box",Parent=world,CFrame=frame(v(0,0,0)),Size=v(16,8,6),IsA=laser.IsA,GetAttribute=child,Lifetime=.3}
     tags["RubricatusSlam Slam"]:Fire(hitbox);api.RefreshThreats()
     assert(api.IsThreatened(v(5,0,0)) and not api.IsThreatened(v(5,-20,0)),"Use the tagged melee hitbox")
+    at+=.6;api.RefreshThreats()
+    assert(not api.IsThreatened(v(5,0,0)),"A finished melee warning cannot stall farming while its part is retained")
+    for index=1,1000 do disc(index,v(0,0,0)).LockedTarget=v(30,0,0)end
+    api.RefreshThreats();assert(api.ThreatCount<=48,"Burst effects have bounded storage")
+    final=false;api.RefreshThreats()
+    assert(api.ThreatCount==0 and not api.IsThreatened(v(30,0,0)),"Final-wave hazards cannot leak into a new room or retry")
     api.Destroy()
-    print("PASS Rubricatus: wave scope, per-disc locks and prediction, laser elevation, directional wave and melee hitbox")
+    assert(not world.DescendantAdded.Fire and not replicate.Fire,"Cleanup disconnects world and skill listeners")
+    print("PASS Rubricatus: wave scope, disc resets and prediction, laser charge, native cone defaults, melee expiry and cleanup")
 end

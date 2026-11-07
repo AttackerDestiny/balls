@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.between-in-place-retry-v3.0.14"
-local VERSION="3.0.14"
+local BUILD="2026-11-07.rubricatus-cover-v3.0.15"
+local VERSION="3.0.15"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2658,15 +2658,17 @@ return function(ctx)
     local tags={"AegorSlam Rock","AegorSlam Slam","AegorSpike Spike","RiftDetonation Rift"}
     local final=ctx.FinalWave
     local wave=ctx.RubricatusWave or {}
+    local cover=ctx.RubricatusCover
+    local finalActive=false
     local laserColor=final and Color3.fromRGB(255,18,38)
     local function bind(signal,fn)bindings[#bindings+1]=signal:Connect(fn)end
-    local function register(object,kind,name,radius)
+    local function register(object,kind,name,radius,finalOnly)
         if closed then return end
         local entry=warnings[object]
         if not entry then
             local count=0;for _ in pairs(warnings)do count+=1 end
             if count>=48 then return end
-            entry={Kind=kind,Started=os.clock(),Name=name or object.Name};warnings[object]=entry
+            entry={Kind=kind,Started=os.clock(),Name=name or object.Name,FinalOnly=finalOnly};warnings[object]=entry
         end
         entry.Radius=radius or entry.Radius;api.HasHazards=true
     end
@@ -2690,15 +2692,17 @@ return function(ctx)
         if final and (group=="RedLightningDiscEffects" or group=="RedLightningLaserEffects" or group=="RedLightningEffects"
             or parent==ctx.Workspace and name=="Part")and final()then
             if group=="RedLightningDiscEffects" and name:match("^LightningDisc%d+$")and object:IsA("Model")then
-                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6);return
+                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6,true);return
             elseif group=="RedLightningLaserEffects" then
-                if name=="RedBeam" and object:IsA("BasePart")then register(object,"Laser","Red Lightning Laser",ctx.LaserRadius or 5)end
+                if name=="RedBeam"and object:IsA("BasePart")or name=="LockedAimWarning"and (object:IsA("BasePart")or object:IsA("Model"))then
+                    register(object,name=="RedBeam"and "Laser"or "Beam","Red Lightning Laser",ctx.LaserRadius or 5,true)
+                end
                 if name=="RedBeam" or name=="LockedAimWarning"then return end
             elseif group=="RedLightningEffects" and name=="LightningWaveAnchor" and object:IsA("BasePart")then
-                register(object,"Wave","Red Lightning Wave");return
+                register(object,"Wave","Red Lightning Wave",nil,true);return
             elseif parent==ctx.Workspace and name=="Part" and object:IsA("BasePart")and object.Color==laserColor then
                 task.defer(function()
-                    if object.Parent and object:FindFirstChild("Beam")then register(object,"Box","Rubricatus Lasers")end
+                    if not closed and object.Parent and final()and object:FindFirstChild("Beam")then register(object,"Box","Rubricatus Lasers",nil,true)end
                 end)
             end
         end
@@ -2711,13 +2715,13 @@ return function(ctx)
         if final and final()and phase=="Initial"and name=="RedLightningWave"and typeof(target)=="Vector3"then
             local origin=ctx.RubricatusOrigin and ctx.RubricatusOrigin()
             if not origin then return end
-            origin+=Vector3.new(0,wave.OriginHeight or 2.5,0)
+            origin+=Vector3.new(0,wave.OriginHeight or 1.5,0)
             local delta=target-origin
             delta=Vector3.new(delta.X,0,delta.Z)
             if delta.Magnitude<.01 then return end
             local direction=delta.Unit
             cone={Kind="Cone",Name="Red Lightning Wave",Origin=origin+direction*(wave.MuzzleOffset or 2.5),
-                Direction=direction,Until=os.clock()+(wave.ChargeTime or .9)+math.clamp(tonumber(duration)or 1.7,.65,10)+.35}
+                Direction=direction,Until=os.clock()+(wave.ChargeTime or .35)+(wave.ExpandTime or .45)+(wave.FireTime or 0)+(wave.FadeTime or .3)+.2}
         end
     end)end
     bind(ctx.Workspace.DescendantAdded,inspect)
@@ -2730,7 +2734,12 @@ return function(ctx)
     if final then
         for _,tag in ipairs({"RubricatusAttack Attack","RubricatusSlam Slam"})do
             local function tagged(object)
-                if final()and object.Name=="Box"and object:IsA("BasePart")then register(object,"Box",tag)end
+                if final()and object.Name=="Box"and object:IsA("BasePart")then
+                    register(object,"Box",tag,nil,true)
+                    local entry=warnings[object]
+                    local lifetime=tonumber(object:GetAttribute("Lifetime"))
+                    if entry and lifetime then entry.ExpiresAt=entry.Started+math.clamp(lifetime,0,10)+.2 end
+                end
             end
             bind(ctx.Collection:GetInstanceAddedSignal(tag),tagged)
             for _,object in ipairs(ctx.Collection:GetTagged(tag))do tagged(object)end
@@ -2754,7 +2763,7 @@ return function(ctx)
     local function sample(object,entry,time)
         if not object.Parent then entry.RemovedAt=entry.RemovedAt or time;return end
         entry.RemovedAt=nil
-        if entry.Kind=="Laser"and object.Shape~=Enum.PartType.Cylinder then return end
+        if entry.Kind=="Laser"and object.Shape~=Enum.PartType.Cylinder then entry.CFrame=nil;return end
         local ok,frame,size=pcall(function()
             if entry.Kind=="Disc"then
                 local root=object.PrimaryPart
@@ -2766,7 +2775,7 @@ return function(ctx)
             if object:IsA("Model")then return object:GetBoundingBox()end
             return object.CFrame,object.Size
         end)
-        if not ok or not frame or math.max(size.X,size.Z)<=.2 then return end
+        if not ok or not frame or math.max(size.X,size.Z)<=.2 then entry.CFrame=nil;entry.Velocity=nil;entry.SampleAt=nil;return end
         if (entry.Kind=="Projectile"or entry.Kind=="Disc")and entry.CFrame and time>(entry.SampleAt or time)then
             local motion=(frame.Position-entry.CFrame.Position)/(time-entry.SampleAt)
             entry.Velocity=motion.Magnitude<=400 and motion or Vector3.zero
@@ -2777,9 +2786,18 @@ return function(ctx)
         if closed then return end
         table.clear(snapshots)
         local time=os.clock()
+        local active=final and final()==true
+        if active and not finalActive then
+            for _,name in ipairs({"RedLightningDiscEffects","RedLightningLaserEffects","RedLightningEffects"})do
+                local folder=ctx.Workspace:FindFirstChild(name)
+                if folder then for _,object in ipairs(folder:GetChildren())do inspect(object)end end
+            end
+        end
+        finalActive=active
         for object,entry in pairs(warnings)do
             sample(object,entry,time)
-            if time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
+            if entry.FinalOnly and not active or (entry.ExpiresAt and time>=entry.ExpiresAt)
+                or time-entry.Started>20 or (entry.RemovedAt and time-entry.RemovedAt>.8)then warnings[object]=nil
             elseif entry.CFrame then snapshots[#snapshots+1]=entry end
         end
         if cone and time<cone.Until and final()then snapshots[#snapshots+1]=cone else cone=nil end
@@ -2795,12 +2813,12 @@ return function(ctx)
         if entry.Kind=="Wave"or entry.Kind=="Cone"then
             if entry.Kind=="Wave"and cone then return false end
             local delta=point-(entry.Origin or frame.Position)
-            if math.abs(delta.Y)>(wave.Height or 12)*.5+margin then return false end
+            if math.abs(delta.Y)>(wave.Height or 6)*.5+margin then return false end
             delta=Vector3.new(delta.X,0,delta.Z)
-            if delta.Magnitude>(wave.Range or 52)+margin then return false end
+            if delta.Magnitude>(wave.Range or 100)+margin then return false end
             if not entry.Direction then return true end
             local forward=delta:Dot(entry.Direction)
-            return forward>=-margin and (delta-entry.Direction*forward).Magnitude<=math.max(0,forward)*math.tan(math.rad((wave.SpreadAngle or 80)/2))+margin
+            return forward>=-margin and (delta-entry.Direction*forward).Magnitude<=math.max(0,forward)*math.tan(math.rad((wave.SpreadAngle or 120)/2))+margin
         end
         if entry.Kind=="Box"or entry.Kind=="Laser"then
             local at=frame:PointToObjectSpace(point)
@@ -2833,18 +2851,18 @@ return function(ctx)
         return false
     end
     function api.IsHazardPart(part)
+        if ctx.PillarPart and ctx.PillarPart(part)then return true end
         local object=part
         while object and object~=ctx.Workspace do if warnings[object]then return true end;object=object.Parent end
         return false
     end
     function api.Plan(point,desired,region,extraThreat)
-        if closed or not ctx.State.AutoDodge then return nil end
+        api.Blocked=false;api.RequiresCover=false
+        if closed or not ctx.State.AutoDodge then escape.Point=nil;escape.Until=0;return nil end
         api.RefreshThreats()
         local time=os.clock()
         local danger,reason=api.IsThreatened(point)
         local targetDanger,targetReason=api.IsThreatened(desired or point)
-        api.Blocked=danger or targetDanger
-        if not api.Blocked and time>=escape.Until then escape.Point=nil;return nil end
         local function safe(candidate)
             if api.IsThreatened(candidate)or (extraThreat and extraThreat(candidate))then return false end
             if region then
@@ -2853,6 +2871,16 @@ return function(ctx)
             end
             return true
         end
+        if cover then
+            local point,reason=cover.Plan(point,safe)
+            if cover.Active then
+                api.Blocked=true;api.RequiresCover=true;api.LastReason=reason;escape.Point=nil
+                ctx.State.LastBossWarning=reason
+                return point,reason
+            end
+        end
+        api.Blocked=danger or targetDanger
+        if not api.Blocked and time>=escape.Until then escape.Point=nil;return nil end
         if escape.Point and safe(escape.Point)then return escape.Point,api.LastReason end
         if time<escape.SearchAt then return nil end
         local chosen=safe(point)and point or nil
@@ -2873,6 +2901,9 @@ return function(ctx)
     function api.Destroy()
         if closed then return end
         closed=true;api.HasHazards=false;api.ThreatCount=0
+        ctx.State.BossThreatCount=0
+        api.Blocked=false;api.RequiresCover=false
+        if cover then cover.Destroy()end
         for _,connection in ipairs(bindings)do connection:Disconnect()end
         table.clear(bindings);table.clear(warnings);table.clear(snapshots);table.clear(castWindows);escape.Point=nil;cone=nil
     end
@@ -2903,18 +2934,173 @@ end
     local rubricatus=bosses and bosses:FindFirstChild(rubricatusName)
     local function attributes(name)
         local skill=rubricatus and rubricatus:FindFirstChild(name)
-        return skill and skill:GetAttributes()or {}
+        local values={}
+        if skill then
+            local ok,native=pcall(require,skill)
+            if ok and type(native)=="table"and type(native.Defaults)=="table"then
+                for key,value in pairs(native.Defaults)do if type(value)=="number"then values[key]=value end end
+            end
+            for key,value in pairs(skill:GetAttributes())do if type(value)=="number"then values[key]=value end end
+        end
+        return values
     end
+    local function finalWave()return game.PlaceId==78945654064532 and workspace:GetAttribute("Wave")==100 end
+    local function origin()
+        local mobs=workspace:FindFirstChild("Mobs")
+        local boss=mobs and mobs:FindFirstChild(rubricatusName)
+        return boss and boss:GetPivot().Position
+    end
+    local function pillarPart(part)
+        if not finalWave()or not part:IsA("BasePart")then return false end
+        local node=part
+        while node and node~=workspace do
+            local name=node.Name:lower()
+            if name=="pillarspawns"or name:match("^pillar%d*$")then return true end
+            node=node.Parent
+        end
+        return false
+    end
+    local makeCover=(function()
+-- BEGIN BUNDLED RUBRICATUS COVER
+-- Wave 100 Nuke shelter. Only measured, raised pillars can supply cover.
+return function(ctx)
+    local api={Active=false,Waiting=false}
+    local now=ctx.Now or os.clock
+    local expires,emptySince,scanAt=0,nil,0
+    local raised,closed=false,false
+    local pillars={}
+    local shelter,source,connection
+    local flat=Vector3.new(1,0,1)
+    local function reset()
+        expires=0;emptySince=nil;shelter=nil;source=nil
+        api.Active=false;api.Waiting=false
+    end
+    if ctx.Replicate then connection=ctx.Replicate:Connect(function(_,operation,skill,surface)
+        if closed or not ctx.FinalWave()or operation~="Initial"or skill~="RubricatusNuke"then return end
+        source=typeof(surface)=="Vector3"and surface or ctx.Origin()
+        expires=now()+12;emptySince=nil;shelter=nil;scanAt=0
+    end)end
+    local function refresh(time,origin)
+        if time<scanAt then return end
+        scanAt=time+.1;table.clear(pillars)
+        for _,pillar in ipairs(ctx.Pillars())do
+            if #pillars==32 then break end
+            if origin and pillar.Parent and pillar.CanCollide then
+                local frame,size=pillar.CFrame,pillar.Size
+                local height=math.abs(frame.RightVector.Y)*size.X+math.abs(frame.UpVector.Y)*size.Y+math.abs(frame.LookVector.Y)*size.Z
+                local radius=((pillar.Position-origin)*flat).Magnitude
+                -- Spawn markers and pillars still underground do not block the blast.
+                if height>=12 and radius>=70 and radius<=170 and pillar.Position.Y+height*.5>origin.Y+6
+                    and pillar.Position.Y-height*.5<origin.Y+8 then
+                    pillars[#pillars+1]=pillar
+                end
+            end
+        end
+        local any=#pillars>0
+        if any and not raised then
+            source=source or origin;expires=math.max(expires,time+12);emptySince=nil
+        elseif not any and raised then emptySince=time end
+        raised=any
+    end
+    local function covered(pillar,origin,point)
+        if not pillar.Parent or not pillar.CanCollide then return false end
+        -- Require a ray through the interior of the actual pillar, between boss and player.
+        local a=pillar.CFrame:PointToObjectSpace(origin+Vector3.new(0,3,0))
+        local b=pillar.CFrame:PointToObjectSpace(point)
+        local half=pillar.Size*.5-Vector3.new(1,1,1)
+        if math.min(half.X,half.Y,half.Z)<=0 then return false end
+        local lo,hi=0,1
+        for _,axis in ipairs({"X","Y","Z"})do
+            local direction=b[axis]-a[axis]
+            if math.abs(direction)<.001 then
+                if math.abs(a[axis])>half[axis]then return false end
+            else
+                local first,last=(-half[axis]-a[axis])/direction,(half[axis]-a[axis])/direction
+                if first>last then first,last=last,first end
+                lo=math.max(lo,first);hi=math.min(hi,last)
+                if lo>hi then return false end
+            end
+        end
+        return lo>0 and hi<1 and (not ctx.Covered or ctx.Covered(pillar,origin+Vector3.new(0,3,0),point))
+    end
+    function api.Plan(point,safe)
+        api.Active=false;api.Waiting=false
+        if closed then return end
+        if not ctx.FinalWave()then reset();raised=false;table.clear(pillars);return end
+        local time=now();local origin=ctx.Origin()or source
+        refresh(time,source or origin)
+        if time>=expires or (emptySince and time-emptySince>=.2)then reset();return end
+        if not ctx.State.AutoDodge then return end
+        api.Active=true
+        origin=source or origin
+        if not origin then api.Waiting=true;return nil,"Nuke · waiting for pillar geometry"end
+        if shelter then
+            for _,pillar in ipairs(pillars)do
+                if covered(pillar,origin,shelter)and safe(shelter)then return shelter,"Nuke · pillar cover"end
+            end
+            shelter=nil
+        end
+        local best,cost
+        for _,pillar in ipairs(pillars)do
+            local direction=(pillar.Position-origin)*flat
+            if direction.Magnitude<1 then continue end
+            direction=direction.Unit
+            -- Use the horizontal extent in world space, including rotated rectangular pillars.
+            local frame,size=pillar.CFrame,pillar.Size
+            local x=math.abs(frame.RightVector.X)*size.X+math.abs(frame.UpVector.X)*size.Y+math.abs(frame.LookVector.X)*size.Z
+            local z=math.abs(frame.RightVector.Z)*size.X+math.abs(frame.UpVector.Z)*size.Y+math.abs(frame.LookVector.Z)*size.Z
+            local distance=math.sqrt(x*x+z*z)*.5+6
+            local candidate=pillar.Position+direction*distance
+            candidate=Vector3.new(candidate.X,origin.Y+3,candidate.Z)
+            if covered(pillar,origin,candidate)and safe(candidate)then
+                local travel=(candidate-point).Magnitude
+                if not cost or travel<cost then best=candidate;cost=travel end
+            end
+        end
+        shelter=best;api.Waiting=best==nil
+        return best,best and "Nuke · pillar cover"or "Nuke · waiting for clear pillar cover"
+    end
+    function api.Destroy()
+        if closed then return end
+        closed=true;if connection then connection:Disconnect();connection=nil end
+        reset();table.clear(pillars)
+    end
+    return api
+end
+
+-- END BUNDLED RUBRICATUS COVER
+    end)()
+    local cover=game.PlaceId==78945654064532 and makeCover({State=state,FinalWave=finalWave,Origin=origin,
+        Replicate=events and events.OnClientEvent,
+        Pillars=function()
+            local result={}
+            -- Search pillar containers only; never scan all arena descendants.
+            for _,root in ipairs(workspace:GetChildren())do
+                local name=root.Name:lower()
+                if name=="pillarspawns"or name:match("^pillar%d*$")then
+                    if root:IsA("BasePart")then result[#result+1]=root
+                    else
+                        for _,part in ipairs(root:QueryDescendants("BasePart"))do
+                            result[#result+1]=part;if #result==32 then break end
+                        end
+                    end
+                    if #result>=32 then break end
+                end
+            end
+            return result
+        end,
+        Covered=function(part,from,to)
+            local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Include
+            params.RespectCanCollide=true;params.FilterDescendantsInstances={part}
+            local hit=workspace:Raycast(from,to-from,params)
+            return hit and hit.Instance==part
+        end})or nil
     state.BossDodge=buildWarnings({State=state,Workspace=workspace,Collection=game:GetService("CollectionService"),
         Projectiles=projectiles,Replicate=events and events.OnClientEvent,
-        FinalWave=game.PlaceId==78945654064532 and function()return workspace:GetAttribute("Wave")==100 end or nil,
+        FinalWave=game.PlaceId==78945654064532 and finalWave or nil,RubricatusCover=cover,PillarPart=pillarPart,
         RubricatusWave=attributes("RedLightningWave"),DiscRadius=attributes("RedLightningDiscs").Radius,
         LaserRadius=attributes("RedLightningLaser").Radius,
-        RubricatusOrigin=function()
-            local mobs=workspace:FindFirstChild("Mobs")
-            local boss=mobs and mobs:FindFirstChild(rubricatusName)
-            return boss and boss:GetPivot().Position
-        end})
+        RubricatusOrigin=origin})
 end
 do
     local createPlanner=(function()
@@ -3463,7 +3649,11 @@ return function(ctx)
     end
     local function hold(point,kind,now,force)
         if point.Y<=workspace.FallenPartsDestroyHeight+30 then return false end
-        api.Active=true;state.Dodging=true;ctx.Hold(point,nil,force)
+        api.Active=true;state.Dodging=true
+        if kind~="Blackout shelter"and (state.SkillCastRunning or state.ActiveSkillCast)and state.CancelSkillAura then
+            state.CancelSkillAura(kind)
+        end
+        ctx.Hold(point,nil,force)
         if now-timing.LastMove>.2 and (not api.LastPosition or (api.LastPosition-point).Magnitude>2)then
             timing.LastMove=now;api.Moves+=1
             if event then event.Moves=(event.Moves or 0)+1 end
@@ -3514,12 +3704,14 @@ return function(ctx)
         if usable and not blackout and ctx.AeganatosDodge then
             local point,reason=ctx.AeganatosDodge.Plan(root.Position,state.AutoOffsetDestination or root.Position)
             if point then
-                if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Aeganatos dodge")end
                 hold(point,"Aeganatos evade: "..tostring(reason),now);ctx.Status("Aeganatos Dodge · "..tostring(reason));return true
             end
         end
         local target=state.FollowTarget;local targetRoot=target and target:FindFirstChild("HumanoidRootPart")
         local desired=root and targetRoot and Vector3.new(targetRoot.Position.X,root.Position.Y,targetRoot.Position.Z)or root and root.Position
+        if state.AutoFarm and targetRoot and state.AutoOffsetTarget==target and state.AutoOffsetDestination then
+            desired=state.AutoOffsetDestination
+        end
         if usable and not blackout and ctx.AtheonDodge then
             local point,reason=ctx.AtheonDodge.Plan(root.Position,desired,api.FloorY)
             if point then hold(point,"Atheon evade: "..tostring(reason),now);ctx.Status("Atheon Dodge · "..tostring(reason));return true end
@@ -3540,7 +3732,14 @@ return function(ctx)
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
             local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
             if point then hold(point,"Boss evade: "..tostring(reason),now);ctx.Status("Boss attack · outside danger zone");return true end
-            if ctx.BossDodge.Blocked then local refuge=api.BlackoutPoint(root.Position);if refuge then hold(refuge,"Boss evade below map bottom",now);return true end end
+            if ctx.BossDodge.Blocked then
+                if not ctx.BossDodge.RequiresCover then
+                    local refuge=api.BlackoutPoint(root.Position)
+                    if refuge then hold(refuge,"Boss evade below map bottom",now);return true end
+                end
+                hold(root.Position,"Boss evade waiting for safe route",now)
+                ctx.Status(ctx.BossDodge.LastReason or "Boss attack · waiting for a safe route");return true
+            end
         end
         release();ctx.Status((kind and kind.." · watching"or "Ready").." · events "..seen.."/8");return false
     end
@@ -3603,7 +3802,7 @@ do
     local savedZoom=player.CameraMaxZoomDistance
     local restoringZoom=false
     local roots={}
-    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true}
+    local excluded={Mobs=true,Characters=true,CharacterItems=true,HitEffects=true,WaveDefenseStuff=true,MobSpawnEffects=true,PillarSpawns=true}
     local function zoom()
         if not restoringZoom and state.Running and not state.StopEverything and player.CameraMaxZoomDistance<1000000 then player.CameraMaxZoomDistance=1000000 end
     end

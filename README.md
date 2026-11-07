@@ -211,7 +211,11 @@ The Between automatically uses free revives while the server reports lives remai
 
 **Auto Dodge** holds at `(10, -19, -5)` during other survival special waves. During Blackout it holds at `(12, 37, 3)`. Skill Aura, when enabled, hits enemies that come into range. Auto Farm movement and ordinary Kill Aura hits pause until Blackout ends. Default ON.
 
-On Wave 100, Auto Dodge checks Rubricatus's locked disc paths, red lightning beams and wave, tagged melee hitboxes, and standard ground warnings for spikes and falling stones.
+On Wave 100, **Auto Dodge** checks Rubricatus's locked disc paths, laser charge warnings and beams, the native 100-stud/120° lightning wave, tagged melee hitboxes, and standard ground warnings for spikes and falling stones. It checks the saved Auto Farm return position as well as the current position, cancels script-owned casts before an escape hold, and resumes farming when the warning expires.
+
+For **Nuke**, it selects a raised, collidable pillar between the blast origin and the character, verifies the pillar with a raycast, and holds behind it until the pillars collapse. Spawn markers, underground parts and distant scenery do not count as cover. Missing or obstructed cover keeps Auto Farm paused for a bounded wait rather than sending it back toward the boss. Pillar geometry is preserved by map cleanup. The existing Auto Dodge setting controls this behavior.
+
+The v3.0.15 Rubricatus changes pass offline geometry, movement-handoff, expiry and cleanup regressions. Native combo, slam and lightning-wave code was inspected earlier; the new pillar discovery and a complete fight have **not** been verified live. Shadow Dash has no dedicated phase predictor yet. This does not guarantee every Rubricatus attack is avoided.
 
 Extended camera zoom is applied while the runtime owns it.
 
