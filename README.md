@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.7**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.8**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -102,7 +102,9 @@ At startup, the floor runtime holds the character at the current X/Z and detecte
 - Uses bounded transient retries, **12-hop / 15-minute** search limits, and bounded same-server return recovery.
 - Continues monitoring after reaching a protected server. Status exposes failed/unverified operations.
 
-**Safe floor** supports the normal floor catalog, Atheon, and Atlantis, subject to native unlocks. Profile unlock changes refresh the available labels. During Account Progression, Safe Mode protects the current progression floor instead of travelling back to the manually selected floor.
+**Safe floor** supports the normal floor catalog, Atheon, Atlantis, and The Between. Profile unlock changes refresh the normal floor labels. During Account Progression, Safe Mode protects the current progression floor.
+
+Selecting **The Between** from elsewhere waits for you to enter through a room. Inside The Between, Safe Mode protects the current server. When an unlisted player is present, it confirms the block, kicks the local account, and then requests a rejoin to The Between without a teleport-pad detour.
 
 Native block confirmations run with the blocking modal's visuals transparent while its controls remain active. The script still requires Roblox's blocked-user acknowledgment before rejoining or moderator disconnects. Only the blocking modal is masked, and visual properties/listeners are restored after each attempt or shutdown. This approach was live-tested on the connected desktop executor; other executors still need device-specific verification.
 

@@ -1,7 +1,11 @@
 -- Native Roblox/executor boundary for safe search, floor travel and arena rotation.
 return function(ctx)
     local state,player,Players=ctx.State,ctx.Player,ctx.Players
-    local inBetween=game.PlaceId==78945654064532
+    local betweenId=78945654064532
+    local inBetween=game.PlaceId==betweenId
+    local function waitingForBetween()
+        return not inBetween and not state.AccountProgression and state.SafeFloorId==betweenId
+    end
     local farmClock=state.FarmClock or os.clock
     state.SafeWhitelistText=type(state.SafeWhitelistText)=="string"and state.SafeWhitelistText or ""
     state.SafeWhitelistIds=type(state.SafeWhitelistIds)=="table"and state.SafeWhitelistIds or {}
@@ -26,7 +30,7 @@ return function(ctx)
     local nativeFloors={}
     for _,floor in ipairs(definitions)do nativeFloors[floor.PlaceId]=floor end
     local function floorUnlocked(floor)
-        if floor.PlaceId==game.PlaceId or floor.Unlocked==true then return true end
+        if floor.PlaceId==game.PlaceId or floor.PlaceId==betweenId or floor.Unlocked==true then return true end
         local profile=game.ReplicatedStorage.Profiles:FindFirstChild(player.Name)
         local locations=profile and profile:FindFirstChild("Locations")
         return locations~=nil and locations:FindFirstChild(tostring(floor.PlaceId))~=nil
@@ -321,9 +325,15 @@ end
         end,
         Queue=function()state.QueueAutomation()end,
         Hop=function()
+            local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
+            if inBetween then
+                assert(kickFallback and ticket and ticket.LastBlockedUserId,"Confirmed-block rejoin unavailable")
+                state.ServerTeleportStarted=false
+                kickFallback.Requested(ticket.LastBlockedUserId)
+                return
+            end
             state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40;state.SafeRejoinRequested=true
             state.ServerTeleportStarted=false
-            local ticket=state.SoloServerSearch and state.SoloServerSearch.Ticket
             if kickFallback and ticket then kickFallback.Requested(ticket.LastBlockedUserId)end
             local ok,reason=pcall(function()TeleportService:Teleport(game.PlaceId,player)end)
             if not ok then clearRejoinAway();error(reason)end
@@ -335,10 +345,17 @@ end
         end})
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
-        Suspended=function()return inBetween end,
-        TargetFloor=function()return state.AccountProgression and game.PlaceId or state.SafeFloorId end,
+        Suspended=function()
+            if not waitingForBetween()then return false end
+            if state.SafeMode and not state.SafeWhitelistResolving then state.SafeModeStatus="Waiting to enter The Between through a room"end
+            return true
+        end,
+        TargetFloor=function()return (inBetween or state.AccountProgression) and game.PlaceId or state.SafeFloorId end,
         Players=others,Allowed=allowed,ChangeFloor=state.ChangeAutomationFloor,
-        Panic=function()if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end end,
+        Panic=function()
+            if inBetween then return end
+            if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
+        end,
         ReleasePanic=function()state.ReleaseSafePanic()end,Travelling=function()return state.AutomationTeleporting or state.TravelBusy end,
         Status=function(message)state.SafeModeStatus=message end,Save=state.SaveNow})
     state.SafeController=safe
@@ -412,7 +429,13 @@ end
         if not floor or not state.IsAutomationFloorUnlocked(floor.Id)then state.SafeModeStatus="That floor is locked";refresh();return false end
         safe.Reset();multi.Reset();state.SafeFloorId=floor.Id;state.SharedSafeFloorId=floor.Id
         state.SaveNow();refresh()
-        if state.SafeMode and not inBetween then state.PanicToSpawn();task.defer(function()workerIdentity();safe.Update();refresh()end)end
+        if state.SafeMode then
+            if waitingForBetween()then
+                if state.SafeKickFallback then state.SafeKickFallback.Reset()end
+                state.ReleaseSafePanic()
+            elseif not inBetween then state.PanicToSpawn()end
+            task.defer(function()workerIdentity();safe.Update();refresh()end)
+        end
         return true
     end
     local whitelistGeneration=0
@@ -557,24 +580,26 @@ end
         if ticket then
             assert(ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId,"Saved search scope mismatch · no fallback kick")
             assert(type(ticket.StartedAt)=="number"and os.time()-ticket.StartedAt<900
-                and type(ticket.Hops)=="number"and ticket.Hops<12,"Safe Mode search limit reached · no fallback kick")
+                and type(ticket.Hops)=="number"and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no fallback kick")
         end
         return ticket
     end
     if ctx.MakeKickFallback then
         kickFallback=ctx.MakeKickFallback({InitialJob=game.JobId,Job=function()return game.JobId end,Now=os.clock,
-            Active=function()return state.Running and state.SafeMode and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
+            Active=function()return state.Running and state.SafeMode and not waitingForBetween()and not state.StopEverything and not state.ModeratorBlocking and not state.SafeWhitelistResolving end,
             Players=others,Allowed=allowed,Present=function(person)return person.Parent==Players end,Spawn=task.spawn,Sleep=task.wait,CheckLimits=fallbackTicket,
             Started=function()return state.ServerTeleportStarted==true end,
             Pause=function()
                 workerIdentity();state.SafeKickFallbackBusy=true;api.Destroy(true)
-                if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
+                if not inBetween then
+                    if state.PanicInPlace then state.PanicInPlace()else state.PanicToSpawn()end
+                end
             end,
             Block=function(person,active)return state.BlockPlayerNative(person,active)end,
             Prepare=function(person)
                 local ticket=fallbackTicket()or {Version=1,UserId=player.UserId,PlaceId=game.PlaceId,
                     RunId=HttpService:GenerateGUID(false),StartedAt=os.time(),Hops=0,Visited={},Added={}}
-                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<12,"Safe Mode search limit reached · no kick")
+                assert(os.time()-ticket.StartedAt<900 and ticket.Hops<(inBetween and 13 or 12),"Safe Mode search limit reached · no kick")
                 ticket.SameServerReturns=math.min(ticket.SameServerReturns or 0,3)
                 ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
@@ -601,7 +626,7 @@ end
         if resumeFeatures then restoreFeatures(resumeFeatures)end
         local ok,resume=pcall(readTicket)
         if queuedResume then ok,resume=true,queuedResume end
-        local resumeAllowed=not inBetween and not state.ModeratorBlocking and state.SafeMode and (state.AccountProgression or state.SafeFloorId==game.PlaceId)
+        local resumeAllowed=not state.ModeratorBlocking and state.SafeMode and (inBetween or state.AccountProgression or state.SafeFloorId==game.PlaceId)
         if resumeAllowed and ok and type(resume)=="table"and resume.Active==true and resume.PlaceId==game.PlaceId then
             api.Start(resume);if safe.AdoptSearch then safe.AdoptSearch()end
         end
@@ -609,8 +634,8 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
-                if inBetween then return end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
+                if inBetween then safe.Update();return end
                 friend.Update(os.clock());safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end

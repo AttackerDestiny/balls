@@ -279,6 +279,13 @@ test("Atheon appears as F13 and preserves its unlock status",function()
     end
     Vector3=oldVector
 end)
+test("The Between appears by name in Safe Mode without an arena",function()
+    local oldVector=Vector3;Vector3={new=function(x,y,z)return {X=x,Y=y,Z=z}end}
+    local factory=assert(loadfile("floor-catalog.module.luau"))()
+    local c=factory({Floors={{PlaceId=78945654064532,Name="The Between"}},Unlocked=function()return true end})
+    assert(#c.Floors==1 and c.FloorById[78945654064532].Label=="The Between" and #c.Spots==0)
+    Vector3=oldVector
+end)
 test("Only the named floor boss can refine or alias the canonical F1 boss arena",function()
     local mt={}
     local function vector(x,y,z)return setmetatable({X=x,Y=y,Z=z},mt)end

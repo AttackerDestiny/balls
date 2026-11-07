@@ -10,8 +10,8 @@ return function(source)
         CurrentFloor=function()return 1 end,Players=function()return {outsider}end,Allowed=function()return false end,
         Travelling=function()return false end,Panic=operation,ReleasePanic=operation,Status=operation,Save=operation})
     api.Update();api.Joined(outsider);api.ObserveProtected()
-    assert(operations==0 and not api.Seeking and state.SafePendingUserId==nil,"The Between cannot start protection, block or native travel through Safe Mode")
+    assert(operations==0 and not api.Seeking and state.SafePendingUserId==nil,"A suspended floor cannot start protection, block or native travel")
     paused=false;api.Update()
     assert(operations>0 and api.Seeking,"Safe Mode resumes ordinary behavior when the adapter no longer suspends it")
-    print("PASS Safe Mode suspension: Between waits never dispatch protection or travel while normal floors remain active")
+    print("PASS Safe Mode suspension: entry waits never dispatch protection or travel")
 end

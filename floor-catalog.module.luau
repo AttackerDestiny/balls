@@ -104,7 +104,7 @@ return function(ctx)
         },
     }
     local numbers = {[542351431]=1,[548231754]=2,[555980327]=3,[572487908]=4,[580239979]=5,[566212942]=6,
-        [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14}
+        [582198062]=7,[548878321]=8,[573267292]=9,[2659143505]=10,[5287433115]=11,[6144637080]=12,[13965775911]=13,[134019705603409]=14,[78945654064532]=15}
     local catalog={Floors={},FloorById={},Spots={},SpotById={},Aliases={}}
     local function clean(name)return tostring(name or ""):lower():gsub("[^%w]","")end
     local function accepts(spot,name)
@@ -127,7 +127,7 @@ return function(ctx)
         local number=numbers[definition.PlaceId]
         if number then
             local floor={Id=definition.PlaceId,Number=number,Name=definition.Name,Unlocked=ctx.Unlocked(definition)}
-            floor.Label=floor.Id==134019705603409 and floor.Name or "F"..number.." · "..floor.Name
+            floor.Label=(floor.Id==134019705603409 or floor.Id==78945654064532) and floor.Name or "F"..number.." · "..floor.Name
             catalog.Floors[#catalog.Floors+1]=floor;catalog.FloorById[floor.Id]=floor
         end
     end

@@ -520,6 +520,7 @@ local function installBetweenAutomation()
         Active=function()
             if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
             if not localFloor then return true end
+            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
                 local hostRoom=findHostRoom(assignment.Host)
                 return hostRoom~=nil and (not priorRoom or hostRoom.Id~=priorRoom.Id)
