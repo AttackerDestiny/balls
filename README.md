@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.21**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.22**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -348,6 +348,9 @@ Streaming loss, an unrelated miniboss, or an uncredited corpse is not a complete
 | **Config Import** | Paste an export to add its presets and restore its Auto Preset choices |
 | **Load Preset** | Load the selected preset or switch back to Default |
 | **Auto Preset** | Load the assigned preset on startup and supported teleports, with separate choices for inside and outside The Between |
+| **Webhook** | Send new inventory items and stack increases to Discord for the selected rarities |
+
+Paste a Discord webhook URL in **Settings → Webhook**, choose **Send Test**, then turn on **Reward Webhook**. Legendary, Tribute, and Burst are selected by default. **Hide Player Name** omits the Roblox username. The URL and alert preferences are saved in the executor workspace for accounts that use it, separately from portable config exports. Outbound HTTP support is required.
 
 Export includes every field from the autosave snapshot: feature toggles, **both whitelists**, floor/skill/item selections, Multi Spot order, layout/theme, relevant saved preferences/checkpoints, and **custom Save Spot entries from all available floor files**. Custom-spot transfer requires executor file access.
 

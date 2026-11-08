@@ -377,7 +377,7 @@ function state.Destroy(replacing,teleportCleanup)
     owned("Block dialog visuals",state.BlockDialogMask)
     owned("SelfDamage",state.SelfDamageProtection)
     method("Ownership",runtimeOwner,"Release")
-    owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk)
+    owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk);owned("Reward webhook",state.WebhookController)
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)

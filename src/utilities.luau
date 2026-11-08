@@ -12,6 +12,115 @@ do
         Error=function(reason)state.LastRestartError=reason;warn("[SB2 Restart] "..reason)end})
 end
 
+local function installRewardWebhook()
+    local make=(function()
+-- BEGIN BUNDLED REWARD WEBHOOK
+-- END BUNDLED REWARD WEBHOOK
+    end)()
+    local path=configFolder.."/reward-webhook.json"
+    local saved
+    if filePersistence then
+        local ok,result=pcall(function()
+            if not isfile(path)then return end
+            local bytes=readfile(path)
+            if #bytes>4096 then return end
+            local data=HttpService:JSONDecode(bytes)
+            if type(data)=="table"and data.Version==1 then return data end
+        end)
+        if ok then saved=result end
+    end
+    local post=request or http_request or (syn and syn.request)or (http and http.request)
+    local webhook=make({Saved=saved,PlayerName=player.Name,Alive=function()return state.Running end,
+        Paused=function()return state.StopEverything end,Schedule=task.delay,Sleep=task.wait,
+        Decode=function(bytes)return HttpService:JSONDecode(bytes)end,
+        Save=function(settings)
+            if not filePersistence then return false end
+            writefile(path,HttpService:JSONEncode(settings));return true
+        end,
+        Send=type(post)=="function"and function(url,payload)
+            return post({Url=url,Method="POST",Headers={["Content-Type"]="application/json"},Body=HttpService:JSONEncode(payload)})
+        end or nil})
+    local inventory=ReplicatedStorage.Profiles[player.Name].Inventory
+    local definitions=ReplicatedStorage.Database.Items
+    local rarityCache={}
+    local listeners,counts,unstacked={},{},{}
+    local revision=0
+    local function stopWatching()
+        revision+=1
+        for _,connection in ipairs(listeners)do connection:Disconnect()end
+        for _,connection in pairs(counts)do connection:Disconnect()end
+        table.clear(listeners);table.clear(counts);table.clear(unstacked)
+    end
+    local function itemRarity(item)
+        if item.Parent~=inventory or not item:IsA("IntValue")then return nil end
+        local name=item.Name
+        if rarityCache[name]==nil then
+            local definition=definitions:FindFirstChild(name)
+            local rarity=definition and definition:FindFirstChild("Rarity")
+            if rarity then rarityCache[name]=rarity.Value end
+        end
+        local rarity=rarityCache[name]
+        if rarity and webhook.Watches(rarity)then return rarity end
+    end
+    local function watchCount(item,count,rarity)
+        if not count or not count:IsA("ValueBase")or type(count.Value)~="number"then return nil end
+        if not counts[count]then
+            local last=count.Value
+            counts[count]=count:GetPropertyChangedSignal("Value"):Connect(function()
+                local value=count.Value;local increase=value-last;last=value
+                if item.Parent==inventory and count.Parent==item then webhook.Add(item.Name,rarity,increase)end
+            end)
+        end
+        return count.Value
+    end
+    local function refresh()
+        state.WebhookEnabled=webhook.Enabled
+        state.WebhookHidePlayer=webhook.HidePlayer
+        stopWatching()
+        if not webhook.Enabled then return end
+        listeners[1]=inventory.ChildAdded:Connect(function(item)
+            local rarity=itemRarity(item)
+            if not rarity then return end
+            local amount=watchCount(item,item:FindFirstChild("Count"),rarity)
+            if amount==nil then unstacked[item]=true end
+            webhook.Add(item.Name,rarity,amount or 1)
+        end)
+        listeners[2]=inventory.DescendantAdded:Connect(function(count)
+            if count.Name~="Count"then return end
+            local item=count.Parent
+            local rarity=item and itemRarity(item)
+            if not rarity then return end
+            local amount=watchCount(item,count,rarity)
+            if amount and unstacked[item]then unstacked[item]=nil;webhook.Add(item.Name,rarity,amount-1)end
+        end)
+        listeners[3]=inventory.DescendantRemoving:Connect(function(object)
+            if counts[object]then counts[object]:Disconnect();counts[object]=nil end
+            unstacked[object]=nil
+        end)
+        local stamp=revision
+        task.defer(function()
+            for index,item in ipairs(inventory:GetChildren())do
+                if stamp~=revision or not state.Running then return end
+                local count=item:FindFirstChild("Count")
+                local rarity=count and itemRarity(item)
+                if rarity then watchCount(item,count,rarity)end
+                if index%40==0 then task.wait()end
+            end
+        end)
+    end
+    state.WebhookController={Destroy=stopWatching}
+    state.GetWebhookRarities=function()return webhook.RarityChoices,webhook.Rarities end
+    state.GetWebhookStatus=function()return webhook.Status end
+    function state.SetWebhookUrl(text)if webhook.SetUrl(text)then refresh()end end
+    function state.ClearWebhookUrl()webhook.Clear();refresh()end
+    function state.SetWebhookEnabled(value)webhook.SetEnabled(value);refresh()end
+    function state.SetWebhookRarities(values)webhook.SetRarities(values);refresh()end
+    function state.SetWebhookHidePlayer(value)webhook.SetHidePlayer(value);state.WebhookHidePlayer=webhook.HidePlayer end
+    state.TestWebhook=webhook.Test
+    refresh()
+end
+installRewardWebhook()
+
 do
     local make=(function()
 -- BEGIN BUNDLED AUTO DISMANTLE

@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.between-auto-retry-v3.0.21"
-local VERSION="3.0.21"
+local BUILD="2026-11-08.reward-webhook-v3.0.22"
+local VERSION="3.0.22"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -6000,7 +6000,7 @@ end
     owned("Block dialog visuals",state.BlockDialogMask)
     owned("SelfDamage",state.SelfDamageProtection)
     method("Ownership",runtimeOwner,"Release")
-    owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk)
+    owned("UI",state.WindUI);owned("AntiAFK",state.AntiAfk);owned("Reward webhook",state.WebhookController)
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
@@ -9850,6 +9850,236 @@ end
         Status=function(message)state.RestartStatus=message end,
         Error=function(reason)state.LastRestartError=reason;warn("[SB2 Restart] "..reason)end})
 end
+
+local function installRewardWebhook()
+    local make=(function()
+-- BEGIN BUNDLED REWARD WEBHOOK
+-- Private Discord settings and a bounded, event-driven reward sender.
+return function(ctx)
+    local api={RarityChoices={"Common","Uncommon","Rare","Legendary","Tribute","Burst"}}
+    local function endpoint(text)
+        if type(text)~="string"or #text>300 then return nil end
+        local url=text:match("^%s*(.-)%s*$")
+        url=url:gsub("^https://discordapp%.com/","https://discord.com/")
+        return url:match("^https://discord%.com/api/webhooks/%d+/[%w_%-]+$")
+    end
+    local function selectRarities(values)
+        local selected={}
+        for _,name in ipairs(api.RarityChoices)do if values[name]==true then selected[name]=true end end
+        return selected
+    end
+    local saved=ctx.Saved or {}
+    local url=endpoint(saved.Url)
+    api.Enabled=saved.Enabled==true and url~=nil and ctx.Send~=nil
+    api.HidePlayer=saved.HidePlayer==true
+    api.Rarities=selectRarities(type(saved.Rarities)=="table" and saved.Rarities or {Legendary=true,Tribute=true,Burst=true})
+    local revision=0
+    local rows,count,testPending={},0,false
+    local scheduled,busy=false,false
+    local function reset()
+        revision+=1;rows={};count=0;testPending=false
+    end
+    local function status()
+        if not ctx.Send then return "HTTP requests are unavailable in this executor"end
+        if not url then return "Enter a Discord webhook URL"end
+        return api.Enabled and "Reward webhook enabled" or "Webhook URL saved · alerts off"
+    end
+    api.Status=status()
+    local function save()
+        local ok,stored=pcall(ctx.Save,{Version=1,Url=url,Enabled=api.Enabled,HidePlayer=api.HidePlayer,Rarities=api.Rarities})
+        api.Status=ok and stored and status() or "Webhook updated for this session · local save unavailable"
+    end
+    function api.SetUrl(text)
+        local value=endpoint(text)
+        if not value then api.Status="Enter a valid Discord webhook URL";return false end
+        if value~=url then url=value;api.Enabled=false;reset();save()end
+        return true
+    end
+    function api.Clear()
+        url=nil;api.Enabled=false;reset();save()
+    end
+    function api.SetEnabled(value)
+        api.Enabled=value==true and url~=nil and ctx.Send~=nil
+        reset();save()
+    end
+    function api.SetRarities(values)
+        api.Rarities=selectRarities(values or {});reset();save()
+    end
+    function api.SetHidePlayer(value)
+        api.HidePlayer=value==true;save()
+    end
+    function api.Watches(rarity)
+        return ctx.Alive() and api.Enabled and ctx.Send~=nil and api.Rarities[rarity]==true
+    end
+    local function available(stamp,isTest)
+        return revision==stamp and ctx.Alive() and (isTest or api.Enabled and not ctx.Paused())
+    end
+    local function deliver(stamp,destination,isTest,batch)
+        local lines={}
+        for _,row in pairs(batch)do lines[#lines+1]=row.Rarity.." · "..row.Name.." ×"..row.Amount end
+        table.sort(lines)
+        local embed={title=isTest and "Feather webhook test"or "Swordburst 2 rewards",
+            description=isTest and "Webhook is connected."or table.concat(lines,"\n"),color=8021215}
+        if not api.HidePlayer and not isTest then embed.footer={text=ctx.PlayerName}end
+        local payload={username="Feather",embeds={embed},allowed_mentions={parse={}}}
+        for attempt=1,2 do
+            if not available(stamp,isTest)then return end
+            local ok,response=pcall(ctx.Send,destination.."?wait=true",payload)
+            if not available(stamp,isTest)then return end
+            local code=ok and type(response)=="table" and tonumber(response.StatusCode or response.Status)
+            if code and code>=200 and code<300 then
+                api.Status=isTest and "Test message delivered" or "Reward message delivered";return
+            end
+            if code~=429 or attempt==2 then
+                api.Status=code and ("Discord request failed (HTTP "..code..")")or "Webhook request failed"
+                return
+            end
+            local parsed,body=pcall(ctx.Decode,response.Body or "")
+            local delay=parsed and type(body)=="table" and tonumber(body.retry_after)
+            if not delay or delay~=delay or delay<0 or delay>120 then api.Status="Discord rate limited the webhook";return end
+            ctx.Sleep(math.max(.25,delay))
+        end
+    end
+    local function schedule()
+        if scheduled or busy or not ctx.Alive()then return end
+        scheduled=true
+        ctx.Schedule(3,function()
+            scheduled=false
+            if not ctx.Alive()then return end
+            local isTest=testPending
+            local batch=rows
+            if isTest then testPending=false else rows={};count=0 end
+            if not isTest and next(batch)==nil then return end
+            busy=true
+            deliver(revision,url,isTest,batch)
+            busy=false
+            if testPending or count>0 then schedule()end
+        end)
+    end
+    function api.Add(name,rarity,amount)
+        if not api.Watches(rarity)or ctx.Paused()or type(name)~="string"or #name>120
+            or type(amount)~="number"or amount%1~=0 or amount<=0 or amount>=1e12 then return end
+        local key=rarity.."\0"..name
+        if not rows[key]then
+            if count>=20 then return end
+            count+=1;rows[key]={Name=name,Rarity=rarity,Amount=0}
+        end
+        rows[key].Amount+=amount
+        schedule()
+    end
+    function api.Test()
+        if not url or not ctx.Send then api.Status=status();return end
+        if testPending or busy then return end
+        testPending=true;api.Status="Test message queued";schedule()
+    end
+    return api
+end
+
+-- END BUNDLED REWARD WEBHOOK
+    end)()
+    local path=configFolder.."/reward-webhook.json"
+    local saved
+    if filePersistence then
+        local ok,result=pcall(function()
+            if not isfile(path)then return end
+            local bytes=readfile(path)
+            if #bytes>4096 then return end
+            local data=HttpService:JSONDecode(bytes)
+            if type(data)=="table"and data.Version==1 then return data end
+        end)
+        if ok then saved=result end
+    end
+    local post=request or http_request or (syn and syn.request)or (http and http.request)
+    local webhook=make({Saved=saved,PlayerName=player.Name,Alive=function()return state.Running end,
+        Paused=function()return state.StopEverything end,Schedule=task.delay,Sleep=task.wait,
+        Decode=function(bytes)return HttpService:JSONDecode(bytes)end,
+        Save=function(settings)
+            if not filePersistence then return false end
+            writefile(path,HttpService:JSONEncode(settings));return true
+        end,
+        Send=type(post)=="function"and function(url,payload)
+            return post({Url=url,Method="POST",Headers={["Content-Type"]="application/json"},Body=HttpService:JSONEncode(payload)})
+        end or nil})
+    local inventory=ReplicatedStorage.Profiles[player.Name].Inventory
+    local definitions=ReplicatedStorage.Database.Items
+    local rarityCache={}
+    local listeners,counts,unstacked={},{},{}
+    local revision=0
+    local function stopWatching()
+        revision+=1
+        for _,connection in ipairs(listeners)do connection:Disconnect()end
+        for _,connection in pairs(counts)do connection:Disconnect()end
+        table.clear(listeners);table.clear(counts);table.clear(unstacked)
+    end
+    local function itemRarity(item)
+        if item.Parent~=inventory or not item:IsA("IntValue")then return nil end
+        local name=item.Name
+        if rarityCache[name]==nil then
+            local definition=definitions:FindFirstChild(name)
+            local rarity=definition and definition:FindFirstChild("Rarity")
+            if rarity then rarityCache[name]=rarity.Value end
+        end
+        local rarity=rarityCache[name]
+        if rarity and webhook.Watches(rarity)then return rarity end
+    end
+    local function watchCount(item,count,rarity)
+        if not count or not count:IsA("ValueBase")or type(count.Value)~="number"then return nil end
+        if not counts[count]then
+            local last=count.Value
+            counts[count]=count:GetPropertyChangedSignal("Value"):Connect(function()
+                local value=count.Value;local increase=value-last;last=value
+                if item.Parent==inventory and count.Parent==item then webhook.Add(item.Name,rarity,increase)end
+            end)
+        end
+        return count.Value
+    end
+    local function refresh()
+        state.WebhookEnabled=webhook.Enabled
+        state.WebhookHidePlayer=webhook.HidePlayer
+        stopWatching()
+        if not webhook.Enabled then return end
+        listeners[1]=inventory.ChildAdded:Connect(function(item)
+            local rarity=itemRarity(item)
+            if not rarity then return end
+            local amount=watchCount(item,item:FindFirstChild("Count"),rarity)
+            if amount==nil then unstacked[item]=true end
+            webhook.Add(item.Name,rarity,amount or 1)
+        end)
+        listeners[2]=inventory.DescendantAdded:Connect(function(count)
+            if count.Name~="Count"then return end
+            local item=count.Parent
+            local rarity=item and itemRarity(item)
+            if not rarity then return end
+            local amount=watchCount(item,count,rarity)
+            if amount and unstacked[item]then unstacked[item]=nil;webhook.Add(item.Name,rarity,amount-1)end
+        end)
+        listeners[3]=inventory.DescendantRemoving:Connect(function(object)
+            if counts[object]then counts[object]:Disconnect();counts[object]=nil end
+            unstacked[object]=nil
+        end)
+        local stamp=revision
+        task.defer(function()
+            for index,item in ipairs(inventory:GetChildren())do
+                if stamp~=revision or not state.Running then return end
+                local count=item:FindFirstChild("Count")
+                local rarity=count and itemRarity(item)
+                if rarity then watchCount(item,count,rarity)end
+                if index%40==0 then task.wait()end
+            end
+        end)
+    end
+    state.WebhookController={Destroy=stopWatching}
+    state.GetWebhookRarities=function()return webhook.RarityChoices,webhook.Rarities end
+    state.GetWebhookStatus=function()return webhook.Status end
+    function state.SetWebhookUrl(text)if webhook.SetUrl(text)then refresh()end end
+    function state.ClearWebhookUrl()webhook.Clear();refresh()end
+    function state.SetWebhookEnabled(value)webhook.SetEnabled(value);refresh()end
+    function state.SetWebhookRarities(values)webhook.SetRarities(values);refresh()end
+    function state.SetWebhookHidePlayer(value)webhook.SetHidePlayer(value);state.WebhookHidePlayer=webhook.HidePlayer end
+    state.TestWebhook=webhook.Test
+    refresh()
+end
+installRewardWebhook()
 
 do
     local make=(function()
@@ -28842,6 +29072,24 @@ return function(ctx)
         paragraph("Settings","PresetStatus","Preset Status",function()
             return state.PresetStatus or (state.PresetId and "Active · Preset "..state.PresetId or "Active · Default")
         end)
+        section("Settings","WebhookSection","Webhook")
+        local urlInput
+        urlInput=input("Settings","WebhookUrl","Discord Webhook URL","",function(url)
+            if not url:match("%S")then return end
+            urlInput.Syncing=true;urlInput.Control:Set("");urlInput.Syncing=false
+            action("SetWebhookUrl",url)
+        end)
+        toggle("Settings","WebhookEnabled","Reward Webhook","SetWebhookEnabled")
+        dropdown("Settings","WebhookRarities","Reward Rarities",function()
+            local options,picked=state.GetWebhookRarities()
+            local values={}
+            for _,rarity in ipairs(options)do if picked[rarity]then values[#values+1]=rarity end end
+            return {Options=options,Value=values}
+        end,function(values)action("SetWebhookRarities",selection(values))end,true)
+        toggle("Settings","WebhookHidePlayer","Hide Player Name","SetWebhookHidePlayer")
+        button("Settings","TestWebhook","Send Test",function()action("TestWebhook")end)
+        button("Settings","ClearWebhookUrl","Clear URL",function()action("ClearWebhookUrl")end)
+        paragraph("Settings","WebhookStatus","Webhook Status",function()return state.GetWebhookStatus()end)
     end
     function synchronize(projection,choices)
         local definition=projection.Definition

@@ -218,6 +218,9 @@ def main():
     credit_send=script[credit_send_start:script.index("\n                end,",credit_send_start)]+"\nend"
     fixture += "assert(loadstring(" + quote(read("credit-check.test.luau")) + "))()(" + quote(read("credit-check.module.luau")) + "," + quote(read("attack-scheduler.module.luau")) + "," + quote(credit_send) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
+    webhook_start = script.index("local function installRewardWebhook()")
+    webhook_adapter = script[webhook_start:script.index("\ninstallRewardWebhook()", webhook_start) + len("\ninstallRewardWebhook()")]
+    fixture += "assert(loadstring(" + quote(read("reward-webhook.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("reward-webhook.module.luau"), webhook_adapter)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("windui.test.luau")) + "))()(" + quote(read("windui.module.luau")) + ")\n"
     payload_start = script.index("local persistedFields=")
     payload = script[payload_start:script.index("function state.SaveNow()", payload_start)]

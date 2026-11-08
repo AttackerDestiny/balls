@@ -486,6 +486,24 @@ return function(ctx)
         paragraph("Settings","PresetStatus","Preset Status",function()
             return state.PresetStatus or (state.PresetId and "Active · Preset "..state.PresetId or "Active · Default")
         end)
+        section("Settings","WebhookSection","Webhook")
+        local urlInput
+        urlInput=input("Settings","WebhookUrl","Discord Webhook URL","",function(url)
+            if not url:match("%S")then return end
+            urlInput.Syncing=true;urlInput.Control:Set("");urlInput.Syncing=false
+            action("SetWebhookUrl",url)
+        end)
+        toggle("Settings","WebhookEnabled","Reward Webhook","SetWebhookEnabled")
+        dropdown("Settings","WebhookRarities","Reward Rarities",function()
+            local options,picked=state.GetWebhookRarities()
+            local values={}
+            for _,rarity in ipairs(options)do if picked[rarity]then values[#values+1]=rarity end end
+            return {Options=options,Value=values}
+        end,function(values)action("SetWebhookRarities",selection(values))end,true)
+        toggle("Settings","WebhookHidePlayer","Hide Player Name","SetWebhookHidePlayer")
+        button("Settings","TestWebhook","Send Test",function()action("TestWebhook")end)
+        button("Settings","ClearWebhookUrl","Clear URL",function()action("ClearWebhookUrl")end)
+        paragraph("Settings","WebhookStatus","Webhook Status",function()return state.GetWebhookStatus()end)
     end
     function synchronize(projection,choices)
         local definition=projection.Definition

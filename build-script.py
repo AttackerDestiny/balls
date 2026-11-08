@@ -48,6 +48,7 @@ MODULES = {
     "STARTUP BELOW": "startup-below.module.luau",
     "CONFIG TRANSFER": "config-transfer.module.luau",
     "AUTO QUEST": "auto-quest.module.luau",
+    "REWARD WEBHOOK": "reward-webhook.module.luau",
     "AUTO CRAFT": "auto-craft.module.luau",
     "PLAYER TOOLS": "player-tools.module.luau",
     "INVENTORY VIEW": "inventory-view.module.luau",

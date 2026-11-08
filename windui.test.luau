@@ -83,6 +83,9 @@ return function(source)
     function s.LoadPreset(id)record("LoadPreset",id)end
     function s.SetAutoPreset(on)record("SetAutoPreset",on);s.AutoPreset=on end
     function s.SetPresetRoute(key,id)record("SetPresetRoute",key,id);s.PresetPreferences[key]=id end
+    function s.GetWebhookRarities()return {"Legendary","Tribute","Burst"},{Legendary=true}end
+    function s.GetWebhookStatus()return "Webhook status"end
+    function s.SetWebhookUrl(url)record("SetWebhookUrl",url)end
     function s.SetBetweenRoomField(index,field,value)
         if field=="AutoRetry" and not s.IsBetweenRoomHost(index)then return end
         if field=="Alt"then value=value:gsub("%s+",", ") end
@@ -276,6 +279,8 @@ return function(source)
         return s.PresetPreferences.Count
     end
     staged.Controls.ConfigImport:Emit("config-text");assert(calls[#calls].Name=="ImportConfig"and calls[#calls].Args[1]=="config-text")
+    staged.Controls.WebhookUrl:Emit("dummy-url");flush()
+    assert(calls[#calls].Name=="SetWebhookUrl" and staged.Controls.WebhookUrl.Value=="", "Webhook credentials clear from the input after entry")
     assert(staged.Controls.ConfigImport.Value=="","Successful import clears the text field")
     staged.Tabs.Settings:Select()
     for i=1,10 do staged.Update(24+i*.3);flush()end
