@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.between-roster-v3.0.19"
-local VERSION="3.0.19"
+local BUILD="2026-11-08.safe-block-recovery-v3.0.20"
+local VERSION="3.0.20"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -7324,7 +7324,6 @@ return function(ctx)
     local api={Active=false,Phase="Idle",Status="Ready",JobId=ctx.JobId}
     local run={epoch=0,solo=nil,settle=0,deadline=nil,busy=false,sameReturn=false}
     local ticket
-    local retriedUser
     local pending
     local function publish(message)
         api.Status=message
@@ -7336,7 +7335,7 @@ return function(ctx)
         return text:match(":%d+: (.*)")or text
     end
     local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
-        "getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
+        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
     local function retryable(reason)
         local text=tostring(reason or ""):lower()
         for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end
@@ -7355,7 +7354,7 @@ return function(ctx)
     end
     function api.Stop(reason,outcome)
         api.RetryWasTeleporting=api.Phase=="Teleporting"
-        api.Retryable=outcome~="Safe"and (api.RetryWasTeleporting or retryable(reason))
+        api.Retryable=outcome~="Safe"and (outcome=="Restart" or api.RetryWasTeleporting or retryable(reason))
         run.epoch=run.epoch+1;run.solo=nil;run.deadline=nil;pending=nil
         api.Active=false;api.Phase="Idle";api.Outcome=outcome or "Stopped"
         if ticket then
@@ -7372,7 +7371,7 @@ return function(ctx)
         local returns=resume.SameServerReturns
         return resume.Version==1 and resume.Active==true and resume.UserId==ctx.UserId and resume.PlaceId==ctx.PlaceId
             and type(resume.RunId)=="string"and #resume.RunId<=80
-            and age and age>=0 and age<900
+            and age and age>=0
             and type(hops)=="number"and hops>=0 and hops<=12 and hops%1==0
             and type(resume.Visited)=="table"and type(resume.Added)=="table"and type(resume.SourceJob)=="string"
             and (returns==nil or type(returns)=="number"and returns>=0 and returns<=3 and returns%1==0)
@@ -7407,16 +7406,21 @@ return function(ctx)
             api.Stop("Resume expired, changed floor/account, or did not change server")
             return false
         end
-        run.epoch=run.epoch+1;run.sameReturn=false;retriedUser=nil
+        ticket=resume;api.Ticket=ticket
+        run.epoch=run.epoch+1;run.sameReturn=false
         local epoch=run.epoch
         api.Active=true;api.Phase="Preparing";api.Outcome="Searching"
         publish("Checking block access and rejoin support...")
         return guard(epoch,function()
             if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features)end
+            if resume and ctx.Now()-resume.StartedAt>=900 then
+                api.Stop("Search window ended","Restart");return
+            end
             if resume and (resume.SourceJob==ctx.JobId or resume.Visited[ctx.JobId])then
-                ticket=resume;api.Ticket=ticket
+                if (ticket.SameServerReturns or 0)>=3 then
+                    api.Stop("Matchmaking keeps returning this server","Restart");return
+                end
                 ticket.SameServerReturns=(ticket.SameServerReturns or 0)+1
-                assert(ticket.SameServerReturns<=3,"Same-server retry limit reached · matchmaking did not move you")
                 run.sameReturn=true
             end
             ctx.Preflight()
@@ -7432,20 +7436,6 @@ return function(ctx)
             publish(run.sameReturn and ("Returned to the same server · retry "..ticket.SameServerReturns.."/3 pending")or "Checking this floor's population...")
         end)
     end
-    local function sameServer(epoch,people)
-        if not run.sameReturn then return false end
-        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return true end
-        local confirmed=blocked(epoch)
-        if not confirmed then return true end
-        for _,person in ipairs(people)do
-            if confirmed[person.UserId]then ticket.LastBlockedUserId=person.UserId;hop(epoch);return true end
-        end
-        for _,person in ipairs(people)do
-            assert(person.UserId~=ticket.LastBlockedUserId,"Block was not confirmed after same-server return; no rejoin attempted")
-        end
-        run.sameReturn=false
-        return false
-    end
     local function confirmPending(epoch)
         if api.Phase~="Block settling"then return false end
         if ctx.IsPresent(pending)then
@@ -7458,33 +7448,32 @@ return function(ctx)
     local function chooseAndBlock(epoch,people)
         local list=blocked(epoch)
         if not list then return end
+        for _,person in ipairs(people)do
+            if list[person.UserId]then ticket.LastBlockedUserId=person.UserId;hop(epoch);return end
+        end
         local eligible={}
         for _,person in ipairs(people)do
-            if list[person.UserId]then
-                if ticket.Hops==0 or retriedUser==person.UserId then ticket.LastBlockedUserId=person.UserId;hop(epoch);return end
-                error("A blocked player is in the joined server; matchmaking exclusion is not reliable here")
-            end
             local friend=ctx.IsFriend(person)
             if not current(epoch)then return end
             if friend==false then eligible[#eligible+1]=person end
         end
         if #eligible==0 then api.Stop("No eligible players to block (friends are skipped)");return end
         local person=ctx.ChooseTarget and ctx.ChooseTarget(eligible)or eligible[ctx.Random(#eligible)]
-        if not ctx.IsPresent(person)then run.settle=ctx.Clock()+2;return end
-        publish("Blocking @"..person.Name.."...");retriedUser=person.UserId
-        local receipt=ctx.Block(person,function()return current(epoch)end)
+        if not ctx.IsPresent(person)then return end
+        publish("Blocking @"..person.Name.."...")
+        local receipt=ctx.Block(person,function()return current(epoch)and ctx.IsPresent(person)end)
         if not current(epoch)then return end
+        if not receipt and not ctx.IsPresent(person)then return end
         assert(receipt==true,"Roblox rejected the block; no rejoin attempted")
         ticket.LastBlockedUserId=person.UserId;ticket.Added[#ticket.Added+1]=person.UserId
         save()
         if not current(epoch)then return end
         pending=person;api.Phase="Block settling";run.settle=ctx.Clock()+(ctx.BlockSettleSeconds or 3)
         publish("Waiting for the block to register...")
-        if ctx.BlockSettleSeconds==0 then confirmPending(epoch)end
+        if ctx.BlockSettleSeconds==0 and #outsiders()>0 then confirmPending(epoch)end
     end
     local function update(epoch)
         if api.Phase=="Preparing"then return end
-        if ctx.Now()-ticket.StartedAt>=900 then api.Stop("15-minute search limit reached");return end
         if api.Phase=="Teleporting"then
             if ctx.Clock()>=run.deadline then api.Stop("Rejoin timed out; no further blocks added")end
             return
@@ -7497,8 +7486,8 @@ return function(ctx)
         end
         run.solo=nil
         if ctx.Clock()<run.settle then return end
-        if sameServer(epoch,people)or confirmPending(epoch)then return end
-        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return end
+        if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then api.Stop("Search window ended","Restart");return end
+        if confirmPending(epoch)then return end
         chooseAndBlock(epoch,people)
     end
     function api.Update()
@@ -7512,9 +7501,9 @@ return function(ctx)
     end
     function api.Retry()
         if api.Active or run.busy or not api.Retryable then return false end
-        if not ticket then return api.Start()end
+        if not ticket or api.Outcome=="Restart" then return api.Start()end
         if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then
-            api.Retryable=false;publish("Search limit reached · toggle Safe Mode OFF/ON to begin a new search");return false
+            api.Stop("Search window ended","Restart");return false
         end
         local retryHop=api.RetryWasTeleporting
         run.epoch=run.epoch+1
@@ -7527,8 +7516,7 @@ return function(ctx)
             if not confirmed then return end
             ticket.Active=true;save()
             if not current(epoch)then return end
-            if retryHop and #outsiders()>0 then
-                assert(ticket.LastBlockedUserId and confirmed[ticket.LastBlockedUserId],"Cannot verify previous block · no rejoin attempted")
+            if retryHop and ticket.LastBlockedUserId and confirmed[ticket.LastBlockedUserId] and #outsiders()>0 then
                 hop(epoch);return
             end
             run.settle=ctx.Clock();run.solo=nil;api.Phase="Waiting"
@@ -7593,26 +7581,26 @@ return function(ctx)
     local function recover()
         if populationSafe()then protected();return false end
         panic()
-        if not(search.Retryable and type(search.Retry)=="function"and session.retries<3)then
-            ctx.Status("Holding position · "..tostring(api.PauseReason)..(session.retries>=3 and " · retries exhausted"or ""))
+        if not(search.Retryable and type(search.Retry)=="function")then
+            ctx.Status("Holding position · "..tostring(api.PauseReason))
             return true
         end
         local now=clock()
-        session.retryAt=session.retryAt or now+math.min(2,.5*2^session.retries)
+        local delay=search.Outcome=="Restart" and 2 or math.min(2,.25*2^session.retries)
+        session.retryAt=session.retryAt or now+delay
         if now<session.retryAt then
-            ctx.Status("Safe Mode retry "..(session.retries+1).."/3 in "..math.max(0,math.ceil(session.retryAt-now)).."s · "..tostring(api.PauseReason))
+            ctx.Status("Retrying Safe Mode · "..tostring(api.PauseReason))
             return true
         end
-        session.retries=session.retries+1;session.retryAt=nil;api.Paused=false
+        session.retries=math.min(3,session.retries+1);session.retryAt=nil;api.Paused=false
         session.adopted=search.Retry()==true
-        if not session.adopted then api.Pause(search.Status)end
+        if session.adopted then search.Update()else api.Pause(search.Status)end
         return true
     end
     function api.Update()
         if ctx.Suspended and ctx.Suspended()then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
-        if api.Paused and recover()then return end
         if state.SafeWhitelistResolving then
             api.Seeking=true
             for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then panic();break end end
@@ -7625,6 +7613,7 @@ return function(ctx)
             if not ctx.Travelling()then ctx.ChangeFloor(floor)end
             return
         end
+        if api.Paused and recover()then return end
         if search.Active then
             session.adopted=true;panic();search.Update();return
         end
@@ -8156,6 +8145,18 @@ return function(ctx)
     local virtualInput
     pcall(function()virtualInput=game:GetService("VirtualInputManager")end)
     local blockPoint=ctx.BlockPoint or function(button,inset)return button.AbsolutePosition+button.AbsoluteSize/2+inset end
+    local touchEnabled=false
+    pcall(function()touchEnabled=game:GetService("UserInputService").TouchEnabled end)
+    local function supportsInput(name)
+        local ok,method=pcall(function()return virtualInput and virtualInput[name]end)
+        return ok and type(method)=="function"
+    end
+    local canMouse=supportsInput("SendMouseButtonEvent")
+    local canTouch=touchEnabled and supportsInput("SendTouchEvent")
+    local fireActivation=type(firesignal)=="function" and firesignal or nil
+    local function requireBlockInput()
+        assert(canMouse or canTouch or fireActivation,"Automatic block confirmation input is unavailable")
+    end
     local function workerIdentity()
         if type(setthreadidentity)=="function"then pcall(setthreadidentity,8)end
     end
@@ -8224,7 +8225,7 @@ return function(ctx)
         if blockEventsBound then return end
         local blocked,added=pcall(StarterGui.GetCore,StarterGui,"PlayerBlockedEvent")
         local unblocked,removed=pcall(StarterGui.GetCore,StarterGui,"PlayerUnblockedEvent")
-        if not blocked or not unblocked then return end
+        if not blocked or not unblocked or not added or not removed then return end
         local function identity(value)return typeof(value)=="Instance"and value.UserId or tonumber(value)end
         ctx.Bind(added.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=true end end)
         ctx.Bind(removed.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=nil end end)
@@ -8260,7 +8261,7 @@ return function(ctx)
     end
     local function preflight()
         queuePreflight()
-        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic prompt input is unavailable")
+        requireBlockInput()
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
@@ -8291,13 +8292,31 @@ return function(ctx)
             end
         end
     end
-    local function click(button)
+    local touchId=0
+    local function click(button,attempt)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=blockPoint(button,GuiService:GetGuiInset())
-        virtualInput:SendMouseMoveEvent(point.X,point.Y,game)
-        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
-        task.wait(.03)
-        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+        local function touch()
+            touchId+=1
+            local id=touchId
+            virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
+            task.wait(.03)
+            virtualInput:SendTouchEvent(id,Enum.UserInputState.End.Value,point.X,point.Y)
+        end
+        local function mouse()
+            pcall(function()virtualInput:SendMouseMoveEvent(point.X,point.Y,game)end)
+            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
+            task.wait(.03)
+            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+        end
+        local function activate()fireActivation(button.Activated,nil,1)end
+        attempt=attempt or 1
+        local primary=canTouch and (attempt%2==1 or not canMouse) and touch or canMouse and mouse
+        local secondary=primary==touch and canMouse and mouse or primary==mouse and canTouch and touch
+        if fireActivation and (attempt==3 or not primary) and pcall(activate)then return end
+        if primary and pcall(primary)then return end
+        if secondary and pcall(secondary)then return end
+        if fireActivation and attempt~=3 and primary then pcall(activate)end
     end
     local function directBlock(target,active)
         local button,cancel=findPrompt(target)
@@ -8364,7 +8383,7 @@ return function(ctx)
         workerIdentity()
         if not active()then return false end
         if getBlocked()[target.UserId]then return true end
-        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic block confirmation input is unavailable")
+        requireBlockInput()
         return performBlock(target,active)
     end
     local queuedToken,queuedAutoPreset
@@ -8898,8 +8917,8 @@ return function(ctx)
                     local key=ctx.Key(button)
                     if key~=geometry then geometry=key;geometryAt=now end
                     if now>=clickAt and now-geometryAt>=.06 then
-                        ctx.Click(button)
                         clicked=clicked+1
+                        ctx.Click(button,clicked)
                         clickAt=ctx.Now()+.3
                     end
                 end

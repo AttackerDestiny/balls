@@ -43,26 +43,26 @@ return function(ctx)
     local function recover()
         if populationSafe()then protected();return false end
         panic()
-        if not(search.Retryable and type(search.Retry)=="function"and session.retries<3)then
-            ctx.Status("Holding position · "..tostring(api.PauseReason)..(session.retries>=3 and " · retries exhausted"or ""))
+        if not(search.Retryable and type(search.Retry)=="function")then
+            ctx.Status("Holding position · "..tostring(api.PauseReason))
             return true
         end
         local now=clock()
-        session.retryAt=session.retryAt or now+math.min(2,.5*2^session.retries)
+        local delay=search.Outcome=="Restart" and 2 or math.min(2,.25*2^session.retries)
+        session.retryAt=session.retryAt or now+delay
         if now<session.retryAt then
-            ctx.Status("Safe Mode retry "..(session.retries+1).."/3 in "..math.max(0,math.ceil(session.retryAt-now)).."s · "..tostring(api.PauseReason))
+            ctx.Status("Retrying Safe Mode · "..tostring(api.PauseReason))
             return true
         end
-        session.retries=session.retries+1;session.retryAt=nil;api.Paused=false
+        session.retries=math.min(3,session.retries+1);session.retryAt=nil;api.Paused=false
         session.adopted=search.Retry()==true
-        if not session.adopted then api.Pause(search.Status)end
+        if session.adopted then search.Update()else api.Pause(search.Status)end
         return true
     end
     function api.Update()
         if ctx.Suspended and ctx.Suspended()then return end
         if not state.SafeMode or not state.Running or state.StopEverything or state.ModeratorBlocking then return end
         if state.AccountProgression and state.AutomationTeleporting then api.Seeking=true;return end
-        if api.Paused and recover()then return end
         if state.SafeWhitelistResolving then
             api.Seeking=true
             for _,person in ipairs(ctx.Players())do if not ctx.Allowed(person)then panic();break end end
@@ -75,6 +75,7 @@ return function(ctx)
             if not ctx.Travelling()then ctx.ChangeFloor(floor)end
             return
         end
+        if api.Paused and recover()then return end
         if search.Active then
             session.adopted=true;panic();search.Update();return
         end

@@ -11,7 +11,7 @@ return function(source)
         end end
         setfenv(chunk,setmetatable({state=state,ctx=context,game={GetService=function()return {}end},workerIdentity=function()end,getBlocked=function()return f.Blocked end,
             block=function()f.Clicks+=1;if f.Fail then error("native block failed")end;return f.Result end,
-            virtualInput={SendMouseButtonEvent=function()end},typeof=type,
+            requireBlockInput=function()end,typeof=type,
             os={clock=function()return f.Now end},task={wait=function(dt)f.Now+=dt end}},{__index=getfenv()}))
         chunk();f.State=state;f.Live=function()return f.Active end;return f
     end

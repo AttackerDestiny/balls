@@ -231,10 +231,11 @@ def main():
     save_start = script.index("function state.SaveNow()")
     save = script[save_start:script.index("requestSave=function()", save_start)]
     fixture += "assert(loadstring(" + quote(read("storage-bootstrap.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("storage-bootstrap.module.luau"), script, read("kill-aura.luau"), save)) + ")\n"
-    fixture += "assert(loadstring(" + quote(read("block-input.test.luau")) + "))()(" + quote(read("block-input.module.luau")) + ")\n"
+    adapter = read("server-isolation-client.module.luau")
+    block_click = adapter[adapter.index("    local touchId=0"):adapter.index("    local function directBlock(")]
+    fixture += "assert(loadstring(" + quote(read("block-input.test.luau")) + "))()(" + quote(read("block-input.module.luau")) + "," + quote(block_click) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
-    adapter = read("server-isolation-client.module.luau")
     order_adapter = adapter[adapter.index("    local function spotOrder("):adapter.index("    local function joinFriendAtPad(")]
     fixture += "assert(loadstring(" + quote(read("multi-order.test.luau")) + "))()(" + quote(order_adapter) + ")\n"
     preflight = adapter[adapter.index("    local function queuePreflight()"):adapter.index("    local function preflight()")]

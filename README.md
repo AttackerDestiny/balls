@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.19**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.20**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -99,7 +99,7 @@ At startup, the floor runtime holds the character at the current X/Z and detecte
 - Same-floor rejoining uses the place ID without a teleport-pad detour. Native floor changes still use their required pad staging.
 - Startup still places the character 20 studs below ground once. Same-floor searches and outsider arrivals then block and dispatch rejoin from the current position, without pad staging or the old 10,000-stud escape.
 - After a confirmed-block rejoin request, the fallback checks on the next scheduler turn. If Roblox has not reported teleport starting, it re-verifies blocking and queued recovery before kicking the local account and retrying rejoin. The old eight-second wait is removed. Native teleport-start events cancel the fallback; retries remain bounded and use elapsed time rather than frame counts.
-- Uses bounded transient retries, **12-hop / 15-minute** search limits, and bounded same-server return recovery.
+- Keeps retrying temporary block and rejoin failures while Safe Mode is enabled. The **12-hop / 15-minute** windows renew automatically, with a short delay after repeated same-server returns.
 - Continues monitoring after reaching a protected server. Status exposes failed/unverified operations.
 
 **Safe floor** supports the normal floor catalog, Atheon, Atlantis, and The Between. Profile unlock changes refresh the normal floor labels. During Account Progression, Safe Mode protects the current progression floor.

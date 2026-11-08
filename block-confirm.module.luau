@@ -37,8 +37,8 @@ return function(ctx)
                     local key=ctx.Key(button)
                     if key~=geometry then geometry=key;geometryAt=now end
                     if now>=clickAt and now-geometryAt>=.06 then
-                        ctx.Click(button)
                         clicked=clicked+1
+                        ctx.Click(button,clicked)
                         clickAt=ctx.Now()+.3
                     end
                 end

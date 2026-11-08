@@ -3,7 +3,6 @@ return function(ctx)
     local api={Active=false,Phase="Idle",Status="Ready",JobId=ctx.JobId}
     local run={epoch=0,solo=nil,settle=0,deadline=nil,busy=false,sameReturn=false}
     local ticket
-    local retriedUser
     local pending
     local function publish(message)
         api.Status=message
@@ -15,7 +14,7 @@ return function(ctx)
         return text:match(":%d+: (.*)")or text
     end
     local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
-        "getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
+        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
     local function retryable(reason)
         local text=tostring(reason or ""):lower()
         for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end
@@ -34,7 +33,7 @@ return function(ctx)
     end
     function api.Stop(reason,outcome)
         api.RetryWasTeleporting=api.Phase=="Teleporting"
-        api.Retryable=outcome~="Safe"and (api.RetryWasTeleporting or retryable(reason))
+        api.Retryable=outcome~="Safe"and (outcome=="Restart" or api.RetryWasTeleporting or retryable(reason))
         run.epoch=run.epoch+1;run.solo=nil;run.deadline=nil;pending=nil
         api.Active=false;api.Phase="Idle";api.Outcome=outcome or "Stopped"
         if ticket then
@@ -51,7 +50,7 @@ return function(ctx)
         local returns=resume.SameServerReturns
         return resume.Version==1 and resume.Active==true and resume.UserId==ctx.UserId and resume.PlaceId==ctx.PlaceId
             and type(resume.RunId)=="string"and #resume.RunId<=80
-            and age and age>=0 and age<900
+            and age and age>=0
             and type(hops)=="number"and hops>=0 and hops<=12 and hops%1==0
             and type(resume.Visited)=="table"and type(resume.Added)=="table"and type(resume.SourceJob)=="string"
             and (returns==nil or type(returns)=="number"and returns>=0 and returns<=3 and returns%1==0)
@@ -86,16 +85,21 @@ return function(ctx)
             api.Stop("Resume expired, changed floor/account, or did not change server")
             return false
         end
-        run.epoch=run.epoch+1;run.sameReturn=false;retriedUser=nil
+        ticket=resume;api.Ticket=ticket
+        run.epoch=run.epoch+1;run.sameReturn=false
         local epoch=run.epoch
         api.Active=true;api.Phase="Preparing";api.Outcome="Searching"
         publish("Checking block access and rejoin support...")
         return guard(epoch,function()
             if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features)end
+            if resume and ctx.Now()-resume.StartedAt>=900 then
+                api.Stop("Search window ended","Restart");return
+            end
             if resume and (resume.SourceJob==ctx.JobId or resume.Visited[ctx.JobId])then
-                ticket=resume;api.Ticket=ticket
+                if (ticket.SameServerReturns or 0)>=3 then
+                    api.Stop("Matchmaking keeps returning this server","Restart");return
+                end
                 ticket.SameServerReturns=(ticket.SameServerReturns or 0)+1
-                assert(ticket.SameServerReturns<=3,"Same-server retry limit reached · matchmaking did not move you")
                 run.sameReturn=true
             end
             ctx.Preflight()
@@ -111,20 +115,6 @@ return function(ctx)
             publish(run.sameReturn and ("Returned to the same server · retry "..ticket.SameServerReturns.."/3 pending")or "Checking this floor's population...")
         end)
     end
-    local function sameServer(epoch,people)
-        if not run.sameReturn then return false end
-        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return true end
-        local confirmed=blocked(epoch)
-        if not confirmed then return true end
-        for _,person in ipairs(people)do
-            if confirmed[person.UserId]then ticket.LastBlockedUserId=person.UserId;hop(epoch);return true end
-        end
-        for _,person in ipairs(people)do
-            assert(person.UserId~=ticket.LastBlockedUserId,"Block was not confirmed after same-server return; no rejoin attempted")
-        end
-        run.sameReturn=false
-        return false
-    end
     local function confirmPending(epoch)
         if api.Phase~="Block settling"then return false end
         if ctx.IsPresent(pending)then
@@ -137,33 +127,32 @@ return function(ctx)
     local function chooseAndBlock(epoch,people)
         local list=blocked(epoch)
         if not list then return end
+        for _,person in ipairs(people)do
+            if list[person.UserId]then ticket.LastBlockedUserId=person.UserId;hop(epoch);return end
+        end
         local eligible={}
         for _,person in ipairs(people)do
-            if list[person.UserId]then
-                if ticket.Hops==0 or retriedUser==person.UserId then ticket.LastBlockedUserId=person.UserId;hop(epoch);return end
-                error("A blocked player is in the joined server; matchmaking exclusion is not reliable here")
-            end
             local friend=ctx.IsFriend(person)
             if not current(epoch)then return end
             if friend==false then eligible[#eligible+1]=person end
         end
         if #eligible==0 then api.Stop("No eligible players to block (friends are skipped)");return end
         local person=ctx.ChooseTarget and ctx.ChooseTarget(eligible)or eligible[ctx.Random(#eligible)]
-        if not ctx.IsPresent(person)then run.settle=ctx.Clock()+2;return end
-        publish("Blocking @"..person.Name.."...");retriedUser=person.UserId
-        local receipt=ctx.Block(person,function()return current(epoch)end)
+        if not ctx.IsPresent(person)then return end
+        publish("Blocking @"..person.Name.."...")
+        local receipt=ctx.Block(person,function()return current(epoch)and ctx.IsPresent(person)end)
         if not current(epoch)then return end
+        if not receipt and not ctx.IsPresent(person)then return end
         assert(receipt==true,"Roblox rejected the block; no rejoin attempted")
         ticket.LastBlockedUserId=person.UserId;ticket.Added[#ticket.Added+1]=person.UserId
         save()
         if not current(epoch)then return end
         pending=person;api.Phase="Block settling";run.settle=ctx.Clock()+(ctx.BlockSettleSeconds or 3)
         publish("Waiting for the block to register...")
-        if ctx.BlockSettleSeconds==0 then confirmPending(epoch)end
+        if ctx.BlockSettleSeconds==0 and #outsiders()>0 then confirmPending(epoch)end
     end
     local function update(epoch)
         if api.Phase=="Preparing"then return end
-        if ctx.Now()-ticket.StartedAt>=900 then api.Stop("15-minute search limit reached");return end
         if api.Phase=="Teleporting"then
             if ctx.Clock()>=run.deadline then api.Stop("Rejoin timed out; no further blocks added")end
             return
@@ -176,8 +165,8 @@ return function(ctx)
         end
         run.solo=nil
         if ctx.Clock()<run.settle then return end
-        if sameServer(epoch,people)or confirmPending(epoch)then return end
-        if ticket.Hops>=12 then api.Stop("12-hop search limit reached");return end
+        if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then api.Stop("Search window ended","Restart");return end
+        if confirmPending(epoch)then return end
         chooseAndBlock(epoch,people)
     end
     function api.Update()
@@ -191,9 +180,9 @@ return function(ctx)
     end
     function api.Retry()
         if api.Active or run.busy or not api.Retryable then return false end
-        if not ticket then return api.Start()end
+        if not ticket or api.Outcome=="Restart" then return api.Start()end
         if ctx.Now()-ticket.StartedAt>=900 or ticket.Hops>=12 then
-            api.Retryable=false;publish("Search limit reached · toggle Safe Mode OFF/ON to begin a new search");return false
+            api.Stop("Search window ended","Restart");return false
         end
         local retryHop=api.RetryWasTeleporting
         run.epoch=run.epoch+1
@@ -206,8 +195,7 @@ return function(ctx)
             if not confirmed then return end
             ticket.Active=true;save()
             if not current(epoch)then return end
-            if retryHop and #outsiders()>0 then
-                assert(ticket.LastBlockedUserId and confirmed[ticket.LastBlockedUserId],"Cannot verify previous block · no rejoin attempted")
+            if retryHop and ticket.LastBlockedUserId and confirmed[ticket.LastBlockedUserId] and #outsiders()>0 then
                 hop(epoch);return
             end
             run.settle=ctx.Clock();run.solo=nil;api.Phase="Waiting"

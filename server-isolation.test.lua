@@ -58,7 +58,7 @@ test("Same or visited jobs retry a confirmed rejoin without another block",funct
         assert(b.saved.SameServerReturns==1)
     end
 end)
-test("Repeated same-server arrivals retain a three-return cap across executions",function()
+test("Repeated same-server arrivals renew the bounded window without another block",function()
     local a=fixture();a.start();a.tick(8);a.tick(11);local t=a.saved
     for n=1,3 do
         local b=fixture(t,"A1");b.blocked[2]=true;assert(b.start());b.tick(.25*(n-1))
@@ -66,11 +66,17 @@ test("Repeated same-server arrivals retain a three-return cap across executions"
     end
     local stopped=fixture(t,"A1");stopped.blocked[2]=true
     assert(not stopped.start()and stopped.hops==0 and stopped.blocks==0 and not stopped.saved.Active)
+    assert(stopped.api.Outcome=="Restart" and stopped.api.Retry())
+    stopped.tick(8);assert(stopped.hops==1 and stopped.blocks==0 and stopped.saved.Hops==1)
 end)
 test("Same-server recovery does not bypass confirmation, solo checks, or hop limits",function()
     local a=fixture();a.start();a.tick(8);a.tick(11)
     local b=fixture(copy(a.saved),"A1");assert(b.start());b.tick(2)
-    assert(b.hops==0 and b.blocks==0 and b.api.Retryable)
+    assert(b.hops==0 and b.blocks==1 and b.api.Active)
+    b.tick(5);assert(b.hops==1 and b.blocked[2])
+    local failed=fixture(copy(a.saved),"A1");failed.ctx.Block=function()return false end
+    assert(failed.start());failed.tick(0)
+    assert(failed.hops==0 and failed.api.Retryable,"A stale receipt cannot authorize rejoin")
     b=fixture(copy(a.saved),"A1");b.others={};assert(b.start());b.tick(0);b.tick(8)
     assert(b.api.Outcome=="Safe"and b.hops==0)
     local t=copy(a.saved);t.Hops=12;b=fixture(t,"A1");b.blocked[2]=true;assert(b.start());b.tick(2)
@@ -87,11 +93,11 @@ test("a confirmed blocked player leaving does not become a failed block", functi
     f.ctx.IsPresent=function(p) return p.UserId~=2 end
     f.tick(11); assert(f.api.Active and f.hops==1 and f.blocks==1)
 end)
-test("existing block allows first hop; blocked player after rejoin stops", function()
+test("A confirmed block can be reused in a different server without adding another block", function()
     local f=fixture(); f.blocked[2]=true; f.start(); f.tick(8)
     assert(f.api.Active and f.blocks==0 and f.hops==1)
     local g=fixture(f.saved,"A2"); g.blocked[2]=true; g.start(); g.tick(8)
-    assert(not g.api.Active and g.blocks==0 and g.hops==0)
+    assert(g.api.Active and g.blocks==0 and g.hops==1)
 end)
 test("failed block or missing confirmation never rejoins", function()
     for _, confirmed in ipairs({false,true}) do
@@ -189,14 +195,21 @@ test("Rejoin retry reconfirms the previous block and never adds another block",f
     local f=fixture();f.start();f.tick(8);f.tick(11);f.api.TeleportFailed("temporary failure")
     assert(f.api.Retryable and not f.api.Active and f.api.Retry())
     assert(f.blocks==1 and f.hops==2 and f.saved.Hops==2 and f.saved.StartedAt==1000)
-    f.api.TeleportFailed("temporary failure");f.blocked={};assert(not f.api.Retry())
-    assert(f.hops==2 and not f.api.Retryable)
+    f.api.TeleportFailed("temporary failure");f.blocked={};assert(f.api.Retry())
+    assert(f.hops==2 and f.blocks==1)
+    f.tick(12);assert(f.hops==2 and f.blocks==2)
+    f.tick(15);assert(f.hops==3 and f.blocked[2])
 end)
-test("Search limits and missing executor support never gain an automatic restart",function()
+test("Expired windows can renew, while missing executor support stays paused",function()
     local f=fixture();f.ctx.Preflight=function()error("No queue_on_teleport support")end
     assert(not f.start()and not f.api.Retryable and not f.api.Retry())
     f=fixture();f.start();f.tick(8);f.tick(11);f.api.TeleportFailed("temporary")
-    f.wall=1900;assert(not f.api.Retry()and f.hops==1 and not f.api.Retryable)
+    f.wall=1900;assert(not f.api.Retry()and f.hops==1 and f.api.Outcome=="Restart")
+    assert(f.api.Retry() and f.saved.Hops==0 and f.saved.StartedAt==1900)
+    local previous=fixture();previous.start();previous.tick(8);previous.tick(11)
+    local resumed=fixture(previous.saved,"A2");resumed.wall=1900
+    assert(not resumed.start() and resumed.api.Outcome=="Restart" and resumed.api.Retry())
+    assert(resumed.saved.Hops==0 and resumed.hops==0)
 end)
 test("A late block acknowledgment recovers without prompting or blocking twice",function()
     local f=fixture();f.start()

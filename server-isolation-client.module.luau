@@ -22,6 +22,18 @@ return function(ctx)
     local virtualInput
     pcall(function()virtualInput=game:GetService("VirtualInputManager")end)
     local blockPoint=ctx.BlockPoint or function(button,inset)return button.AbsolutePosition+button.AbsoluteSize/2+inset end
+    local touchEnabled=false
+    pcall(function()touchEnabled=game:GetService("UserInputService").TouchEnabled end)
+    local function supportsInput(name)
+        local ok,method=pcall(function()return virtualInput and virtualInput[name]end)
+        return ok and type(method)=="function"
+    end
+    local canMouse=supportsInput("SendMouseButtonEvent")
+    local canTouch=touchEnabled and supportsInput("SendTouchEvent")
+    local fireActivation=type(firesignal)=="function" and firesignal or nil
+    local function requireBlockInput()
+        assert(canMouse or canTouch or fireActivation,"Automatic block confirmation input is unavailable")
+    end
     local function workerIdentity()
         if type(setthreadidentity)=="function"then pcall(setthreadidentity,8)end
     end
@@ -90,7 +102,7 @@ return function(ctx)
         if blockEventsBound then return end
         local blocked,added=pcall(StarterGui.GetCore,StarterGui,"PlayerBlockedEvent")
         local unblocked,removed=pcall(StarterGui.GetCore,StarterGui,"PlayerUnblockedEvent")
-        if not blocked or not unblocked then return end
+        if not blocked or not unblocked or not added or not removed then return end
         local function identity(value)return typeof(value)=="Instance"and value.UserId or tonumber(value)end
         ctx.Bind(added.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=true end end)
         ctx.Bind(removed.Event,function(value)local id=identity(value);if id then nativeBlockedEvents[id]=nil end end)
@@ -126,7 +138,7 @@ return function(ctx)
     end
     local function preflight()
         queuePreflight()
-        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic prompt input is unavailable")
+        requireBlockInput()
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
@@ -157,13 +169,31 @@ return function(ctx)
             end
         end
     end
-    local function click(button)
+    local touchId=0
+    local function click(button,attempt)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=blockPoint(button,GuiService:GetGuiInset())
-        virtualInput:SendMouseMoveEvent(point.X,point.Y,game)
-        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
-        task.wait(.03)
-        virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+        local function touch()
+            touchId+=1
+            local id=touchId
+            virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
+            task.wait(.03)
+            virtualInput:SendTouchEvent(id,Enum.UserInputState.End.Value,point.X,point.Y)
+        end
+        local function mouse()
+            pcall(function()virtualInput:SendMouseMoveEvent(point.X,point.Y,game)end)
+            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
+            task.wait(.03)
+            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+        end
+        local function activate()fireActivation(button.Activated,nil,1)end
+        attempt=attempt or 1
+        local primary=canTouch and (attempt%2==1 or not canMouse) and touch or canMouse and mouse
+        local secondary=primary==touch and canMouse and mouse or primary==mouse and canTouch and touch
+        if fireActivation and (attempt==3 or not primary) and pcall(activate)then return end
+        if primary and pcall(primary)then return end
+        if secondary and pcall(secondary)then return end
+        if fireActivation and attempt~=3 and primary then pcall(activate)end
     end
     local function directBlock(target,active)
         local button,cancel=findPrompt(target)
@@ -230,7 +260,7 @@ return function(ctx)
         workerIdentity()
         if not active()then return false end
         if getBlocked()[target.UserId]then return true end
-        assert(virtualInput and typeof(virtualInput.SendMouseButtonEvent)=="function","Automatic block confirmation input is unavailable")
+        requireBlockInput()
         return performBlock(target,active)
     end
     local queuedToken,queuedAutoPreset
