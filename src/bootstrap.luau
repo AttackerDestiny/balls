@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.portable-presets-v3.0.18"
-local VERSION="3.0.18"
+local BUILD="2026-11-08.between-roster-v3.0.19"
+local VERSION="3.0.19"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

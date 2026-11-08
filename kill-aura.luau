@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.portable-presets-v3.0.18"
-local VERSION="3.0.18"
+local BUILD="2026-11-08.between-roster-v3.0.19"
+local VERSION="3.0.19"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -10778,6 +10778,24 @@ end
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
     end
+    local function missingRoomAlts(room,names)
+        local missing={}
+        if #names==0 then return missing end
+        local roster={}
+        for _,person in ipairs(Players:GetPlayers())do
+            roster[person.Name:lower()]=person
+            roster[tostring(person.UserId)]=person
+        end
+        for _,name in ipairs(names)do
+            local alt=roster[name:lower()]
+            local id=alt and tostring(alt.UserId) or name:match("^%d+$")
+            -- The party roster and the player attribute can replicate independently.
+            local joined=room.Instance and ((id and room.Instance:GetAttribute(id)~=nil)
+                or (alt and tostring(alt:GetAttribute("PartyID"))==room.Id))
+            if not joined then missing[#missing+1]=name end
+        end
+        return missing
+    end
     local function send(action,partyId)
         if action=="CreateParty"and index==nil then
             for ordinal,floor in ipairs(require(ReplicatedStorage.Database.Locations).floors)do
@@ -10794,7 +10812,7 @@ end
     end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
         Active=function()
-            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting or state.TravelBusy then return false end
+            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting then return false end
             if not localFloor then return true end
             if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
@@ -10806,17 +10824,7 @@ end
         end,
         Assignment=function()return assignment end,
         FindHostRoom=findHostRoom,
-        MissingAlts=function(current,names)
-            local missing={}
-            for _,name in ipairs(names)do
-                local alt=findPlayer(name)
-                if not alt or not current.Instance or tostring(alt:GetAttribute("PartyID"))~=current.Id
-                    or current.Instance:GetAttribute(tostring(alt.UserId))==nil then
-                    missing[#missing+1]=name
-                end
-            end
-            return missing
-        end,
+        MissingAlts=missingRoomAlts,
         Selection=function()
             local room=assignment.Room
             if room then return room.Mode,room.Difficulty end

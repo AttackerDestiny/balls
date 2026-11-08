@@ -98,15 +98,42 @@ return function(source,snapshotSource)
     assert(starts==4,"Removing or changing an assignment cancels a start waiting to dispatch")
 
     local nativeParty
-    local snapshot=assert(loadstring(snapshotSource.."\nreturn roomSnapshot"))
+    local snapshot=assert(loadstring(snapshotSource.."\nreturn roomSnapshot,missingRoomAlts"))
     local env={localFloor=true,player={GetAttribute=function()return 23 end},
         ReplicatedStorage={FindFirstChild=function()return {FindFirstChild=function()return nativeParty end}end}}
     setfenv(snapshot,setmetatable(env,{__index=getfenv()}))
-    local read=snapshot()
+    local read,missingRoomAlts=snapshot()
     assert(not read(),"A stale PartyID cannot prevent room creation inside The Between")
     nativeParty={GetAttribute=function(_,name)return name=="Host"and 10 or nil end}
     assert(read().Host==10 and read().Id=="23","Recognize a real retained party")
     nativeParty=nil;env.localFloor=false
     assert(read().Id=="23","Keep waiting for the replicated party details in the lobby")
-    print("PASS The Between starts once after both room settings are confirmed")
+
+    local members,players={Host=10,PlaceId=20,Status="Friends",Mode="Hard"},{}
+    local names={}
+    for index=1,7 do
+        local id=10+index
+        names[index]=index==7 and tostring(id) or "alt"..index
+        if index~=7 then
+            players[index]={Name="Alt"..index,UserId=id,PartyId=index%2==0 and 23 or nil,
+                GetAttribute=function(person,key)assert(key=="PartyID");return person.PartyId end}
+        end
+        if index%2==1 then members[tostring(id)]=true end
+    end
+    nativeParty={GetAttribute=function(_,name)return members[name]end}
+    env.Players={GetPlayers=function()return players end}
+    ctx.Read=read;ctx.MissingAlts=missingRoomAlts
+    assignment={Role="Host",Alts=names}
+    controller=make(ctx)
+    assert(#missingRoomAlts(read(),names)==0,"Recognize all seven alts using independently replicated markers")
+    controller.Update(20)
+    players[6].PartyId=999
+    run=worker;worker=nil;run()
+    assert(starts==4 and missingRoomAlts(read(),names)[1]=="alt6","An alt in a different party cancels the pending start")
+    players[6].PartyId=23
+    controller.Update(21)
+    run=worker;worker=nil;run()
+    controller.Update(22)
+    assert(starts==5 and not worker,"Start once after all seven alts have joined")
+    print("PASS The Between: confirmed settings, mixed roster receipts, seven alts, and final roster recheck")
 end
