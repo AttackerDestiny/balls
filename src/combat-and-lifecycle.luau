@@ -382,6 +382,7 @@ function state.Destroy(replacing,teleportCleanup)
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
+    owned("AutoRegroup",state.AutoRegroupController)
     local callbacks={
         {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},
         {"Skills",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end},

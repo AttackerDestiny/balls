@@ -503,12 +503,13 @@ local function installBetweenAutomation()
     if localFloor then
         local receipt,busy
         taskController("BetweenRevive",.35,function()
+            if state.AutoRegroupHolding then return end
             if livingPlayer(player)then receipt=nil;return end
             local lives=player:GetAttribute("Lives")
             if busy or not prompt()or type(lives)~="number"or lives<=0 or receipt==lives then return end
             receipt=lives;busy=true
             task.spawn(function()
-                local permitted=state.Running and not state.StopEverything and prompt()
+                local permitted=state.Running and not state.StopEverything and not state.AutoRegroupHolding and prompt()
                     and player:GetAttribute("Lives")==lives and not livingPlayer(player)
                 if permitted then
                     local ok,accepted=pcall(ReplicatedStorage.Function.InvokeServer,ReplicatedStorage.Function,
@@ -658,6 +659,77 @@ local function installBetweenAutomation()
         state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()
+    local makeRegroup=(function()
+-- BEGIN BUNDLED AUTO REGROUP
+-- END BUNDLED AUTO REGROUP
+    end)()
+    local function regroupUsers()
+        local source=state.AutoRegroupUsers or ""
+        if not source:find("%S")then
+            if assignment.Role=="Invalid"then return {}end
+            local entry=assignment.Room
+            if not entry then
+                for _,room in ipairs(rooms)do
+                    local host=hostName(room)
+                    if host and matches(player,host)then entry=room;break end
+                    for name in room.Alt:gmatch("[^,%s;]+")do if matches(player,name:gsub("^@",""))then entry=room;break end end
+                    if entry then break end
+                end
+            end
+            if not entry then return {}end
+            local host=hostName(entry)
+            if not host or host==""then return {}end
+            source=host..", "..entry.Alt
+        end
+        local names,seen={},{}
+        for name in source:gmatch("[^,%s;]+")do
+            name=name:gsub("^@","")
+            local key=name:lower()
+            if name:match("^[%w_]+$")and #name<=20 and not seen[key]then seen[key]=true;names[#names+1]=name end
+        end
+        table.sort(names,function(a,b)return a:lower()<b:lower()end)
+        return names
+    end
+    state.AutoRegroupController=makeRegroup({State=state,InBetween=function()return localFloor end,Users=regroupUsers,
+        Present=function()
+            local roster={}
+            for _,person in ipairs(Players:GetPlayers())do roster[person.Name:lower()]=true;roster[tostring(person.UserId)]=true end
+            return roster
+        end,
+        Pause=function()
+            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false;state.PlayerTravelLease=nil
+            finishAttackBurst("Auto Regroup");stopSword(true)
+            if state.CancelSkillAura then state.CancelSkillAura("Auto Regroup")end
+            if state.CancelMiscSkill then state.CancelMiscSkill()end
+            stopMovement("Auto Regroup · returning to lobby",true)
+        end,
+        Release=function()nextMovementUpdate=0;nextAcquisition=0 end,
+        ResetCharacter=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health>0 then humanoid.Health=0 end
+        end,
+        Dead=function()
+            local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            return player:GetAttribute("ReviveState")==true or not humanoid or humanoid.Health<=0
+        end,
+        PrepareReturn=function()state.SaveNow();if state.QueueAutomation then state.QueueAutomation()end end,
+        Return=function()ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"WaveDefense","Return"})end})
+    function state.SetAutoRegroup(value)
+        state.AutoRegroup=value==true;state.AutoRegroupController.Reset();requestSave()
+    end
+    function state.SetAutoRegroupUsers(value)
+        local names,seen={},{}
+        for name in tostring(value or ""):gmatch("[^,%s;]+")do
+            name=name:gsub("^@","")
+            assert(name:match("^[%w_]+$")and #name<=20,"Use Roblox usernames or user IDs")
+            if not seen[name:lower()]then seen[name:lower()]=true;names[#names+1]=name end
+        end
+        assert(#names<=100,"Use at most 100 regroup users")
+        state.AutoRegroupUsers=table.concat(names,", ");state.AutoRegroupController.Reset();requestSave()
+        return state.AutoRegroupUsers
+    end
+    taskController("AutoRegroup",.5,state.AutoRegroupController.Update);table.insert(frameOrder,1,"AutoRegroup")
     local index
     local function roomSnapshot(person)
         local id=(person or player):GetAttribute("PartyID")
@@ -721,7 +793,7 @@ local function installBetweenAutomation()
         end end
     end
     local function roomActive()
-        if not state.Running or not state.AutoCreateBetween or state.StopEverything
+        if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutoRegroupHolding
             or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
         if not localFloor then return true end
         if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end

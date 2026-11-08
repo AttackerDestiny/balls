@@ -17,6 +17,7 @@ MODULES = {
     "BLOCK UI MASK": "block-ui-mask.module.luau",
     "BETWEEN ROOM": "between-room.module.luau",
     "BETWEEN RETRY": "between-retry.module.luau",
+    "AUTO REGROUP": "auto-regroup.module.luau",
     "ANTI SUSPICIOUS": "anti-suspicious.module.luau",
     "CONFIG PRESETS": "config-presets.module.luau",
     "BETWEEN PACE": "between-pace.module.luau",

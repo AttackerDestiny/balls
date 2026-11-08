@@ -86,7 +86,10 @@ local function runFrame()
     local at=os.clock()
     workScheduler.Step("TradeHold",at);workScheduler.Step("AuraTouch",at)
     if state.StopEverything or priorityOnly()then return end
-    for _,name in ipairs(frameOrder)do if state.Running then workScheduler.Step(name,at)end end
+    for _,name in ipairs(frameOrder)do
+        if state.Running and (not state.AutoRegroupHolding or name=="AutoRegroup")then workScheduler.Step(name,at)end
+    end
+    if state.AutoRegroupHolding then return end
     for index=3,#jobs do
         if not state.Running then return end
         local name=jobs[index][1]

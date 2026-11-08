@@ -12,7 +12,7 @@ return function(source,activeSource,findSource)
     for _,key in ipairs({"Running","AutoCreateBetween"})do
         state[key]=false;assert(not active());state[key]=true
     end
-    for _,key in ipairs({"StopEverything","AutomationTeleporting","ServerTeleportStarted"})do
+    for _,key in ipairs({"StopEverything","AutomationTeleporting","ServerTeleportStarted","AutoRegroupHolding"})do
         state[key]=true;assert(not active());state[key]=false
     end
     state.SafeController.Seeking=true;assert(not active());state.SafeController.Seeking=false

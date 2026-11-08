@@ -71,11 +71,11 @@ return function(source)
     for key,method in pairs({Enabled="SetEnabled",AutoFarm="SetAutoFarm",SkillAura="SetSkillAura",MiscSkillEnabled="SetMiscSkillEnabled",
         NoSelfDamage="SetNoSelfDamage",AeganatosDodge="SetAeganatosDodge",AtheonUnlock="SetAtheonUnlock",CreditCheck="SetCreditCheck",BossOnly="SetBossOnly",AutoSwing="SetAutoSwing",AtheonDodge="SetAtheonDodge",AutoDodge="SetAutoDodge",TransparentMap="SetTransparentMap",
         AutoEquipBestSword="SetAutoEquipBestSword",SafeMode="SetSafeMode",MultiSpot="SetMultiSpot",AutoJoinFriend="SetAutoJoinFriend",
-        AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade",AntiSuspicious="SetAntiSuspicious"})do
+        AccountProgression="SetAccountProgression",AutoTrade="SetAutoTrade",AntiSuspicious="SetAntiSuspicious",AutoRegroup="SetAutoRegroup"})do
         s[method]=function(value)record(method,value);if not s.StopEverything then s[key]=value end end
     end
     for key,method in pairs({CreditWhitelistText="SetCreditWhitelist",SafeWhitelistText="SetSafeWhitelist",JoinFriendUsername="SetJoinFriendUsername",
-        SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode"})do
+        SelectedSkill="SetSelectedSkill",SelectedMiscSkill="SetMiscSkill",TradeMode="SetTradeMode",AutoRegroupUsers="SetAutoRegroupUsers"})do
         s[method]=function(value)record(method,value);s[key]=value end
     end
     function s.IsBetweenRoomHost(index)return s.BetweenRooms[index].Host=="Host"end
@@ -149,7 +149,7 @@ return function(source)
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportSection","TeleportDestination","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
-        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoCraftSection","AutoCraft","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression","ResetSavedProgression"})do
+        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoCraftSection","AutoCraft","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression","ResetSavedProgression","AutoRegroup","AutoRegroupUsers","AutoRegroupStatus"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
     assert(c.MultiSpotAreas.Title=="Saved Spot"and c.MultiSpotAreas.Desc==nil)
@@ -186,6 +186,8 @@ return function(source)
     c.NoSelfDamage:Emit(true);assert(s.NoSelfDamage and calls[#calls].Name=="SetNoSelfDamage")
     c.AeganatosDodge:Emit(true);assert(s.AeganatosDodge)
     c.AtheonUnlock:Emit(true);assert(s.AtheonUnlock)
+    c.AutoRegroup:Emit(true);assert(s.AutoRegroup)
+    c.AutoRegroupUsers:Emit("Host, Alt");assert(s.AutoRegroupUsers=="Host, Alt")
     assert(c.BetweenRoom1Start.Title=="Start" and not c.BetweenRoom1Start.Value)
     c.BetweenRoom1Mode:Emit("Friends");assert(s.BetweenRooms[1].Mode=="Friends")
     c.BetweenRoom1Difficulty:Emit("Hard");assert(s.BetweenRooms[1].Difficulty=="Hard")

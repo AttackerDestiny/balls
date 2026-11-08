@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.wave-hazard-clearance-v3.0.28"
-local VERSION="3.0.28"
+local BUILD="2026-11-08.regroup-friend-cooldown-v3.0.29"
+local VERSION="3.0.29"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -21,7 +21,7 @@ local previous=(function()
 return function(previous,userId)
     if type(previous)~="table"or previous.UserId~=userId then return nil end
     local fields={"AccountProgression","ActiveTab","AtheonDodge","AutoCraft","AutoDismantle","AutoDodge",
-        "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoSwing","AutoTrade",
+        "AutoEquipBestSword","AutoExplore","AutoFarm","AutoHideUI","AutoJoinFriend","AutoRegroup","AutoRegroupUsers","AutoSwing","AutoTrade",
         "AutomationResumeFeatures","AutomationRunId","BossOnly","NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","Enabled",
         "HealthHUDPosition","JoinFriendUsername","MiscSkillEnabled","MultiSpot","MultiSpotCursor","MultiSpotOrder",
         "MultiSpotPending","MultiSpotSelected","OffsetProfiles","PerformanceBoosters","ProgressionBossCleared",
@@ -283,9 +283,9 @@ local presetBook=(function()
 return function(ctx)
     local schema={}
     local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
-        string={"BetweenAccess","BetweenDifficulty","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
+        string={"BetweenAccess","BetweenDifficulty","AutoRegroupUsers","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
         table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
@@ -699,7 +699,7 @@ if filePersistence then
 return function(ctx)
     local file=ctx.File or "SB2Codex/shared-settings.json"
     local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
-        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
+        "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoRegroup","AutoRegroupUsers","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}
         for _,name in ipairs(fields)do result[name]=settings[name]end
@@ -791,9 +791,9 @@ local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
 local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
-    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false}
+    AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false,AutoRegroup=false}
 for key,fallback in pairs(booleanDefaults)do restore[key]=preference(key,fallback)==true end
-local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText=""}
+local textDefaults={BetweenAccess="Private",BetweenDifficulty="Normal",TradeMode="Selected",CreditWhitelistText="",SelectedMiscSkill="Cursed Enhancement",JoinFriendUsername="",SafeWhitelistText="",AutoRegroupUsers=""}
 for key,fallback in pairs(textDefaults)do restore[key]=preference(key,fallback)end
 for _,key in ipairs({"BetweenRooms","BetweenPace","AntiSuspiciousLimits","TradeItems","AutoCraft","AutoDismantle","PerformanceBoosters","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder"})do
     local value=preference(key,{})
@@ -936,7 +936,7 @@ local state={
     AutoSaveStatus=filePersistence and "Auto-save · ready"or "Auto-save · file access unavailable",
 }
 for _,key in ipairs({"CreditCheck","CreditWhitelistText","BossOnly","AutoSwing","AutoTrade","TradeMode","AutoEquipBestSword",
-    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
+    "AutoExplore","AutoDodge","NoSelfDamage","AeganatosDodge","AtheonDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoRegroup","AutoRegroupUsers","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId",
     "SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","MultiSpotCursor","MultiSpotPending",
     "AutomationRunId","AutomationResumeFeatures","AccountProgression","ProgressionFloor","ProgressionBossCleared","ProgressionComplete","ProgressionRestore"})do
     state[key]=restore[key]
@@ -1783,7 +1783,7 @@ function state.SetUIVisible(requested)
     if requested and state.Running and state.WindUIError and state.RestartScript then state.RestartScript()end
 end
 bind(showUI.Activated,function()state.SetUIVisible(state.UIHidden)end)
-local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
+local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","AutoRegroup","AutoRegroupUsers","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword",
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
@@ -2431,6 +2431,7 @@ return function(state)
         {"Safety",function()return state.SafeModePanic end},
         {"Friend",function()return state.AutoJoinFriendHolding end},
         {"Floor travel",function()return state.AutomationTeleporting end},
+        {"Regroup",function()return state.AutoRegroupHolding end},
         {"Trade",function()return state.AutoTradeBusy end},
         {"Arena travel",function()return state.TravelBusy or state.MultiSpotOwnsTravel end},
         {"Dodge",function()return state.Dodging or state.BlackoutHolding end},
@@ -6115,6 +6116,7 @@ end
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
+    owned("AutoRegroup",state.AutoRegroupController)
     local callbacks={
         {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},
         {"Skills",function()if state.CancelSkillAura then state.CancelSkillAura("Script replaced")end end},
@@ -6544,7 +6546,10 @@ local function runFrame()
     local at=os.clock()
     workScheduler.Step("TradeHold",at);workScheduler.Step("AuraTouch",at)
     if state.StopEverything or priorityOnly()then return end
-    for _,name in ipairs(frameOrder)do if state.Running then workScheduler.Step(name,at)end end
+    for _,name in ipairs(frameOrder)do
+        if state.Running and (not state.AutoRegroupHolding or name=="AutoRegroup")then workScheduler.Step(name,at)end
+    end
+    if state.AutoRegroupHolding then return end
     for index=3,#jobs do
         if not state.Running then return end
         local name=jobs[index][1]
@@ -8854,7 +8859,8 @@ end
         if not ok then error(result)end
         return result
     end
-    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
+    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,Now=os.clock,
+        PendingTimedOut=function()state.ServerTeleportStarted=false end,
         Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
         Queue=function()
             local enqueue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)or (fluxus and fluxus.queue_on_teleport)
@@ -8876,7 +8882,9 @@ end
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,reason)
         if who==player then
             local requested=state.SafeRejoinRequested
+            state.ServerTeleportStarted=false
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
+            if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
@@ -8930,7 +8938,9 @@ end
             if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
+            state.ServerTeleportStarted=false
             clearRejoinAway();state.AutomationTeleporting=false
+            if friend.TeleportFailed then friend.TeleportFailed("Teleport failed")end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
@@ -8950,6 +8960,7 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
+                if state.AutoRegroupHolding then return end
                 if state.AntiSuspiciousRestUntil then
                     if os.time()<state.AntiSuspiciousRestUntil or kickFallback and kickFallback.Armed then return end
                     state.AntiSuspiciousRestUntil=nil
@@ -9121,20 +9132,45 @@ end
 -- Resolve identities lazily and protect every yielding step with a generation token.
 return function(ctx)
     local state=ctx.State
-    local api={}
+    local api={Failures=0}
     local generation,due=0,0
     local operation
+    local pending
     local identity={}
+    local clock=ctx.Now or os.clock
     local function status(message)state.AutoJoinFriendStatus=message end
+    local function clearFailures()
+        api.Failures=0;api.CooldownUntil=nil;due=0
+    end
+    local function failed(reason)
+        api.Failures+=1
+        if api.Failures>=2 then
+            api.CooldownUntil=clock()+600;due=api.CooldownUntil
+            status("Join failed twice · waiting 10 minutes before retrying")
+        else status(reason)end
+    end
+    local function cancelled(reason)
+        local text=tostring(reason):lower()
+        return text:find("friend join cancelled",1,true)or text:find("wait for a living character",1,true)
+            or text:find("teleport pad is unavailable",1,true)
+    end
     function api.Reset()
-        generation=generation+1;due=0;identity={}
+        generation=generation+1;due=0;identity={};pending=nil
+        clearFailures()
         status(state.AutoJoinFriend and "Checking friend..."or "Auto Join Friend is off")
     end
     local function blocked()
         local gates={{state.ModeratorBlocking,"moderator protection"},{state.SafeModePanic,"Safe Mode protection"},
+            {state.AutoRegroupHolding,"Auto Regroup"},
             {state.TravelBusy,"current movement"},{state.AutomationTeleporting,"teleport in progress"},
             {state.AccountProgression,"Account Progression owns floor travel"}}
         for _,gate in ipairs(gates)do if gate[1]then return gate[2]end end
+    end
+    function api.TeleportFailed(reason)
+        local ticket=pending;pending=nil
+        if not ticket or ticket.generation~=generation or not state.Running or not state.AutoJoinFriend
+            or state.StopEverything or blocked()then return end
+        failed("Retrying · "..tostring(reason or "Friend teleport failed"))
     end
     function api.Update(now)
         if not state.AutoJoinFriend then status("Auto Join Friend is off");return end
@@ -9144,20 +9180,41 @@ return function(ctx)
         local name=tostring(state.JoinFriendUsername or ""):match("^%s*(.-)%s*$"):gsub("^@","")
         if name==""then status("Enter a Roblox username");return end
         if #name>20 or not name:match("^[%w_]+$")then status("Enter a username, not a display name");return end
+        if identity.name and identity.name~=name:lower()then api.Reset()end
         local gate=blocked()
         if gate then status("Waiting · "..gate);return end
+        if identity.id and identity.id~=ctx.LocalUserId and ctx.Present(identity.id)then
+            pending=nil;clearFailures();status("Joined @"..name.." · staying in this server");return
+        end
+        if pending then
+            if now>=pending.deadline then
+                if ctx.PendingTimedOut then ctx.PendingTimedOut()end
+                api.TeleportFailed("Friend teleport did not finish")
+            elseif not state.ServerTeleportStarted then api.TeleportFailed("Friend teleport failed")
+            else status("Join requested · waiting for teleport");return end
+        end
+        if api.CooldownUntil then
+            if now<api.CooldownUntil then
+                local remaining=math.ceil(api.CooldownUntil-now)
+                status(string.format("Join cooldown · %d:%02d remaining",math.floor(remaining/60),remaining%60))
+                return
+            end
+            clearFailures()
+        end
         if now<due then return end
         due=now+20
         local ticket={generation=generation};operation=ticket
         local function current()
             return generation==ticket.generation and state.Running and not state.StopEverything and state.AutoJoinFriend
+                and not state.AutoRegroupHolding
         end
         local function ready()
             return current()and not(state.ModeratorBlocking or (state.SafeModePanic and not state.AutoJoinFriendHolding)
-                or state.TravelBusy or state.AutomationTeleporting or state.AccountProgression)
+                or state.AutoRegroupHolding or state.TravelBusy or state.AutomationTeleporting or state.AccountProgression)
         end
         status("Checking @"..name)
         ctx.Spawn(function()
+            local dispatched=false
             local ok,reason=pcall(function()
                 local canonical=name:lower()
                 if identity.name~=canonical then
@@ -9168,18 +9225,33 @@ return function(ctx)
                 end
                 if not ready()then return end
                 if identity.id==ctx.LocalUserId then status("Choose another player");return end
-                if ctx.Present(identity.id)then status("Joined @"..name.." · staying in this server");return end
+                if ctx.Present(identity.id)then clearFailures();status("Joined @"..name.." · staying in this server");return end
                 if state.SafeMode and not(state.SafeWhitelistIds and state.SafeWhitelistIds[tostring(identity.id)])then
                     status("Add @"..name.." to the Safe Mode whitelist first");return
                 end
                 ctx.Queue()
                 if not ready()then return end
                 status("Joining @"..name)
+                dispatched=true
                 local result=ctx.Join(identity.id,ready)
-                if current()then status(type(result)=="string"and result~=""and result or "Join requested · waiting for teleport")end
+                if not current()then return end
+                if ctx.Present(identity.id)then
+                    pending=nil;clearFailures();status("Joined @"..name.." · staying in this server")
+                elseif state.ServerTeleportStarted then
+                    pending={generation=generation,deadline=clock()+30}
+                    status("Join requested · waiting for teleport")
+                elseif cancelled(result)then status(tostring(result))
+                elseif ready()then
+                    -- The native adapter waits for teleport after an empty accepted reply.
+                    -- Returning here without a start receipt means that attempt timed out.
+                    failed(type(result)=="string"and result~=""and result or "Join did not start · retrying")
+                end
             end)
             if operation==ticket then operation=nil end
-            if not ok and current()then status("Retrying · "..tostring(reason))end
+            if not ok and current()then
+                local message="Retrying · "..tostring(reason)
+                if dispatched and ready()and not cancelled(reason)then failed(message)else status(message)end
+            end
         end)
     end
     api.Reset()
@@ -11016,12 +11088,13 @@ end
     if localFloor then
         local receipt,busy
         taskController("BetweenRevive",.35,function()
+            if state.AutoRegroupHolding then return end
             if livingPlayer(player)then receipt=nil;return end
             local lives=player:GetAttribute("Lives")
             if busy or not prompt()or type(lives)~="number"or lives<=0 or receipt==lives then return end
             receipt=lives;busy=true
             task.spawn(function()
-                local permitted=state.Running and not state.StopEverything and prompt()
+                local permitted=state.Running and not state.StopEverything and not state.AutoRegroupHolding and prompt()
                     and player:GetAttribute("Lives")==lives and not livingPlayer(player)
                 if permitted then
                     local ok,accepted=pcall(ReplicatedStorage.Function.InvokeServer,ReplicatedStorage.Function,
@@ -11194,6 +11267,138 @@ end
         state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()
+    local makeRegroup=(function()
+-- BEGIN BUNDLED AUTO REGROUP
+-- Every enabled client independently checks the same roster; no cross-client commands.
+return function(ctx)
+    local state=ctx.State
+    local api={Phase="Idle"}
+    local signature,armedAt,missingAt
+    local resetAt,returnAt,returns=0,0,0
+    local closed=false
+    local function status(message)state.AutoRegroupStatus=message end
+    local function release()
+        if state.AutoRegroupHolding then ctx.Release()end
+        state.AutoRegroupHolding=false
+    end
+    function api.Reset()
+        release();signature=nil;armedAt=nil;missingAt=nil
+        resetAt=0;returnAt=0;returns=0;api.Phase="Idle"
+        status(state.AutoRegroup and "Waiting for room users"or "Auto Regroup is off")
+    end
+    function api.Update(now)
+        if closed then return end
+        if not state.Running or not state.AutoRegroup or not ctx.InBetween()then api.Reset();return end
+        if state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutomationTeleporting
+            or state.ServerTeleportStarted or state.AutoJoinFriendHolding or state.AutoTradeBusy
+            or (state.SafeMode and state.SafeController and state.SafeController.Seeking)then missingAt=nil;return end
+        local names=ctx.Users()
+        if #names==0 then api.Reset();status("Add room Host + Alts or Regroup Users");return end
+        local key=table.concat(names,"\0"):lower()
+        if signature~=key then api.Reset();signature=key;armedAt=now end
+        if api.Phase=="Returning"then
+            if now<returnAt then return end
+            if returns>=3 then api.Phase="Failed";status("Return was not confirmed · toggle Auto Regroup OFF/ON to retry");return end
+            returns+=1;returnAt=now+10
+            ctx.PrepareReturn();ctx.Return()
+            status("Returning to lobby · regrouping")
+            return
+        end
+        if api.Phase=="Failed"then return end
+        if api.Phase=="Resetting"then
+            if not ctx.Dead()and now-resetAt<5 then return end
+            api.Phase="Returning";returnAt=now
+            return
+        end
+        if now-armedAt<15 then status("Waiting for server users to load");return end
+        local present=ctx.Present()
+        local missing={}
+        for _,name in ipairs(names)do if not present[name:lower()]then missing[#missing+1]=name end end
+        if #missing==0 then missingAt=nil;status("All regroup users are in this server");return end
+        missingAt=missingAt or now
+        status("Missing: "..table.concat(missing,", "))
+        if now-missingAt<5 then return end
+        state.AutoRegroupHolding=true;api.Phase="Resetting";resetAt=now
+        ctx.Pause();ctx.ResetCharacter()
+        status("Resetting to regroup · missing "..table.concat(missing,", "))
+    end
+    function api.Destroy()
+        if closed then return end
+        closed=true;release();signature=nil
+    end
+    api.Reset()
+    return api
+end
+
+-- END BUNDLED AUTO REGROUP
+    end)()
+    local function regroupUsers()
+        local source=state.AutoRegroupUsers or ""
+        if not source:find("%S")then
+            if assignment.Role=="Invalid"then return {}end
+            local entry=assignment.Room
+            if not entry then
+                for _,room in ipairs(rooms)do
+                    local host=hostName(room)
+                    if host and matches(player,host)then entry=room;break end
+                    for name in room.Alt:gmatch("[^,%s;]+")do if matches(player,name:gsub("^@",""))then entry=room;break end end
+                    if entry then break end
+                end
+            end
+            if not entry then return {}end
+            local host=hostName(entry)
+            if not host or host==""then return {}end
+            source=host..", "..entry.Alt
+        end
+        local names,seen={},{}
+        for name in source:gmatch("[^,%s;]+")do
+            name=name:gsub("^@","")
+            local key=name:lower()
+            if name:match("^[%w_]+$")and #name<=20 and not seen[key]then seen[key]=true;names[#names+1]=name end
+        end
+        table.sort(names,function(a,b)return a:lower()<b:lower()end)
+        return names
+    end
+    state.AutoRegroupController=makeRegroup({State=state,InBetween=function()return localFloor end,Users=regroupUsers,
+        Present=function()
+            local roster={}
+            for _,person in ipairs(Players:GetPlayers())do roster[person.Name:lower()]=true;roster[tostring(person.UserId)]=true end
+            return roster
+        end,
+        Pause=function()
+            state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false;state.PlayerTravelLease=nil
+            finishAttackBurst("Auto Regroup");stopSword(true)
+            if state.CancelSkillAura then state.CancelSkillAura("Auto Regroup")end
+            if state.CancelMiscSkill then state.CancelMiscSkill()end
+            stopMovement("Auto Regroup · returning to lobby",true)
+        end,
+        Release=function()nextMovementUpdate=0;nextAcquisition=0 end,
+        ResetCharacter=function()
+            local character=player.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health>0 then humanoid.Health=0 end
+        end,
+        Dead=function()
+            local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            return player:GetAttribute("ReviveState")==true or not humanoid or humanoid.Health<=0
+        end,
+        PrepareReturn=function()state.SaveNow();if state.QueueAutomation then state.QueueAutomation()end end,
+        Return=function()ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"WaveDefense","Return"})end})
+    function state.SetAutoRegroup(value)
+        state.AutoRegroup=value==true;state.AutoRegroupController.Reset();requestSave()
+    end
+    function state.SetAutoRegroupUsers(value)
+        local names,seen={},{}
+        for name in tostring(value or ""):gmatch("[^,%s;]+")do
+            name=name:gsub("^@","")
+            assert(name:match("^[%w_]+$")and #name<=20,"Use Roblox usernames or user IDs")
+            if not seen[name:lower()]then seen[name:lower()]=true;names[#names+1]=name end
+        end
+        assert(#names<=100,"Use at most 100 regroup users")
+        state.AutoRegroupUsers=table.concat(names,", ");state.AutoRegroupController.Reset();requestSave()
+        return state.AutoRegroupUsers
+    end
+    taskController("AutoRegroup",.5,state.AutoRegroupController.Update);table.insert(frameOrder,1,"AutoRegroup")
     local index
     local function roomSnapshot(person)
         local id=(person or player):GetAttribute("PartyID")
@@ -11257,7 +11462,7 @@ end
         end end
     end
     local function roomActive()
-        if not state.Running or not state.AutoCreateBetween or state.StopEverything
+        if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutoRegroupHolding
             or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
         if not localFloor then return true end
         if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
@@ -28979,6 +29184,11 @@ return function(ctx)
         paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
         toggle(wavesTab,"AutoDodge","Auto Dodge","SetAutoDodge")
+        toggle(wavesTab,"AutoRegroup","Auto Regroup","SetAutoRegroup")
+        input(wavesTab,"AutoRegroupUsers","Regroup Users",state.AutoRegroupUsers or "",function(text)
+            if text~=state.AutoRegroupUsers then action("SetAutoRegroupUsers",text)end
+        end,"Blank uses room Host + Alts")
+        paragraph(wavesTab,"AutoRegroupStatus","Regroup Status",function()return state.AutoRegroupStatus or "Auto Regroup is off"end)
         section(wavesTab,"BetweenPaceSection","Completion Time")
         local difficulties={"Normal","Hard","Elite"}
         for _,mode in ipairs(difficulties)do

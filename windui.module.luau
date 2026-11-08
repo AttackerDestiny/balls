@@ -300,6 +300,11 @@ return function(ctx)
         paragraph("Combat","CreditCheckStatus","Credit Status",function()return not state.CreditCheck and "Credit Check is off"or state.CreditCheckStatus or "Waiting for a boss or mini-boss"end)
         for _,row in ipairs({{"AutoEquipBestSword","Auto Equip Best Gear","SetAutoEquipBestSword"},{"AutoSwing","Swing animation","SetAutoSwing"}})do toggle("Combat",row[1],row[2],row[3])end
         toggle(wavesTab,"AutoDodge","Auto Dodge","SetAutoDodge")
+        toggle(wavesTab,"AutoRegroup","Auto Regroup","SetAutoRegroup")
+        input(wavesTab,"AutoRegroupUsers","Regroup Users",state.AutoRegroupUsers or "",function(text)
+            if text~=state.AutoRegroupUsers then action("SetAutoRegroupUsers",text)end
+        end,"Blank uses room Host + Alts")
+        paragraph(wavesTab,"AutoRegroupStatus","Regroup Status",function()return state.AutoRegroupStatus or "Auto Regroup is off"end)
         section(wavesTab,"BetweenPaceSection","Completion Time")
         local difficulties={"Normal","Hard","Elite"}
         for _,mode in ipairs(difficulties)do

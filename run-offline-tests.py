@@ -67,6 +67,7 @@ def main():
         ("BETWEEN ROOM", "between-room.module.luau"),
         ("BETWEEN PACE", "between-pace.module.luau"),
         ("BETWEEN RETRY", "between-retry.module.luau"),
+        ("AUTO REGROUP", "auto-regroup.module.luau"),
         ("ANTI SUSPICIOUS", "anti-suspicious.module.luau"),
         ("CONFIG PRESETS", "config-presets.module.luau"),
         ("PAD SLOT", "pad-slot.module.luau"),
@@ -142,6 +143,12 @@ def main():
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     fixture += "assert(loadstring(" + quote(read("windui-providers.test.luau")) + "))()(" + quote(registry) + ")\n"
     fixture += fixture_party
+    users_start=script.index("    local function regroupUsers()")
+    users=script[users_start:script.index("    state.AutoRegroupController=",users_start)]
+    fixture += "assert(loadstring(" + quote(read("auto-regroup.test.luau")) + "))()(" + quote(read("auto-regroup.module.luau")) + "," + quote(users) + ")\n"
+    adapter_start=script.index("    state.AutoRegroupController=makeRegroup(")
+    regroup_adapter=script[adapter_start:script.index("    function state.SetAutoRegroup(",adapter_start)]
+    fixture += "assert(loadstring(" + quote(read("auto-regroup-adapter.test.luau")) + "))()(" + quote(regroup_adapter) + ")\n"
     active_start=script.index("    local function roomActive()")
     active=script[active_start:script.index("    local function queueRoom()",active_start)]
     find_start=script.index("    local function findHostRoom(name)")

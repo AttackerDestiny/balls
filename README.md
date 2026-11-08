@@ -148,6 +148,8 @@ After five seconds without a target, empty arenas can return to their selected a
 
 Offline users, full servers, locked floors, and native join permissions can prevent travel. Protection and Account Progression can pause it. When used with Safe Mode, the friend must also be allowed by the Safe Mode whitelist.
 
+After **two failed join attempts**, Auto Join Friend waits **10 minutes** before starting another attempt cycle. Offline/full-server replies, native join errors and uncompleted teleport requests count as failures. Protection waits, missing characters/pads, and cancelled attempts do not. Finding the friend in the current server clears the failure streak. Changing the target or toggling the feature resets its current retry cycle.
+
 ## Combat
 
 | Feature | Behavior and fresh default |
@@ -216,6 +218,8 @@ Wipe detection checks the game's combat health as well as the Humanoid. A defaul
 **Completion Time** has a two-handle range for each difficulty, up to 100 minutes. Set both ends to zero to turn pacing off. Feather picks a time down to the second inside the range, shared by accounts using the same range in the same run. It spreads kills across the 100 waves and pauses automated attacks when ahead. Actual completion depends on wave timers and available damage.
 
 **Auto Dodge** starts at `(10, -19, -5)` during other survival special waves, checks that shelter against tracked attacks, and temporarily sidesteps after confirmed damage there. During Blackout it holds at `(12, 37, 3)`. Skill Aura, when enabled, hits enemies that come into range. Auto Farm movement and ordinary Kill Aura hits pause until Blackout ends. Default ON. Below-map idle holds enforce kill-plane clearance, and floor caches reset when the wave or arena origin changes.
+
+**Auto Regroup** defaults OFF. Enable it on every account that should leave a split run together. It checks the room's **Host + Alts** by default; **Regroup Users** can supply a separate comma-separated username or user-ID list. After a 15-second loading grace period, any listed user missing from the server for five seconds triggers one character reset and the native return-to-lobby action on that account. Listed users who are dead or respawning still count as present. Regroup pauses combat, free revives, room starts and friend joining while returning, and yields to active protection/teleports. It operates only inside The Between and does not control other clients directly. Saved settings retain the toggle and optional list; each account must run this version.
 
 On Wave 100, **Auto Dodge** checks Rubricatus's locked disc paths, laser charge warnings and beams, the native 100-stud/120° lightning wave, tagged melee hitboxes, and standard ground warnings for spikes and falling stones. It checks the saved Auto Farm return position as well as the current position, cancels script-owned casts before an escape hold, and resumes farming when the warning expires.
 

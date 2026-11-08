@@ -617,7 +617,8 @@ end
         if not ok then error(result)end
         return result
     end
-    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,
+    local friend=ctx.MakeFriend({State=state,LocalUserId=player.UserId,Spawn=task.spawn,Now=os.clock,
+        PendingTimedOut=function()state.ServerTeleportStarted=false end,
         Resolve=function(name)return Players:GetUserIdFromNameAsync(name)end,Present=function(id)return Players:GetPlayerByUserId(id)~=nil end,
         Queue=function()
             local enqueue=queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)or (fluxus and fluxus.queue_on_teleport)
@@ -639,7 +640,9 @@ end
     ctx.Bind(TeleportService.TeleportInitFailed,function(who,result,reason)
         if who==player then
             local requested=state.SafeRejoinRequested
+            state.ServerTeleportStarted=false
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
+            if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
@@ -693,7 +696,9 @@ end
             if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
+            state.ServerTeleportStarted=false
             clearRejoinAway();state.AutomationTeleporting=false
+            if friend.TeleportFailed then friend.TeleportFailed("Teleport failed")end
             if requested and kickFallback then kickFallback.TeleportFailed()end
         end
     end)
@@ -713,6 +718,7 @@ end
         while state.Running do
             if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
+                if state.AutoRegroupHolding then return end
                 if state.AntiSuspiciousRestUntil then
                     if os.time()<state.AntiSuspiciousRestUntil or kickFallback and kickFallback.Armed then return end
                     state.AntiSuspiciousRestUntil=nil

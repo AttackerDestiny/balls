@@ -7,6 +7,7 @@ return function(state)
         {"Safety",function()return state.SafeModePanic end},
         {"Friend",function()return state.AutoJoinFriendHolding end},
         {"Floor travel",function()return state.AutomationTeleporting end},
+        {"Regroup",function()return state.AutoRegroupHolding end},
         {"Trade",function()return state.AutoTradeBusy end},
         {"Arena travel",function()return state.TravelBusy or state.MultiSpotOwnsTravel end},
         {"Dodge",function()return state.Dodging or state.BlackoutHolding end},

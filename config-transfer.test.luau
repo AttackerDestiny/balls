@@ -1,7 +1,7 @@
 return function(source)
     local make=assert(loadstring(source))()
     local clipboard,applied,encoded,library
-    local settings={Version=1,Enabled=true,SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
+    local settings={Version=1,Enabled=true,AutoRegroup=true,AutoRegroupUsers="Host, Alt",SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
         AntiSuspicious=true,AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60},
         BetweenRooms={{Host="Host",Alt="Alt, 123",Mode="Friends",Difficulty="Hard",Start=true,AutoRetry=true},{Host="Legacy",Alt=""}},
         BetweenPace={Normal=35,Hard={Min=35,Max=38},Elite={Min=0,Max=0}},
