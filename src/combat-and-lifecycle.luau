@@ -347,6 +347,7 @@ local function updateHealthGuard(now)
         local observation={At=os.clock(),Before=before,After=guardLastValue,Target=target and target.Name,
             Position=root and root.Position,Offset=state.TeleportOffset,Mode=state.OffsetMode or "Below",Dodging=state.Dodging,
             DodgeReason=dodge and dodge.LastReason,Anchor=dodge and dodge.Anchor,Planned=waveDodge.LastPosition}
+        if waveDodge.RecordDamage then waveDodge.RecordDamage(observation)end
         local history=state.DamageHistory or {};state.DamageHistory=history
         history[#history+1]=observation;while #history>8 do table.remove(history,1)end
         state.LastDamageEvent=observation;state.LastIncomingDamageAt=observation.At

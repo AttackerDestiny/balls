@@ -8,7 +8,10 @@ return function(ctx)
     local timing={UpdateAt=0,LastMove=0}
     local darknessShelter=Vector3.new(12,37,3)
     local terrain={Environment=nil,Floor=nil,Refuge=nil,RefugeUntil=0}
-    local event,lastEvent,lastHealth
+    local event,lastEvent,lastHealth,lastHealthObject
+    local pendingAudit,nextAuditSave=false,0
+    local lastCast,castConnection
+    local avoid={}
     local path="SB2Codex/wave-tests_"..player.UserId..".json"
     local audit=getgenv().SB2WaveDodgeAudit
     if not audit then
@@ -18,16 +21,41 @@ return function(ctx)
             local text=readfile(path)
             if #text>=65536 then return end
             local value=game:GetService("HttpService"):JSONDecode(text)
-            if value.Version==1 and type(value.Seen)=="table"then audit.Seen=value.Seen end
+            if value.Version==1 and type(value.Seen)=="table"then audit.Seen=value.Seen;audit.Recent=value.Recent end
         end)
         getgenv().SB2WaveDodgeAudit=audit
     end
     api.Seen=audit.Seen
+    audit.Recent=type(audit.Recent)=="table"and audit.Recent or {}
+    while #audit.Recent>32 do table.remove(audit.Recent,1)end
+    api.RecentDamage=audit.Recent
     local function persist()
         pcall(function()
             if not isfolder("SB2Codex")then makefolder("SB2Codex")end
-            writefile(path,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen}))
+            writefile(path,game:GetService("HttpService"):JSONEncode({Version=1,Seen=api.Seen,Recent=audit.Recent}))
         end)
+    end
+    if ctx.Replicate then castConnection=ctx.Replicate:Connect(function(_,operation,skill,phase)
+        if closed or type(skill)~="string"then return end
+        lastCast={Skill=skill,Operation=operation,Phase=type(phase)=="string"and phase or nil,At=os.clock()}
+    end)end
+    function api.RecordDamage(observation)
+        if closed or game.PlaceId~=78945654064532 then return end
+        local character=player.Character;local root=character and character:FindFirstChild("HumanoidRootPart")
+        local point=observation.Position or root and root.Position
+        local row={At=observation.At,JobId=game.JobId,Wave=workspace:GetAttribute("Wave"),Environment=workspace:GetAttribute("WaveDefenseEnvironment"),
+            Before=observation.Before,After=observation.After,Death=observation.After<=0,
+            Position=point and {point.X,point.Y,point.Z},Planned=api.LastPosition and {api.LastPosition.X,api.LastPosition.Y,api.LastPosition.Z},
+            Idle=state.IdleBelowMap==true,Dodging=state.Dodging==true,NoSelfDamage=state.NoSelfDamage==true,
+            Warning=state.LastBossWarning,Owner=state.MovementOwner,Build=state.Build}
+        if lastCast and os.clock()-lastCast.At<8 then row.RecentSkill=lastCast.Skill;row.RecentPhase=lastCast.Phase end
+        audit.Recent[#audit.Recent+1]=row;while #audit.Recent>32 do table.remove(audit.Recent,1)end
+        if api.Active and not state.BlackoutHolding and point then
+            avoid[#avoid+1]={Point=point,Until=os.clock()+4}
+            if #avoid>8 then table.remove(avoid,1)end
+        end
+        pendingAudit=true
+        if row.Death then persist();pendingAudit=false end
     end
     local function environment()return tostring(workspace:GetAttribute("WaveDefenseEnvironment")or "")end
     local function detect()
@@ -39,6 +67,14 @@ return function(ctx)
     local function bounds()
         local container=workspace:FindFirstChild("WaveDefenseStuff")
         return container and container:FindFirstChild("LavaHazardRegion"),container and container:FindFirstChild("WaveDefenseOrigin")
+    end
+    local function refreshTerrain(origin)
+        local env=environment();local wave=workspace:GetAttribute("Wave")
+        local point=origin and origin.Position
+        if terrain.Environment~=env or terrain.Wave~=wave or terrain.Origin~=origin or terrain.OriginPosition~=point then
+            terrain.Environment=env;terrain.Wave=wave;terrain.Origin=origin;terrain.OriginPosition=point
+            terrain.Floor=nil;terrain.Refuge=nil
+        end
     end
     local function actors(part)
         if player.Character and part:IsDescendantOf(player.Character)then return true end
@@ -67,21 +103,23 @@ return function(ctx)
     end
     function api.FloorY(point)
         local _,origin=bounds()
-        local env=environment()
-        if terrain.Environment~=env then terrain.Environment=env;terrain.Floor=nil;terrain.Refuge=nil end
+        refreshTerrain(origin)
         local offset=math.abs(state.TeleportOffset or 20)
         local reference=origin and origin.Position.Y or point.Y+(state.OffsetMode=="Above"and 32 or math.max(32,offset))
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true;params.FilterDescendantsInstances=exclusions()
         local hit=workspace:Raycast(Vector3.new(point.X,reference+8,point.Z),Vector3.new(0,-math.max(180,offset+160),0),params)
         if hit and hit.Normal.Y>.6 then terrain.Floor=hit.Position.Y end
-        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then return point.Y+20 end
+        if not hit and state.PerformanceBoosters and (state.PerformanceBoosters["Delete map"]or state.PerformanceBoosters["Remove everything"])then
+            return terrain.Floor or (origin and reference)or point.Y+20
+        end
         return terrain.Floor or reference
     end
     function api.BlackoutPoint(point)
-        local env=environment();local now=os.clock()
-        if terrain.Refuge and terrain.Environment==env and now<terrain.RefugeUntil then return terrain.Refuge end
         local _,origin=bounds()
+        refreshTerrain(origin)
+        local env=environment();local now=os.clock()
+        if terrain.Refuge and now<terrain.RefugeUntil then return terrain.Refuge end
         local center=origin and origin.Position or point
         local y=origin and origin.Position.Y or api.FloorY(point)
         local minimum=workspace.FallenPartsDestroyHeight+35
@@ -127,9 +165,10 @@ return function(ctx)
         api.LastPosition=point;return true
     end
     local function observe(kind,health,now)
+        if health~=lastHealthObject then lastHealthObject=health;lastHealth=health and health.Value end
         if kind~=lastEvent then
             if event then event.EndHealth=health and health.Value;event.Completed=true;event.Ended=now;persist()end
-            release();api.LastPosition=nil
+            release();api.LastPosition=nil;table.clear(avoid)
             if kind then
                 local previous=api.Seen[kind]
                 if previous and previous.JobId==game.JobId and previous.Wave==workspace:GetAttribute("Wave")and not previous.Completed then event=previous
@@ -152,9 +191,21 @@ return function(ctx)
         if kind=="Horde"or kind=="Rift"or kind=="Wisp"or kind=="Meme"or kind=="Bob"then return true end
         return kind~="Lava"and kind~="Tempest"and kind~="Blackout"and (tonumber(workspace:GetAttribute("MobsLeft"))or 0)>0
     end
+    local function recentlyHit(point)
+        for i=#avoid,1,-1 do
+            local record=avoid[i]
+            if os.clock()>=record.Until then table.remove(avoid,i)
+            else
+                local d=point-record.Point
+                if d.X*d.X+d.Z*d.Z<35*35 then return true end
+            end
+        end
+        return false
+    end
     function api.Update()
         if closed or state.StopEverything then return false end
         local now=os.clock();if now<timing.UpdateAt then return api.Active end
+        if pendingAudit and now>=nextAuditSave then persist();pendingAudit=false;nextAuditSave=now+10 end
         local fast=state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.Active and not state.NetworkPressureLimited
         timing.UpdateAt=now+(fast and 1/60 or .04)
         local kind=detect();api.Event=kind;state.OffsetMode="Below";state.FarmAbove=false
@@ -190,8 +241,27 @@ return function(ctx)
             ctx.Status("Blackout · holding fixed position")
             return true
         end
-        if kind and not needsKills(kind)and hold(Vector3.new(10,-19,-5),kind.." shelter",now)then
-            ctx.Status(kind.." · sheltering");return true
+        if kind and not needsKills(kind)then
+            local shelter=Vector3.new(10,-19,-5)
+            if recentlyHit(shelter)then
+                local region=bounds()
+                for direction=1,8 do
+                    local angle=direction*math.pi/4
+                    local candidate=Vector3.new(10+math.cos(angle)*65,-19,-5+math.sin(angle)*65)
+                    local inBounds=true
+                    if region then
+                        local at=region.CFrame:PointToObjectSpace(candidate)
+                        inBounds=math.abs(at.X)<region.Size.X*.5-8 and math.abs(at.Z)<region.Size.Z*.5-8
+                    end
+                    if inBounds and not recentlyHit(candidate)then shelter=candidate;break end
+                end
+            end
+            if ctx.BossDodge then
+                local region=bounds();local point=ctx.BossDodge.Plan(root.Position,shelter,region,recentlyHit)
+                if point then shelter=point
+                elseif ctx.BossDodge.Blocked then shelter=root.Position end
+            end
+            if hold(shelter,kind.." shelter",now)then ctx.Status(kind.." · sheltering outside tracked hazards");return true end
         end
         if ctx.BossDodge and not(state.AtheonDodge and ctx.AtheonDodge and ctx.AtheonDodge.NearBoss)then
             local region=bounds();local point,reason=ctx.BossDodge.Plan(root.Position,desired,region)
@@ -211,12 +281,16 @@ return function(ctx)
         if closed or state.StopEverything then return end
         local root=player.Character and player.Character:FindFirstChild("HumanoidRootPart");if not root then return end
         local point=anchor or root.Position;local floor=anchor and anchor.Y or api.FloorY(point)
-        ctx.Hold(Vector3.new(point.X,floor-20,point.Z),true)
+        local y=math.max(floor-20,workspace.FallenPartsDestroyHeight+35)
+        state.IdleSafetyClamped=y~=floor-20
+        ctx.Hold(Vector3.new(point.X,y,point.Z),true)
         state.IdleFloorY=floor;state.IdleBelowMap=true;state.IdleAboveMap=false
     end
     function api.Destroy()
         if closed then return end
         closed=true;persist()
+        if castConnection then castConnection:Disconnect();castConnection=nil end
+        table.clear(avoid)
         for _,controller in pairs({ctx.BossDodge,ctx.AtheonDodge,ctx.AeganatosDodge})do if controller then controller.Destroy()end end
         release()
     end

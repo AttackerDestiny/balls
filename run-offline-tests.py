@@ -155,6 +155,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("rubricatus-dodge.test.luau")) + "))()(" + quote(read("boss-dodge.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("rubricatus-cover.test.luau")) + "))()(" + quote(read("rubricatus-cover.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("boss-dodge-handoff.test.luau")) + "))()(" + quote(wave) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("wave-safety.test.luau")) + "))()(" + quote(wave) + ")\n"
     preset_resume_start = script.index("local resumeConfigPath=env.SB2AutomationResumeConfigPath")
     preset_resume = script[preset_resume_start:script.index("if filePersistence and isfile(configPath)", preset_resume_start)]
     fixture += "assert(loadstring(" + quote(read("config-presets.test.luau")) + "))()(" + quote(read("config-presets.module.luau")) + "," + quote(preset_resume) + ")\n"

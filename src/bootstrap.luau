@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.private-progression-checkpoints-v3.0.27"
-local VERSION="3.0.27"
+local BUILD="2026-11-08.wave-hazard-clearance-v3.0.28"
+local VERSION="3.0.28"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

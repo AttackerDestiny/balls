@@ -174,7 +174,7 @@ return function(sources)
         local state={OffsetMode="Above"}
         local api={FloorY=function()return 100 end}
         load(sources.Idle,{state=state,api=api,player={Character={FindFirstChild=function()return {Position=vec(10,200,30)}end}},
-            ctx={Hold=function(p)point=p end},Vector3={new=vec}})
+            ctx={Hold=function(p)point=p end},Vector3={new=vec},workspace={FallenPartsDestroyHeight=-500}})
         api.Idle()
         assert(point.X==10 and point.Y==80 and point.Z==30 and state.IdleBelowMap and not state.IdleAboveMap)
         api.Idle(vec(840,798,336))

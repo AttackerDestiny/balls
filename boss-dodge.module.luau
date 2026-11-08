@@ -20,7 +20,7 @@ return function(ctx)
         local entry=warnings[object]
         if not entry then
             local count=0;for _ in pairs(warnings)do count+=1 end
-            if count>=48 then return end
+            if count>=128 then return end
             entry={Kind=kind,Started=os.clock(),Name=name or object.Name,FinalOnly=finalOnly};warnings[object]=entry
         end
         entry.Radius=radius or entry.Radius;api.HasHazards=true
@@ -45,10 +45,10 @@ return function(ctx)
         if final and (group=="RedLightningDiscEffects" or group=="RedLightningLaserEffects" or group=="RedLightningEffects"
             or parent==ctx.Workspace and name=="Part")and final()then
             if group=="RedLightningDiscEffects" and name:match("^LightningDisc%d+$")and object:IsA("Model")then
-                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 3.6,true);return
+                register(object,"Disc","Red Lightning Discs",ctx.DiscRadius or 10,true);return
             elseif group=="RedLightningLaserEffects" then
                 if name=="RedBeam"and object:IsA("BasePart")or name=="LockedAimWarning"and (object:IsA("BasePart")or object:IsA("Model"))then
-                    register(object,name=="RedBeam"and "Laser"or "Beam","Red Lightning Laser",ctx.LaserRadius or 5,true)
+                    register(object,"Laser","Red Lightning Laser",ctx.LaserRadius or 80,true)
                 end
                 if name=="RedBeam" or name=="LockedAimWarning"then return end
             elseif group=="RedLightningEffects" and name=="LightningWaveAnchor" and object:IsA("BasePart")then
@@ -128,8 +128,11 @@ return function(ctx)
             if object:IsA("Model")then return object:GetBoundingBox()end
             return object.CFrame,object.Size
         end)
-        if not ok or not frame or math.max(size.X,size.Z)<=.2 then entry.CFrame=nil;entry.Velocity=nil;entry.SampleAt=nil;return end
+        if not ok or not frame or math.max(size.X,size.Z)<=.2 then
+            entry.CFrame=nil;entry.Velocity=nil;entry.SampleAt=nil;entry.PreviousPosition=nil;return
+        end
         if (entry.Kind=="Projectile"or entry.Kind=="Disc")and entry.CFrame and time>(entry.SampleAt or time)then
+            entry.PreviousPosition=entry.CFrame.Position
             local motion=(frame.Position-entry.CFrame.Position)/(time-entry.SampleAt)
             entry.Velocity=motion.Magnitude<=400 and motion or Vector3.zero
         end
@@ -186,10 +189,11 @@ return function(ctx)
             return math.abs(at.X)<size.X*.5+margin and math.abs(at.Z)<size.Z*.5+margin
         end
         if entry.Kind=="Projectile"or entry.Kind=="Disc"then
-            local lead=math.clamp(.12+(ctx.State.PingMs or 0)/1000,.12,.4)
+            local lead=math.clamp(.12+(ctx.State.PingMs or 0)/1000+math.min(.2,ctx.State.AverageFrameTime or 0),.12,.6)
             local radius=(entry.Radius or math.max(size.X,size.Y,size.Z)*.5)+margin
             local position=frame.Position
             if entry.Kind=="Disc"and (point-entry.Target).Magnitude<radius then return true end
+            if entry.PreviousPosition and distanceFromSegment(point,entry.PreviousPosition,position-entry.PreviousPosition)<radius then return true end
             return distanceFromSegment(point,position,(entry.Velocity or Vector3.zero)*lead)<radius
         end
         local x=math.abs(frame.RightVector.X)*size.X+math.abs(frame.UpVector.X)*size.Y+math.abs(frame.LookVector.X)*size.Z

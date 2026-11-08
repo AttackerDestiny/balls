@@ -587,6 +587,7 @@ local waveDodge=(function()
 -- BEGIN BUNDLED WAVE DODGE
 -- END BUNDLED WAVE DODGE
 end)()({State=state,BossDodge=state.BossDodge,AtheonDodge=state.AtheonDodgeController,AeganatosDodge=state.AeganatosDodgeController,
+    Replicate=game.PlaceId==78945654064532 and ReplicatedStorage:FindFirstChild("ReplicateSkill")and ReplicatedStorage.ReplicateSkill.OnClientEvent or nil,
     Hold=function(point,farmIdle,force)
         local character=player.Character
         local root=character and character:FindFirstChild("HumanoidRootPart")

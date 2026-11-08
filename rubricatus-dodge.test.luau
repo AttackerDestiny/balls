@@ -33,7 +33,7 @@ return function(source)
     setfenv(chunk,setmetatable({os={clock=function()return at end},Vector3={new=v,zero=v(0,0,0)},
         Enum={PartType={Cylinder="Cylinder"}},Color3={fromRGB=function()return "Red"end},
         typeof=function(x)return getmetatable(x)==vec and "Vector3"or type(x)end},{__index=getfenv()}))
-    local api=chunk()({State={AutoDodge=true},Workspace=world,Collection=collection,Replicate=replicate,
+    local api=chunk()({State={AutoDodge=true},Workspace=world,Collection=collection,Replicate=replicate,LaserRadius=5,
         FinalWave=function()return final end,RubricatusOrigin=function()return v(0,0,0)end})
     local discs={Name="RedLightningDiscEffects"}
     local function disc(number,position)
@@ -62,7 +62,7 @@ return function(source)
         Size=v(50,10,10),Shape="Cylinder",IsA=function(_,kind)return kind=="BasePart"end}
     world.DescendantAdded:Fire(laser);api.RefreshThreats()
     assert(api.IsThreatened(v(20,12,0)) and not api.IsThreatened(v(20,-12,0)),"Use the laser's actual axis and elevation")
-    local charge={Name="LockedAimWarning",Parent=laser.Parent,CFrame=frame(v(0,12,0)),Size=v(100,1,10),IsA=laser.IsA}
+    local charge={Name="LockedAimWarning",Parent=laser.Parent,CFrame=frame(v(0,12,0)),Size=v(100,.12,.12),Shape="Cylinder",IsA=laser.IsA}
     world.DescendantAdded:Fire(charge);api.RefreshThreats()
     assert(api.IsThreatened(v(45,12,0)),"Evade during the one-second laser charge before the cylinder appears")
     charge.Parent=nil
@@ -77,10 +77,24 @@ return function(source)
     at+=.6;api.RefreshThreats()
     assert(not api.IsThreatened(v(5,0,0)),"A finished melee warning cannot stall farming while its part is retained")
     for index=1,1000 do disc(index,v(0,0,0)).LockedTarget=v(30,0,0)end
-    api.RefreshThreats();assert(api.ThreatCount<=48,"Burst effects have bounded storage")
+    api.RefreshThreats();assert(api.ThreatCount<=128,"Burst effects have bounded storage")
     final=false;api.RefreshThreats()
     assert(api.ThreatCount==0 and not api.IsThreatened(v(30,0,0)),"Final-wave hazards cannot leak into a new room or retry")
     api.Destroy()
     assert(not world.DescendantAdded.Fire and not replicate.Fire,"Cleanup disconnects world and skill listeners")
+    final=true
+    api=chunk()({State={AutoDodge=true,AverageFrameTime=.1},Workspace=world,Collection=collection,Replicate=replicate,
+        FinalWave=function()return final end})
+    charge.Parent={Name="RedLightningLaserEffects"};world.DescendantAdded:Fire(charge);api.RefreshThreats()
+    assert(api.IsThreatened(v(40,-40,40)),"Native 80-stud laser radius includes below-floor positions during the charge")
+    assert(not api.IsThreatened(v(40,-90,70)),"Do not turn the laser envelope into arena-wide damage")
+    local escape=api.Plan(v(40,-40,40),v(40,-40,40))
+    assert(escape and not api.IsThreatened(escape),"Escape the whole damage cylinder rather than its thin warning line")
+    charge.Parent=nil;at+=1;api.RefreshThreats()
+    local swept=disc(1001,v(-40,0,0));swept.LockedTarget=v(200,0,0);api.RefreshThreats()
+    at+=.2;swept.PrimaryPart.CFrame=frame(v(40,0,0));api.RefreshThreats()
+    assert(api.IsThreatened(v(0,0,0)),"The segment crossed since the last sample remains dangerous at low FPS")
+    assert(api.IsThreatened(v(200,0,12)),"Disc clearance uses native radius 10 before adding body margin")
+    api.Destroy()
     print("PASS Rubricatus: wave scope, disc resets and prediction, laser charge, native cone defaults, melee expiry and cleanup")
 end
