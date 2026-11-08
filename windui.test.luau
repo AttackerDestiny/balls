@@ -113,7 +113,7 @@ return function(source)
     function s.SetTradeItems(value)record("SetTradeItems",value);s.TradeItems=value end
     local inventoryReads=0;local gemCount=64
     function s.GetTradeItemChoices()inventoryReads+=1;return {{Name="Gem",Count=gemCount},{Name="Scroll",Count=1}}end
-    for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu","ExportConfig","ImportConfig"})do
+    for _,name in ipairs({"SaveMultiSpot","TeleportToDestination","RefreshTeleportDestinations","SaveCurrentMiniBossArea","RestartScript","OpenGameMenu","ExportConfig","ImportConfig","ResetSavedProgression"})do
         s[name]=function(...)record(name,...)end
     end
     function s.SetAutoHideUI(on)record("SetAutoHideUI",on);s.AutoHideUI=on end
@@ -149,7 +149,7 @@ return function(source)
         "MultiSpotSection","MultiSpot","SaveSpot","MultiSpotAreas","FriendJoinerSection","AutoJoinFriend","JoinFriendUsername","RestartScript",
         "TeleportSection","TeleportDestination","RefreshDestinations","OpenDismantle","OpenUpgrade","OpenThe Forge",
         "SelectedPlayer","TeleportPlayer","ViewingPlayer","ViewingPlayerInventory",
-        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoCraftSection","AutoCraft","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression"})do
+        "PerformanceBoosterSection","PerformanceBoosters","AutoDismantleSection","AutoDismantle","AutoCraftSection","AutoCraft","AutoTradeSection","AutoTrade","TradeMode","TradeItems","AccountProgression","ResetSavedProgression"})do
         assert(c[key],"Every available feature must be present: "..key)
     end
     assert(c.MultiSpotAreas.Title=="Saved Spot"and c.MultiSpotAreas.Desc==nil)
@@ -231,6 +231,10 @@ return function(source)
     s.StopEverything=true;c.AtheonDodge:Emit(true)
     assert(c.AtheonDodge.Value==false,"Rejected toggles must return to their actual value")
     s.StopEverything=false
+    local beforeReset=#calls
+    c.ResetSavedProgression:Emit()
+    assert(c.ResetSavedProgression.Title=="Reset Saved Progression"and #calls==beforeReset+1
+        and calls[#calls].Name=="ResetSavedProgression","The reset button must call the progression API exactly once")
     local idleReads=inventoryReads
     api.Update(4);flush();assert(inventoryReads==idleReads,"Main tab must not rebuild inventory dropdowns")
     api.Tabs.Utility:Select();local beforeFriendReads=friendReads;api.Update(4.3);flush();assert(friendReads==beforeFriendReads,"Offscreen status cards must not scan players");before=#calls

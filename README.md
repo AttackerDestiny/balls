@@ -335,6 +335,8 @@ Trading pauses conflicting farming, attacks, gear changes, and crafting/dismantl
 - Makes Safe Mode protect the current progression floor; Multi Spot yields.
 - Restores saved farming preferences when progression is switched off.
 
+**Reset Saved Progression**, beside the progression toggle in **Speacial**, saves a fresh Floor 1 checkpoint and clears saved boss-clear and completion flags. If progression is ON, it clears its paused controller and resumes from F1 when protection and movement permit. If progression is OFF, it stays OFF. Stop Everything remains paused, and the original farming preferences are retained for when progression is switched off. The button does not remove floor unlocks or inventory.
+
 Streaming loss, an unrelated miniboss, or an uncredited corpse is not a completed main-boss kill. The script cannot grant a floor unlock the server has not awarded. **F12 is the endpoint**; Atheon and Atlantis are not additional progression stages.
 
 **Anti Suspicious** starts counting Safe Mode departure attempts after the account reaches its first protected server. A rejoin and its fallback kick count as one attempt. **Rejoin Limit** and **Track (min)** default to **10 departures in 10 minutes**. Set a **Rest Time (min)** range up to **200 minutes**. At the limit, Feather saves a randomly selected deadline down to the second, kicks the local account, and attempts a rejoin when the timer ends if the executor is still running. The account's deadline is retained across reloads. If the kick stops the executor, reopen Roblox manually after the rest.

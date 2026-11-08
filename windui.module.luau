@@ -424,6 +424,7 @@ return function(ctx)
             return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
         end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
         toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        button("Speacial","ResetSavedProgression","Reset Saved Progression",function()action("ResetSavedProgression")end)
         section("Speacial","AntiSuspiciousSection","Anti Suspicious")
         toggle("Speacial","AntiSuspicious","Anti Suspicious","SetAntiSuspicious")
         local limits=state.AntiSuspiciousLimits or {Hops=10,Window=10,Min=40,Max=60}

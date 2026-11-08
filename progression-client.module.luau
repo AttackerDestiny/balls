@@ -249,6 +249,22 @@ return function(ctx)
         Boss=readBoss,Equipment=equipment,Complete=complete,Release=release,Save=state.SaveNow,
         Status=function(message)state.ProgressionStatus=message;text(ui.ProgressionStatus,message)end})
     state.ProgressionController=controller
+    function state.ResetSavedProgression()
+        if closed or not state.Running then return false end
+        state.ProgressionFloor=1;state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
+        state.ProgressionComplete=false
+        if state.AccountProgression then
+            cancelEquipment();gear.Reset();controller.Reset()
+            if not state.StopEverything then
+                state.SetAutoFarm(true,"Progression checkpoint reset");state.SetEnabled(true)
+            end
+        else
+            state.ProgressionPhase="Idle";state.ProgressionStatus="Saved progression reset · Floor 1"
+            text(ui.ProgressionStatus,state.ProgressionStatus)
+        end
+        state.SaveNow()
+        return true
+    end
     function state.SetAccountProgression(on,restoring)
         if on and state.StopEverything then return false end
         cancelEquipment();gear.Reset()

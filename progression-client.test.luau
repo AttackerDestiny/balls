@@ -108,6 +108,53 @@ return function(clientSource,controllerSource,gearSource,payloadSource)
         assert(f.SafeResets==0,"Resuming progression must not restart an in-flight Safe Mode search")
         f.State.SetAccountProgression(false);assert(not f.State.Enabled and not f.State.AutoFarm)
     end)
+    test("Reset saved progression repairs a paused checkpoint and preserves original mode preferences",function()
+        local f=fixture();f.State.SetAccountProgression(true)
+        local original=f.State.ProgressionRestore
+        f.State.ProgressionFloor=9;f.State.ProgressionBossCleared=true
+        f.State.ProgressionBossClearedName="Old boss";f.State.ProgressionComplete=true
+        f.Api.Pause("F9 is locked");f.Api.Attempts=3
+        f.State.ProgressionTravelOwned=true;f.State.TravelBusy=true;f.State.TravelSerial=12
+        local boss,health=f.AddBoss(1);f.ControllerCtx.Boss({Position=vec(0,20,0)})
+        local safe,multi=f.SafeResets,f.MultiResets
+        assert(f.State.ResetSavedProgression())
+        assert(f.State.AccountProgression and f.State.ProgressionFloor==1 and not f.State.ProgressionBossCleared
+            and not f.State.ProgressionBossClearedName and not f.State.ProgressionComplete)
+        assert(not f.Api.Paused and not f.Api.LastError and f.Api.Attempts==0 and f.Api.Phase=="Idle")
+        assert(not f.State.ProgressionTravelOwned and not f.State.TravelBusy and f.State.TravelSerial==13)
+        assert(not f.State.ProgressionBossMob and not health.Changed.Handlers[1].Connection.Connected)
+        assert(f.State.ProgressionRestore==original and f.SafeResets==safe and f.MultiResets==multi)
+        assert(f.State.AutoFarm and f.State.Enabled and #f.Trips==0 and #f.Calls==0,
+            "Reset itself must not send progression, damage or equipment requests")
+        f.State.SetAccountProgression(false)
+        assert(not f.State.AutoFarm and not f.State.Enabled and not f.State.AutoSwing,
+            "OFF still restores the preferences from before progression was enabled")
+    end)
+    test("Reset while OFF only changes checkpoint data and saves it",function()
+        local f=fixture();f.State.ProgressionFloor=9;f.State.ProgressionBossCleared=true
+        f.State.ProgressionBossClearedName="Old boss";f.State.ProgressionComplete=true
+        f.State.Enabled=true;f.State.TravelBusy=true;f.State.TravelHold=true;f.State.TravelSerial=4
+        assert(f.State.ResetSavedProgression())
+        assert(not f.State.AccountProgression and f.State.Enabled and not f.State.AutoFarm and not f.State.AutoSwing)
+        assert(f.State.TravelBusy and f.State.TravelHold and f.State.TravelSerial==4 and f.Stops==0)
+        assert(f.Saves==1 and f.SafeResets==0 and f.MultiResets==0)
+        local position={X={Scale=0,Offset=0},Y={Scale=0,Offset=0}}
+        local load=assert(loadstring(payloadSource.."\nreturn settingsPayload()"))
+        setfenv(load,setmetatable({state=f.State,enemyHUD={Position=position}},{__index=getfenv()}))
+        local saved=load()
+        assert(saved.ProgressionFloor==1 and not saved.ProgressionBossCleared and not saved.ProgressionBossClearedName
+            and not saved.ProgressionComplete and not saved.AccountProgression)
+    end)
+    test("Reset respects Stop Everything, preserves unrelated travel and retires with the runtime",function()
+        local f=fixture();f.State.SetAccountProgression(true)
+        f.State.StopEverything=true;f.State.Enabled=false;f.State.AutoFarm=false
+        f.State.ProgressionFloor=9;f.State.TravelBusy=true;f.State.TravelSerial=4
+        assert(f.State.ResetSavedProgression())
+        assert(f.State.StopEverything and f.State.AccountProgression and not f.State.Enabled and not f.State.AutoFarm)
+        assert(f.State.TravelBusy and f.State.TravelSerial==4,"Only progression-owned travel may be cancelled")
+        f.State.ProgressionDestroy();local saves=f.Saves
+        assert(not f.State.ResetSavedProgression()and f.Saves==saves,"A retired UI action cannot change saved settings")
+    end)
     test("Native boss observation rejects minibosses and requires a real credited health-zero event",function()
         local f=fixture();f.State.SetAccountProgression(true)
         f.AddBoss(2);assert(not f.ControllerCtx.Boss({Position=vec(0,20,0)}))

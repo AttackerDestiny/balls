@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.between-alt-continuous-join-v3.0.24"
-local VERSION="3.0.24"
+local BUILD="2026-11-08.reset-saved-progression-v3.0.25"
+local VERSION="3.0.25"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -9744,6 +9744,22 @@ return function(ctx)
         Boss=readBoss,Equipment=equipment,Complete=complete,Release=release,Save=state.SaveNow,
         Status=function(message)state.ProgressionStatus=message;text(ui.ProgressionStatus,message)end})
     state.ProgressionController=controller
+    function state.ResetSavedProgression()
+        if closed or not state.Running then return false end
+        state.ProgressionFloor=1;state.ProgressionBossCleared=false;state.ProgressionBossClearedName=nil
+        state.ProgressionComplete=false
+        if state.AccountProgression then
+            cancelEquipment();gear.Reset();controller.Reset()
+            if not state.StopEverything then
+                state.SetAutoFarm(true,"Progression checkpoint reset");state.SetEnabled(true)
+            end
+        else
+            state.ProgressionPhase="Idle";state.ProgressionStatus="Saved progression reset · Floor 1"
+            text(ui.ProgressionStatus,state.ProgressionStatus)
+        end
+        state.SaveNow()
+        return true
+    end
     function state.SetAccountProgression(on,restoring)
         if on and state.StopEverything then return false end
         cancelEquipment();gear.Reset()
@@ -29046,6 +29062,7 @@ return function(ctx)
             return {Options=options,Map=map,Value=chosen(options,map,function(name)return state.TradeItems[name]==true end)}
         end,function(values,map)local picked={};for _,label in ipairs(values or {})do if map[label]then picked[map[label]]=true end end;action("SetTradeItems",picked)end,true)
         toggle("Speacial","AccountProgression","Account Progression","SetAccountProgression")
+        button("Speacial","ResetSavedProgression","Reset Saved Progression",function()action("ResetSavedProgression")end)
         section("Speacial","AntiSuspiciousSection","Anti Suspicious")
         toggle("Speacial","AntiSuspicious","Anti Suspicious","SetAntiSuspicious")
         local limits=state.AntiSuspiciousLimits or {Hops=10,Window=10,Min=40,Max=60}
