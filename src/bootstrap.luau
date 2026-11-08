@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.safe-block-recovery-v3.0.20"
-local VERSION="3.0.20"
+local BUILD="2026-11-08.between-auto-retry-v3.0.21"
+local VERSION="3.0.21"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -175,6 +175,10 @@ for _,key in ipairs({"BetweenRooms","BetweenPace","AntiSuspiciousLimits","TradeI
     local value=preference(key,{})
     restore[key]=type(value)=="table"and value or {}
 end
+local betweenResume=env.SB2BetweenResumeRooms
+env.SB2BetweenResumeRooms=nil
+if game.PlaceId==78945654064532 and type(betweenResume)=="table" and betweenResume.UserId==player.UserId
+    and type(betweenResume.Rooms)=="table" then restore.BetweenRooms=betweenResume.Rooms end
 for _,key in ipairs({"SelectedPlayerId","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures"})do
     restore[key]=preference(key,nil)
 end

@@ -1,4 +1,4 @@
-return function(source,snapshotSource)
+return function(source,snapshotSource,resumeSource)
     local make=assert(loadstring(source))()
     local room={Id=1,Host=10,PlaceId=20,Status="Private",Mode="Normal"}
     local requests={}
@@ -135,5 +135,57 @@ return function(source,snapshotSource)
     run=worker;worker=nil;run()
     controller.Update(22)
     assert(starts==5 and not worker,"Start once after all seven alts have joined")
-    print("PASS The Between: confirmed settings, mixed roster receipts, seven alts, and final roster recheck")
+    env.localFloor=true;members["10"]=true
+    assert(#missingRoomAlts(read(),names)==3,"An old PartyID is insufficient when the retained native roster is available")
+
+    ctx.Read=function()return room end
+    ctx.MissingAlts=function()return missing end
+    ctx.InBetween=true
+    local prepared=0
+    ctx.PrepareJoin=function()prepared+=1 end
+    ctx.HasJoined=function(view)return view.Joined==true end
+    room={Id="old",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
+    hostRoom={Id="replacement",Host=10,PlaceId=20,Status="Friends",Mode="Elite"}
+    assignment={Role="Alt",Host="HostAccount"}
+    controller=make(ctx)
+    local sent=#requests
+    for n=0,4 do controller.Update(30+n*3)end
+    assert(#requests==sent+5 and requests[#requests]=="JoinParty:replacement" and prepared==1,
+        "An alt keeps joining a replacement from the same host without leaving the server")
+    room=hostRoom
+    controller.Update(45)
+    assert(#requests==sent+6,"A stale PartyID on a retained room still needs a native join receipt")
+    room.Joined=true
+    controller.Update(48)
+    assert(#requests==sent+6 and prepared==1)
+    room={Id="other",Host=99,PlaceId=20}
+    controller.Update(51)
+    assert(#requests==sent+6,"A different host's party is left alone")
+
+    assignment={Role="Host",Alts=names}
+    room={Id="retry",Host=10,PlaceId=20,Status="Friends",Mode="Hard"}
+    missing={};accepted=false;controller=make(ctx)
+    controller.Update(60);run=worker;worker=nil;run()
+    controller.Update(61);assert(not worker)
+    accepted=true
+    controller.Update(62);run=worker;worker=nil;run()
+    assert(starts==7,"The host retries a failed Start inside The Between")
+    controller.Update(76);assert(not worker)
+    controller.Update(77);assert(not worker)
+    controller.Update(79);assert(worker,"A stalled teleport can retry after a fresh roster check")
+
+    local carried={{Host="HostAccount",Alt="Alt1",Start=true,AutoRetry=true}}
+    local function loadResume(place,user)
+        local resume=assert(loadstring(resumeSource.."\nreturn restore.BetweenRooms"))
+        local original={}
+        local scope={env={SB2BetweenResumeRooms={UserId=1,Rooms=carried}},game={PlaceId=place},player={UserId=user},restore={BetweenRooms=original}}
+        setfenv(resume,setmetatable(scope,{__index=getfenv()}))
+        local result=resume()
+        assert(scope.env.SB2BetweenResumeRooms==nil)
+        return result,original
+    end
+    assert(loadResume(78945654064532,1)==carried)
+    local result,original=loadResume(78945654064532,2);assert(result==original)
+    result,original=loadResume(20,1);assert(result==original)
+    print("PASS The Between: roster recheck, replacement and retained party joins, native Start retry and preset handoff")
 end

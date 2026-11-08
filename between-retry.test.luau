@@ -34,6 +34,8 @@ return function(source)
     assert(not retry.Update(11))
     wipe=false;assert(not retry.Update(11.5),"A revived player cancels the pending wipe")
     wipe=true
-    assert(not retry.Update(12) and retry.Update(13)=="Wipe","A stable wipe opens the retry gate")
+    assert(not retry.Update(12))
+    wave=nil
+    assert(retry.Update(13)=="Wipe","Resetting the wave counter does not interrupt wipe confirmation")
     print("PASS Between Auto Retry: stable wipe, final chest, late and fast loot, streaming and settlement")
 end

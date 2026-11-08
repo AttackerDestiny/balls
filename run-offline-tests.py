@@ -132,7 +132,8 @@ def main():
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     room_snapshot = script[script.index("    local function roomSnapshot(person)"):script.index("    local function send(action,partyId)")]
-    fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + quote(read("between-room.module.luau")) + "," + quote(room_snapshot) + ")\n"
+    room_resume = script[script.index("local betweenResume=env.SB2BetweenResumeRooms"):script.index("for _,key in ipairs({\"SelectedPlayerId\"")]
+    fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("between-room.module.luau"), room_snapshot, room_resume)) + ")\n"
     fixture += "assert(loadstring(" + quote(read("between-pace.test.luau")) + "))()(" + quote(read("between-pace.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("rock-switch.test.luau")) + "))()(" + quote(wave) + ")\n"
     fixture += "assert(loadstring(" + quote(read("rubricatus-dodge.test.luau")) + "))()(" + quote(read("boss-dodge.module.luau")) + ")\n"

@@ -285,6 +285,9 @@ if valid and type(settings)=="table"and settings.AutomationRunId==%q
         if source:find(%q,1,true)then
             getgenv().SB2AutomationResumeFeatures=settings.AutomationResumeFeatures
             getgenv().SB2AutomationResumeConfigPath=%q
+            if settings.AutoCreateBetween and type(settings.BetweenRooms)=="table" then
+                getgenv().SB2BetweenResumeRooms={UserId=player.UserId,Rooms=settings.BetweenRooms}
+            end
             local ok,ticket=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
             if ok and type(ticket)=="table"and ticket.Active==true and ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId then
                 getgenv().SB2SoloResumeTicket=ticket

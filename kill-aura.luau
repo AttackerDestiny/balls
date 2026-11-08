@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.safe-block-recovery-v3.0.20"
-local VERSION="3.0.20"
+local BUILD="2026-11-08.between-auto-retry-v3.0.21"
+local VERSION="3.0.21"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -769,6 +769,10 @@ for _,key in ipairs({"BetweenRooms","BetweenPace","AntiSuspiciousLimits","TradeI
     local value=preference(key,{})
     restore[key]=type(value)=="table"and value or {}
 end
+local betweenResume=env.SB2BetweenResumeRooms
+env.SB2BetweenResumeRooms=nil
+if game.PlaceId==78945654064532 and type(betweenResume)=="table" and betweenResume.UserId==player.UserId
+    and type(betweenResume.Rooms)=="table" then restore.BetweenRooms=betweenResume.Rooms end
 for _,key in ipairs({"SelectedPlayerId","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures"})do
     restore[key]=preference(key,nil)
 end
@@ -8408,6 +8412,9 @@ if valid and type(settings)=="table"and settings.AutomationRunId==%q
         if source:find(%q,1,true)then
             getgenv().SB2AutomationResumeFeatures=settings.AutomationResumeFeatures
             getgenv().SB2AutomationResumeConfigPath=%q
+            if settings.AutoCreateBetween and type(settings.BetweenRooms)=="table" then
+                getgenv().SB2BetweenResumeRooms={UserId=player.UserId,Rooms=settings.BetweenRooms}
+            end
             local ok,ticket=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
             if ok and type(ticket)=="table"and ticket.Active==true and ticket.UserId==player.UserId and ticket.PlaceId==game.PlaceId then
                 getgenv().SB2SoloResumeTicket=ticket
@@ -10426,42 +10433,56 @@ return function(ctx)
     local phase="Setup"
     local waiting,completedRoom
     local attempts=0
-    local joinRoom,joinStatus,joinAttempts,nextJoin
+    local joinRoom,nextJoin,preparedRoom
+    local teleportAt
+    local retryAt=0
     local starting=false
     local revision=0
     local function stop(message)phase="Stopped";ctx.Status(message)end
+    local function retry(message,now)
+        if not ctx.InBetween then stop(message.." Toggle Start to retry.");return end
+        waiting=nil;attempts=0;phase="Setup";retryAt=now+2
+        ctx.Status(message.." Retrying in The Between.")
+    end
     function api.Reset()
         revision+=1
         phase="Setup";waiting=nil;attempts=0
-        joinRoom,joinStatus,joinAttempts,nextJoin=nil,nil,0,0
+        joinRoom,nextJoin,preparedRoom=nil,0,nil;retryAt=0
     end
     local function dispatch(action,field,room,now)
         attempts+=1
-        if attempts>8 then stop("Room settings could not be applied. Check the native party menu.");return end
+        if attempts>8 then retry("Room settings could not be applied.",now);return end
         waiting={Field=field,Before=room and room[field],Until=now+5}
         ctx.Status(room and "Configuring The Between"or "Creating The Between room")
         ctx.Send(action)
     end
     function api.Update(now)
-        if phase~="Setup"or starting or not ctx.Active()then return end
+        if phase=="AwaitingTeleport" and now>=teleportAt and ctx.Active()then
+            completedRoom=nil;retry("Start was accepted but teleport did not finish.",now)
+        end
+        if phase~="Setup"or starting or now<retryAt or not ctx.Active()then return end
         local room=ctx.Read()
         local assignment=ctx.Assignment and ctx.Assignment()
         local access,difficulty=ctx.Selection()
         if assignment and assignment.Role=="Alt" then
             local hostRoom=ctx.FindHostRoom(assignment.Host)
-            if room then
-                ctx.Status(hostRoom and room.Id==hostRoom.Id and "Joined host · waiting for the party"
-                    or "Leave your current party to join "..assignment.Host)
-            elseif not hostRoom then
+            local sameParty=hostRoom and room and room.Id==hostRoom.Id
+            local joined=sameParty and (not ctx.HasJoined or ctx.HasJoined(hostRoom))
+            local canJoin=hostRoom and (not room or (ctx.InBetween and room.Host==hostRoom.Host and room.PlaceId==ctx.PlaceId))
+            if (joined or canJoin) and preparedRoom~=hostRoom.Id then
+                preparedRoom=hostRoom.Id
+                if ctx.PrepareJoin then ctx.PrepareJoin()end
+            end
+            if not hostRoom then
                 ctx.Status("Waiting for host "..assignment.Host.." in this server")
-            elseif hostRoom.Status==access and hostRoom.Mode==difficulty then
-                if joinRoom~=hostRoom.Id or joinStatus~=hostRoom.Status then
-                    joinRoom,joinStatus,joinAttempts,nextJoin=hostRoom.Id,hostRoom.Status,0,0
-                end
-                if joinAttempts>=3 then
-                    ctx.Status("Could not join the host. Check room access and toggle Start to retry.")
-                elseif now>=nextJoin then
-                    joinAttempts+=1;nextJoin=now+3
+            elseif joined then
+                ctx.Status("Joined host · waiting for the party")
+            elseif not canJoin then
+                ctx.Status("Leave your current party to join "..assignment.Host)
+            elseif (ctx.InBetween and hostRoom.Status and hostRoom.Mode) or (hostRoom.Status==access and hostRoom.Mode==difficulty)then
+                if joinRoom~=hostRoom.Id then joinRoom,nextJoin=hostRoom.Id,0 end
+                if now>=nextJoin then
+                    nextJoin=now+3
                     ctx.Status("Joining "..assignment.Host)
                     ctx.Send("JoinParty",hostRoom.Id)
                 end
@@ -10474,7 +10495,7 @@ return function(ctx)
         if waiting then
             local changed=waiting.Field=="Id"and room or room and room[waiting.Field]~=waiting.Before
             if changed then waiting=nil
-            elseif now>=waiting.Until then stop("Room request timed out. Toggle Start to retry.");return
+            elseif now>=waiting.Until then retry("Room request timed out.",now);return
             else return end
         end
         if room then
@@ -10506,8 +10527,13 @@ return function(ctx)
             end
             local ok,accepted=pcall(ctx.Start)
             starting=false
-            if ok and accepted==true then completedRoom=room.Id;phase="Stopped";if ctx.Active()then ctx.Status("Start accepted · waiting for teleport")end
-            elseif ctx.Active()then stop("Start failed. Check the native party menu and toggle Start to retry.")
+            if ok and accepted==true then
+                completedRoom=room.Id
+                phase=ctx.InBetween and "AwaitingTeleport" or "Stopped"
+                teleportAt=(ctx.Now and ctx.Now()or now)+15
+                if ctx.Active()then ctx.Status("Start accepted · waiting for teleport")end
+            elseif requestRevision==revision and ctx.Active()then retry("Start failed.",ctx.Now and ctx.Now()or now)
+            elseif requestRevision~=revision then phase="Setup"
             else phase="Stopped"end
         end)
     end
@@ -10534,7 +10560,7 @@ end
 -- BEGIN BUNDLED BETWEEN RETRY
 -- A retry needs a stable party wipe or an observed final chest breaking.
 return function(ctx)
-    local wipeAt,ready
+    local wipeAt,ready,started
     local chests={}
     local bossHealth
     local api={}
@@ -10552,7 +10578,8 @@ return function(ctx)
     function api.Update(now)
         if ready then return ready end
         local wave,mobsLeft=ctx.Wave()
-        if type(wave)~="number" or wave<1 then return end
+        started=started or (type(wave)=="number" and wave>=1)
+        if not started then return end
         if ctx.PartyDefeated() then
             wipeAt=wipeAt or now
             if now-wipeAt>=1 then ready="Wipe";return ready end
@@ -10797,6 +10824,11 @@ end
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
     end
+    local function nativeRoomMember(room,id)
+        if room.Instance and room.Instance:GetAttribute(id)~=nil then return true end
+        if localFloor and room.Instance and room.Instance:GetAttribute(tostring(room.Host))~=nil then return false end
+        return nil
+    end
     local function missingRoomAlts(room,names)
         local missing={}
         if #names==0 then return missing end
@@ -10809,8 +10841,9 @@ end
             local alt=roster[name:lower()]
             local id=alt and tostring(alt.UserId) or name:match("^%d+$")
             -- The party roster and the player attribute can replicate independently.
-            local joined=room.Instance and ((id and room.Instance:GetAttribute(id)~=nil)
-                or (alt and tostring(alt:GetAttribute("PartyID"))==room.Id))
+            local member=id and nativeRoomMember(room,id)
+            local joined=room.Instance and (member==true
+                or (member==nil and alt and tostring(alt:GetAttribute("PartyID"))==room.Id))
             if not joined then missing[#missing+1]=name end
         end
         return missing
@@ -10829,27 +10862,32 @@ end
         local found=host and roomSnapshot(host)
         if found and found.Host==host.UserId and found.PlaceId==destination then return found end
     end
+    local altRetryReady=false
+    local function queueRoom()if state.QueueAutomation then pcall(state.QueueAutomation)end end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
+        InBetween=localFloor,Now=os.clock,
         Active=function()
-            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting then return false end
+            if not state.Running or not state.AutoCreateBetween or state.StopEverything
+                or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
             if not localFloor then return true end
-            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
-                local hostRoom=findHostRoom(assignment.Host)
-                return hostRoom~=nil
-                    and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
+                altRetryReady=altRetryReady or partyDefeated()
+                    or (workspace:GetAttribute("Wave")==100 and workspace:GetAttribute("MobsLeft")==0)
             end
+            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
+            if assignment.Role=="Alt" then return altRetryReady end
             return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
         end,
         Assignment=function()return assignment end,
         FindHostRoom=findHostRoom,
+        HasJoined=function(room)return nativeRoomMember(room,tostring(player.UserId))~=false end,
         MissingAlts=missingRoomAlts,
         Selection=function()
             local room=assignment.Room
             if room then return room.Mode,room.Difficulty end
         end,
         Status=function(message)state.BetweenRoomStatus=message end,
-        PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
+        PrepareJoin=queueRoom,PrepareStart=queueRoom,
         Start=function()
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})

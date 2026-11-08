@@ -1,6 +1,6 @@
 -- A retry needs a stable party wipe or an observed final chest breaking.
 return function(ctx)
-    local wipeAt,ready
+    local wipeAt,ready,started
     local chests={}
     local bossHealth
     local api={}
@@ -18,7 +18,8 @@ return function(ctx)
     function api.Update(now)
         if ready then return ready end
         local wave,mobsLeft=ctx.Wave()
-        if type(wave)~="number" or wave<1 then return end
+        started=started or (type(wave)=="number" and wave>=1)
+        if not started then return end
         if ctx.PartyDefeated() then
             wipeAt=wipeAt or now
             if now-wipeAt>=1 then ready="Wipe";return ready end

@@ -535,6 +535,11 @@ local function installBetweenAutomation()
         if party then for _,field in ipairs({"Host","PlaceId","Status","Mode"})do view[field]=party:GetAttribute(field)end end
         return view
     end
+    local function nativeRoomMember(room,id)
+        if room.Instance and room.Instance:GetAttribute(id)~=nil then return true end
+        if localFloor and room.Instance and room.Instance:GetAttribute(tostring(room.Host))~=nil then return false end
+        return nil
+    end
     local function missingRoomAlts(room,names)
         local missing={}
         if #names==0 then return missing end
@@ -547,8 +552,9 @@ local function installBetweenAutomation()
             local alt=roster[name:lower()]
             local id=alt and tostring(alt.UserId) or name:match("^%d+$")
             -- The party roster and the player attribute can replicate independently.
-            local joined=room.Instance and ((id and room.Instance:GetAttribute(id)~=nil)
-                or (alt and tostring(alt:GetAttribute("PartyID"))==room.Id))
+            local member=id and nativeRoomMember(room,id)
+            local joined=room.Instance and (member==true
+                or (member==nil and alt and tostring(alt:GetAttribute("PartyID"))==room.Id))
             if not joined then missing[#missing+1]=name end
         end
         return missing
@@ -567,27 +573,32 @@ local function installBetweenAutomation()
         local found=host and roomSnapshot(host)
         if found and found.Host==host.UserId and found.PlaceId==destination then return found end
     end
+    local altRetryReady=false
+    local function queueRoom()if state.QueueAutomation then pcall(state.QueueAutomation)end end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
+        InBetween=localFloor,Now=os.clock,
         Active=function()
-            if not state.Running or not state.AutoCreateBetween or state.StopEverything or state.AutomationTeleporting then return false end
+            if not state.Running or not state.AutoCreateBetween or state.StopEverything
+                or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
             if not localFloor then return true end
-            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
             if assignment.Role=="Alt" then
-                local hostRoom=findHostRoom(assignment.Host)
-                return hostRoom~=nil
-                    and (partyDefeated() or (workspace:GetAttribute("Wave")==100 and (workspace:GetAttribute("MobsLeft")or 0)==0))
+                altRetryReady=altRetryReady or partyDefeated()
+                    or (workspace:GetAttribute("Wave")==100 and workspace:GetAttribute("MobsLeft")==0)
             end
+            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
+            if assignment.Role=="Alt" then return altRetryReady end
             return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
         end,
         Assignment=function()return assignment end,
         FindHostRoom=findHostRoom,
+        HasJoined=function(room)return nativeRoomMember(room,tostring(player.UserId))~=false end,
         MissingAlts=missingRoomAlts,
         Selection=function()
             local room=assignment.Room
             if room then return room.Mode,room.Difficulty end
         end,
         Status=function(message)state.BetweenRoomStatus=message end,
-        PrepareStart=function()if state.QueueAutomation then pcall(state.QueueAutomation)end end,
+        PrepareJoin=queueRoom,PrepareStart=queueRoom,
         Start=function()
             return ReplicatedStorage.Function:InvokeServer("UniqueFloorTypes",{"Parties","Start"})
         end})
