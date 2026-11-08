@@ -35,7 +35,7 @@ return function(ctx)
         return prefs
     end
     local function writePreset(id,package)
-        local bytes=ctx.Encode(package)
+        local bytes=ctx.Encode(ctx.Validate(package))
         assert(#bytes<=262144,"Config exceeds 256 KB")
         ctx.Write(saved(id),bytes)
     end
@@ -68,12 +68,15 @@ return function(ctx)
             if ctx.Exists(source)then
                 local id=nextPrefs.Count+1
                 assert(id<=maxSlots,"Shared preset limit reached (200)")
-                local package=ctx.Validate(decode(source,262144))
+                local legacyPackage=decode(source,262144)
+                local package=ctx.Validate(legacyPackage)
+                local accountSettings=legacyPackage.Settings
                 local settingsPath=ctx.Folder.."/settings_"..ctx.UserId.."_preset_"..oldId..".json"
                 if ctx.Exists(settingsPath)then
                     local current=decode(settingsPath,32768)
                     local edited=table.clone(package);edited.Settings=current
-                    if pcall(ctx.Validate,edited)then package=edited end
+                    local valid,checked=pcall(ctx.Validate,edited)
+                    if valid then package=checked;accountSettings=current end
                 end
                 local spots=table.clone(package.CustomSpots)
                 local prefixName="custom-spots_"..ctx.UserId.."_preset_"..oldId.."_"
@@ -87,6 +90,13 @@ return function(ctx)
                 for floor in pairs(spotFiles[oldId]or {})do if package.CustomSpots[floor]==nil then copySpots(floor)end end
                 package=table.clone(package);package.CustomSpots=spots
                 writePreset(id,ctx.Validate(package))
+                -- Keep this owner's checkpoint in its private file, never in the shared seed.
+                local accountPath=ctx.Folder.."/settings_"..ctx.UserId.."_shared-preset_"..id..".json"
+                if not ctx.Exists(accountPath)then
+                    local bytes=ctx.Encode(accountSettings)
+                    assert(#bytes<=32768,"Settings exceed their storage limit")
+                    ctx.Write(accountPath,bytes)
+                end
                 remap[oldId]=id;nextPrefs.Count=id
             end
         end

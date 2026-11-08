@@ -234,6 +234,9 @@ def main():
     credit_send=script[credit_send_start:script.index("\n                end,",credit_send_start)]+"\nend"
     fixture += "assert(loadstring(" + quote(read("credit-check.test.luau")) + "))()(" + quote(read("credit-check.module.luau")) + "," + quote(read("attack-scheduler.module.luau")) + "," + quote(credit_send) + ")\n"
     fixture += "assert(loadstring(" + quote(read("config-transfer.test.luau")) + "))()(" + quote(read("config-transfer.module.luau")) + ")\n"
+    preference_start=script.index("local function preference(key,fallback)")
+    preference=script[preference_start:script.index("local function numericPreference",preference_start)]
+    fixture += "assert(loadstring(" + quote(read("progression-portability.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("config-transfer.module.luau"),read("config-presets.module.luau"),preference)) + ")\n"
     webhook_start = script.index("local function installRewardWebhook()")
     webhook_adapter = script[webhook_start:script.index("\ninstallRewardWebhook()", webhook_start) + len("\ninstallRewardWebhook()")]
     fixture += "assert(loadstring(" + quote(read("reward-webhook.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("reward-webhook.module.luau"), webhook_adapter)) + ")\n"

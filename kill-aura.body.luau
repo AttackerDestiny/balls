@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.junkie-sdk-compatible-v3.0.26"
-local VERSION="3.0.26"
+local BUILD="2026-11-08.private-progression-checkpoints-v3.0.27"
+local VERSION="3.0.27"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -360,6 +360,19 @@ return function(ctx)
         data(value,0,{})
         settings(value.Settings);arenas(value.CustomSpots)
     end
+    local accountProgression={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore"}
+    local function portable(item)
+        local filtered
+        for _,field in ipairs(accountProgression)do
+            if item.Settings[field]~=nil then
+                filtered=filtered or table.clone(item.Settings)
+                filtered[field]=nil
+            end
+        end
+        if not filtered then return item end
+        local copy=table.clone(item);copy.Settings=filtered
+        return copy
+    end
     function api.Validate(package)
         assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
         for key in pairs(package)do
@@ -382,7 +395,14 @@ return function(ctx)
             end
             assert(total==count,"Invalid preset list")
         end
-        return package
+        -- Accept old exports, but never apply or re-export another account's checkpoints.
+        local clean=portable(package)
+        if library then
+            clean=table.clone(clean);clean.Presets=table.clone(library)
+            clean.Presets.Items={}
+            for id,item in ipairs(library.Items)do clean.Presets.Items[id]=portable(item)end
+        end
+        return clean
     end
     local function withinStorage(package)
         local function check(item)
@@ -455,7 +475,7 @@ return function(ctx)
         return prefs
     end
     local function writePreset(id,package)
-        local bytes=ctx.Encode(package)
+        local bytes=ctx.Encode(ctx.Validate(package))
         assert(#bytes<=262144,"Config exceeds 256 KB")
         ctx.Write(saved(id),bytes)
     end
@@ -488,12 +508,15 @@ return function(ctx)
             if ctx.Exists(source)then
                 local id=nextPrefs.Count+1
                 assert(id<=maxSlots,"Shared preset limit reached (200)")
-                local package=ctx.Validate(decode(source,262144))
+                local legacyPackage=decode(source,262144)
+                local package=ctx.Validate(legacyPackage)
+                local accountSettings=legacyPackage.Settings
                 local settingsPath=ctx.Folder.."/settings_"..ctx.UserId.."_preset_"..oldId..".json"
                 if ctx.Exists(settingsPath)then
                     local current=decode(settingsPath,32768)
                     local edited=table.clone(package);edited.Settings=current
-                    if pcall(ctx.Validate,edited)then package=edited end
+                    local valid,checked=pcall(ctx.Validate,edited)
+                    if valid then package=checked;accountSettings=current end
                 end
                 local spots=table.clone(package.CustomSpots)
                 local prefixName="custom-spots_"..ctx.UserId.."_preset_"..oldId.."_"
@@ -507,6 +530,13 @@ return function(ctx)
                 for floor in pairs(spotFiles[oldId]or {})do if package.CustomSpots[floor]==nil then copySpots(floor)end end
                 package=table.clone(package);package.CustomSpots=spots
                 writePreset(id,ctx.Validate(package))
+                -- Keep this owner's checkpoint in its private file, never in the shared seed.
+                local accountPath=ctx.Folder.."/settings_"..ctx.UserId.."_shared-preset_"..id..".json"
+                if not ctx.Exists(accountPath)then
+                    local bytes=ctx.Encode(accountSettings)
+                    assert(#bytes<=32768,"Settings exceed their storage limit")
+                    ctx.Write(accountPath,bytes)
+                end
                 remap[oldId]=id;nextPrefs.Count=id
             end
         end

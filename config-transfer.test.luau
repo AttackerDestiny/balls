@@ -32,9 +32,31 @@ return function(source)
     api.Export()
     assert(api.Import(clipboard) and applied.Presets.Outside==1 and applied.Presets.Between==2)
     api.Export()
-    library.Between=3;invalid(encoded);library.Between=2
+    encoded.Presets.Between=3;invalid(encoded);encoded.Presets.Between=2
     library.Items[2].Settings.Enabled="yes";invalid(encoded);library.Items[2].Settings.Enabled=nil
     local noClipboard=make({Settings=function()return settings end,Spots=function()return spots end,Encode=function()return "ok"end})
     assert(not pcall(noClipboard.Export),"Unsupported clipboard must report failure")
-    print("PASS Config transfer: all snapshot fields, multi-floor custom spots, clipboard roundtrip, type/path/size validation and unsupported clipboard")
+    local private={ProgressionFloor=9,ProgressionBossCleared=true,ProgressionBossClearedName="Old boss",
+        ProgressionComplete=true,ProgressionRestore={Enabled=true,AutoFarm=true}}
+    settings.AccountProgression=true
+    for key,value in pairs(private)do settings[key]=value end
+    library.Between=2
+    api.Export()
+    for key,value in pairs(private)do
+        assert(encoded.Settings[key]==nil and encoded.Presets.Items[1].Settings[key]==nil,
+            "Root and preset exports must exclude account progression: "..key)
+        assert(settings[key]==value,"Export must preserve the current account's checkpoint")
+    end
+    assert(encoded.Settings.AccountProgression and encoded.Presets.Items[1].Settings.AccountProgression,
+        "Progression ON/OFF is still a portable feature preference")
+    local old={Format="FeatherConfig",Version=1,Settings=settings,CustomSpots=spots,
+        Presets={Items={{Settings=settings,CustomSpots=spots}},Auto=false,Active=1,Manual=1,Outside=1,Between=0}}
+    encoded=old
+    assert(api.Import("encoded-config"))
+    for key,value in pairs(private)do
+        assert(applied.Settings[key]==nil and applied.Presets.Items[1].Settings[key]==nil,
+            "Legacy configs cannot import another account's progression")
+        assert(old.Settings[key]==value,"Validation cannot mutate decoded snapshots or live settings")
+    end
+    print("PASS Config transfer: portable preferences, private progression filtering, custom spots, legacy import, type/path/size validation")
 end

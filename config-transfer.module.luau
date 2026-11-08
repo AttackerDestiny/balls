@@ -80,6 +80,19 @@ return function(ctx)
         data(value,0,{})
         settings(value.Settings);arenas(value.CustomSpots)
     end
+    local accountProgression={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore"}
+    local function portable(item)
+        local filtered
+        for _,field in ipairs(accountProgression)do
+            if item.Settings[field]~=nil then
+                filtered=filtered or table.clone(item.Settings)
+                filtered[field]=nil
+            end
+        end
+        if not filtered then return item end
+        local copy=table.clone(item);copy.Settings=filtered
+        return copy
+    end
     function api.Validate(package)
         assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
         for key in pairs(package)do
@@ -102,7 +115,14 @@ return function(ctx)
             end
             assert(total==count,"Invalid preset list")
         end
-        return package
+        -- Accept old exports, but never apply or re-export another account's checkpoints.
+        local clean=portable(package)
+        if library then
+            clean=table.clone(clean);clean.Presets=table.clone(library)
+            clean.Presets.Items={}
+            for id,item in ipairs(library.Items)do clean.Presets.Items[id]=portable(item)end
+        end
+        return clean
     end
     local function withinStorage(package)
         local function check(item)
