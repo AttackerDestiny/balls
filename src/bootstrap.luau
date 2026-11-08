@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.reset-saved-progression-v3.0.25"
-local VERSION="3.0.25"
+local BUILD="2026-11-08.junkie-sdk-compatible-v3.0.26"
+local VERSION="3.0.26"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

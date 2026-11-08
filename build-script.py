@@ -132,6 +132,17 @@ def main():
     before, rest = body.split(start, 1)
     _, after = rest.split(end, 1)
     library = (ROOT / "vendor/WindUI-1.6.66.lua").read_text(encoding="utf-8")
+    # Feather does not enable WindUI's optional key system. Omit its obsolete
+    # Junkie adapter to keep unsupported API references out of the generated bundle.
+    provider_start = library.index("function a.j()\n")
+    provider_end = library.index("function a.k()\n", provider_start)
+    assert library[provider_start:provider_end].count("JunkieProtected.") == 7
+    library = library[:provider_start] + library[provider_end:]
+    registry_start = library.index("junkiedevelopment={\n")
+    registry_end = library.index("\n},\n", registry_start) + len("\n},\n")
+    assert "New=a.load'j'.New" in library[registry_start:registry_end]
+    library = library[:registry_start] + library[registry_end:]
+    assert "JunkieProtected" not in library and "a.load'j'" not in library
     # Use WindUI's own icon adapter with bundled Lucide data. The upstream
     # desktop path otherwise downloads Main-v2 and six icon packs on every load.
     icon_data = (ROOT / "vendor/Lucide-icons.lua").read_text(encoding="utf-8")

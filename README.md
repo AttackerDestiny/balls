@@ -6,6 +6,8 @@ This guide describes **v3.0.22**. Saved settings can override fresh-install defa
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
+For Junkie packaging, the generated `kill-aura.luau` omits WindUI's unused deprecated Junkie key-provider adapter. Feather does not enable WindUI's key system. The vendor release and licenses remain intact; the build applies this compatibility change. When using Junkie's protected loader, place the script in **Original Code** and any separate key interface in **UI Source**, following the [official Inline UI guide](https://docs.jnkie.com/roblox-sdk/inline-ui). The UI hands the entered key to the protected loader through `getgenv().SCRIPT_KEY`; protected loader authentication remains responsible for access.
+
 The distributed entry is one standalone Luau file (Roblox's Lua). It uses the executor's Roblox/Lua capabilities only; Python, Node and MCP are development tools, not runtime dependencies.
 
 ## Contents

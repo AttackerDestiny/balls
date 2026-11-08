@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.reset-saved-progression-v3.0.25"
-local VERSION="3.0.25"
+local BUILD="2026-11-08.junkie-sdk-compatible-v3.0.26"
+local VERSION="3.0.26"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -15355,68 +15355,6 @@ Copy=CopyLink,
 }
 end
 
-return aa end function a.j()
-
-
-
-
-
-
-
-
-
-local aa={}
-
-function aa.New(ab,ac,ad)
-JunkieProtected.API_KEY=ac
-JunkieProtected.PROVIDER=ad
-JunkieProtected.SERVICE_ID=ab
-
-local function ValidateKey(ae)
-if not ae or ae==""then
-print"No key provided!"
-
-return false,"No key provided. Please get a key."
-end
-
-local af=JunkieProtected.IsKeylessMode()
-if af and af.keyless_mode then
-print"Keyless mode enabled. Starting script..."
-return true,"Keyless mode enabled. Starting script..."
-end
-
-local ag=JunkieProtected.ValidateKey{Key=ae}
-if ag=="valid"then
-print"Key is valid! Starting script..."
-load()
-if _G.JD_IsPremium then
-print"Premium user detected!"
-else
-print"Standard user"
-end
-
-return true,"Key is valid!"
-else
-local ah=JunkieProtected.GetKeyLink()
-print"Invalid key!"
-
-return false,"Invalid key. Get one from:"..ah
-end
-end
-
-local function copyLink()
-local ae=JunkieProtected.GetKeyLink()
-
-if setclipboard then
-setclipboard(ae)
-end
-end
-return{
-Verify=ValidateKey,
-Copy=copyLink
-}
-end
-
 return aa end function a.k()
 
 
@@ -15442,13 +15380,6 @@ Icon="rbxassetid://130918283130165",
 Args={"ScriptId","Discord"},
 
 New=a.load'i'.New
-},
-junkiedevelopment={
-Name="Junkie Development",
-Icon="rbxassetid://106310347705078",
-Args={"ServiceId","ApiKey","Provider"},
-
-New=a.load'j'.New
 },
 
 

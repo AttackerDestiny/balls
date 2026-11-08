@@ -42,6 +42,12 @@ def main():
         assert not re.search(r"[\u00c3\u00c2][^\x00-\x7f]|\u00e2[\u2000-\u2122]|\ufffd", text), f"Corrupt UI encoding: {source_file.name}"
     print("PASS UI source UTF-8 encoding")
     script = read("kill-aura.body.luau")
+    assert "JunkieProtected" not in script and "JunkieProtected" not in read("kill-aura.luau"), "Deprecated Junkie API in runnable source"
+    bundled_ui=script.split("-- BEGIN BUNDLED WINDUI SOURCE\n",1)[1].split("-- END BUNDLED WINDUI SOURCE",1)[0]
+    assert bundled_ui.startswith("return [==========[\n")
+    patched_ui=bundled_ui.removeprefix("return [==========[\n").split("]==========]\n",1)[0]
+    registry_start=patched_ui.index("function a.k()\n")+len("function a.k()\n")
+    registry=patched_ui[registry_start:patched_ui.index("}end function a.l()",registry_start)+1]
     import hashlib
     assert hashlib.sha256((root / "vendor/WindUI-1.6.66.lua").read_bytes()).hexdigest() == "125b5dc3e5f02baf8008504879eef517ca29405c21255497e84da696fac51fc7", "WindUI release asset changed"
     assert script.index("-- WindUI is bundled at a fixed release") > script.index("function state.GetTradeItemChoices()"), "Initialize WindUI after all controllers and settings are ready"
@@ -134,6 +140,7 @@ def main():
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    fixture += "assert(loadstring(" + quote(read("windui-providers.test.luau")) + "))()(" + quote(registry) + ")\n"
     fixture += fixture_party
     active_start=script.index("    local function roomActive()")
     active=script[active_start:script.index("    local function queueRoom()",active_start)]
@@ -319,6 +326,10 @@ def main():
     for name in ("automation.test.lua", "server-isolation.test.lua"):
         subprocess.run([lua, name], check=True)
     with tempfile.TemporaryDirectory(prefix="sb2-offline-") as temp:
+        patched_ui_file=Path(temp)/"WindUI-bundled.luau"
+        patched_ui_file.write_text(patched_ui,encoding="utf-8")
+        for optimization in ("-O1","-O0"):
+            subprocess.run([tool("luau-compile"),"--null",optimization,str(patched_ui_file)],check=True)
         fixture_file = Path(temp) / "regressions.luau"
         fixture_file.write_text(fixture, encoding="utf-8")
         subprocess.run([tool("luau"), str(fixture_file)], check=True)
