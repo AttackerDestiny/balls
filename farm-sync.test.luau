@@ -142,6 +142,42 @@ return function(prioritySource,dataSource,validSource,selectionSource,creditSour
         a.State.CreditController=creditFactory({State=a.State,Members=function()return {{Name="A"},{Name="Missing",CreditMissing=true}}end,Rank=a.Priority.Rank})
         assert(a.Select(vec(cycle*100),mainB,cycle)==mainA,"An incomplete credit roster cannot preserve conflicting same-rank boss locks")
     end
+    local current=mob("Current enemy",0)
+    local futureBoss=mob("Next boss",5,"MainBoss")
+    local firstChest=mob("Common Chest",30,"Boss")
+    local nextChest=mob("NeonChest   ",60)
+    local loot=account({current})
+    assert(loot.Select(vec(0),nil,0)==current)
+    loot.Add(firstChest);loot.Add(nextChest);loot.Add(futureBoss)
+    loot.State.CreditCheck=true
+    loot.State.CreditController={FarmTarget=function()error("Chest priority cannot be replaced by credit-group boss selection")end}
+    assert(loot.Select(vec(0),current,1)==current,"A new chest waits until the current enemy is finished")
+    current.Children.Entity.Children.Health.Value=0
+    assert(loot.Select(vec(0),current,2)==firstChest,"Choose a loaded chest before the next main boss")
+    assert(loot.Select(vec(0),firstChest,3)==firstChest,"A living chest cannot be preempted by a boss")
+    firstChest.Children.Entity.Children.Health.Value=0
+    assert(loot.Select(vec(0),firstChest,4)==nextChest,"Any chest variant can become the next target")
+    nextChest.Parent=nil;loot.State.CreditController=nil
+    assert(loot.Select(vec(0),nextChest,5)==futureBoss,"A despawned chest releases the temporary loot policy")
+    local globalChest=mob("Legendary Chest",50000)
+    local scoped=account({globalChest,futureBoss})
+    scoped.State.MultiSpot=true;scoped.State.MultiSpotSelected={};scoped.State.BossOnly=true
+    assert(scoped.Select(vec(0),nil,0)==globalChest,"Any loaded chest is eligible even with Boss Only or an empty arena selection")
+    globalChest.Children.Entity.Children.Immortal={};scoped.State.FarmTargetLock=nil;scoped.State.FollowTarget=nil
+    assert(not scoped.Select(vec(0),nil,1),"Native invulnerability still prevents chest attacks")
+    local trio=account({mob("Arena add",0),mob("DA",5000),mob("RA",6000),mob("KA",7000)})
+    assert(trio.Priority.Rank(mob("DA",0))==2 and trio.Priority.Rank(mob("Ra",0))==2 and trio.Priority.Rank(mob("Ka",0))==2,
+        "DA/RA/KA are known minibosses even before native markers replicate")
+    trio.State.MultiSpot=true;trio.State.MultiSpotSelected={Trio=true}
+    trio.State.AutomationCatalog={SpotById={Trio={PlaceId=1,EncounterNames={Da=true,Ra=true,Ka=true}}}}
+    local choice=trio.Select(vec(0),nil,0)
+    assert(choice and choice.Name=="DA","The selected DA/RA/KA encounter outranks nearby ordinary mobs")
+    choice.Name="  dA  "
+    assert(trio.State.IsSelectedFarmMob(choice),"Selected encounter aliases tolerate native case and padding differences")
+    assert(not trio.Priority.IsChest(mob("Chestnut Treant",0))and trio.Priority.IsChest(mob("TreasureChest",0)),
+        "Recognize chest variants without matching chestnut enemies")
+    print("PASS Chest focus: finish current enemy, chest before bosses, credit/arena/Boss Only handling, expiry and all chest variants")
+    print("PASS DA/RA/KA priority: native-marker fallback and selected-encounter priority over regular mobs")
     print("PASS Credit target convergence: split living locks across three accounts adopt one boss instead of waiting on each other")
     print("PASS Global boss override: main=1, mini=2, cross-arena priority, different account locks converge after current kills, all priority kills and regular arena scope")
     print("PASS Shared farm targets: three account origins, previous targets, iteration order, boss/name/position ordering, death, late HitLives, invulnerability and trade priority")

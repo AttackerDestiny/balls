@@ -18,6 +18,15 @@ return function(moduleSource)
         assert(api.Rank(boss)==1 and api.Rank(mini)==2 and api.Rank(regular)==3,"Recognize model-level boss tags")
         local peer=mob("Other boss",90,"Boss")
         assert(api.Less(boss,peer,Vector3.zero,boss),"Keep the current target stable within one rank")
+        local chest=mob("Reward Chest",200)
+        local live={[boss]=true,[chest]=true}
+        assert(api.NextChest(boss,{[chest]=true},function()return true end,function(m)return live[m]end)==boss,
+            "Loaded chest waits for the current enemy")
+        live[boss]=false
+        assert(api.NextChest(boss,{[chest]=true},function()return true end,function(m)return live[m]end)==chest)
+        assert(api.NextChest(chest,{},function()return true end,function(m)return live[m]end)==chest,
+            "An opened chest remains focused until its live state ends")
+        assert(api.Rank(mob("DA",0))==2 and api.Rank(mob("RA",0))==2 and api.Rank(mob("KA",0))==2)
         return {Passed=true,Order={1,2,3},ModelTagsRecognized=true}
     end)
     folder:Destroy()

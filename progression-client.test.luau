@@ -76,6 +76,7 @@ return function(clientSource,controllerSource,gearSource,payloadSource)
             Label=function(name,text)local value=node(name,"TextLabel");value.Text=text;return value end,
             Bind=function(event,fn)return event:Connect(fn)end,
             Mobs=function()return f.Mobs end,Data=function(mob)return f.Data[mob]end,Rank=function(mob)return f.Ranks[mob]end,
+            IsChest=function(mob)return mob.Name=="Reward Chest"end,
             OwnDamage=function(health)local counter=health:FindFirstChild("Tester");return counter and counter.Value end,
             SkillsBusy=function()return false end,StopCombat=function()f.Stops+=1 end})
         f.State,f.Game,f.Profile,f.Player,f.Inventory,f.Definitions=state,game,profile,player,inventory,definitions
@@ -164,6 +165,15 @@ return function(clientSource,controllerSource,gearSource,payloadSource)
         health.Value=0;health.Changed:Fire()
         local result=f.ControllerCtx.Boss({Position=vec(0,20,0)})
         assert(result.Defeated and result.Credited)
+    end)
+    test("Progression can collect a chest without crediting it as the main boss",function()
+        local f=fixture();f.State.SetAccountProgression(true)
+        local chest=f.AddBoss(1);chest.Name="Reward Chest"
+        assert(not f.ControllerCtx.Boss({Position=vec(0,20,0)})and not f.State.ProgressionBossMob)
+        f.State.GetFarmChestTarget=function()return chest end
+        assert(f.ControllerCtx.ChestTarget(0)==chest)
+        f.State.ProgressionTravelOwned=true;assert(not f.ControllerCtx.ChestTarget(1))
+        f.State.ProgressionTravelOwned=false;f.State.TravelBusy=true;assert(not f.ControllerCtx.ChestTarget(2))
     end)
     test("A boss-tagged Gorilla cannot replace or satisfy the expected Rahjin target",function()
         local f=fixture();f.State.SetAccountProgression(true)

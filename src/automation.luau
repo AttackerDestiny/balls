@@ -407,7 +407,7 @@ do
     attach({State=state,Player=player,MakeController=makeController,MakeGear=makeGear,
         Parent=state.UI.Pages.Speacial,Button=uiButton,Label=uiLabel,Bind=bind,
         Mobs=function()refreshMobIndex();return trackedMobs end,Data=getMobData,
-        Rank=targetPriority.Rank,OwnDamage=state.ReadOwnDamage,
+        Rank=targetPriority.Rank,IsChest=targetPriority.IsChest,OwnDamage=state.ReadOwnDamage,
         SkillsBusy=function()return Skills.usingSkill~="none"end,
         StopCombat=function(reason)
             finishAttackBurst(reason);stopSword(true)

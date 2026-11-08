@@ -271,6 +271,7 @@ function state.SetAutoFarm(enabled,reason)
     state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
     state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
+    state.FarmChestFocus=nil;state.FarmChestPending=false;state.FarmChestScanAt=0
     if enabled then state.LastFarmStopReason=nil end
     farmToggle.Text=enabled and "Auto farm  ·  ON"or "Auto farm  ·  OFF"
     farmToggle.BackgroundColor3=enabled and Color3.fromRGB(114,88,229)or Color3.fromRGB(45,48,63)
@@ -304,16 +305,17 @@ local selectedFarmSpot=(function()
 -- END BUNDLED SELECTED FARM SPOTS
 end)()
 function state.IsSelectedFarmMob(mob,data)
+    if targetPriority.IsChest(mob)then return true end
     if not state.MultiSpot or state.AccountProgression then return true end
     local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
     return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
 end
-local function validMob(mob, mobs)
+local function validMob(mob, mobs,selection)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
     local data=getMobData(mob)
     if not data then return nil end
     if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
-    if not state.BlackoutHolding then
+    if not state.BlackoutHolding and not targetPriority.IsChest(mob)then
         local rank=targetPriority.Rank(mob)
         if state.AutoFarm and state.BossOnly and rank>2 then return nil end
         if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
@@ -321,8 +323,36 @@ local function validMob(mob, mobs)
         local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
         if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
     end
+    local focus=state.AutoFarm and not selection and state.FarmChestFocus
+    if focus and focus~=mob and focus.Parent==mobs then
+        local live=getMobData(focus)
+        if not live or live.Health.Value>0 and (not live.HitLives or live.HitLives.Value>0)then return nil end
+    end
     if os.clock()<(data.SkipUntil or 0)then return nil end
     return data.Root
+end
+function state.GetFarmChestTarget(now)
+    if not state.AutoFarm or state.Running==false or state.StopEverything or state.SafeModePanic
+        or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy or state.AutoRegroupHolding then
+        state.FarmChestFocus=nil;state.FarmChestPending=false;return nil
+    end
+    local folder=refreshMobIndex();if not folder then return nil end
+    local current=state.FarmTargetLock or state.FollowTarget
+    local function living(mob)
+        if not mob or mob.Parent~=folder then return false end
+        if not targetPriority.IsChest(mob)and state.MultiSpot and not state.IsSelectedFarmMob(mob)then return false end
+        local data=getMobData(mob)
+        return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
+    end
+    local revision=state.EnemyRegistry and state.EnemyRegistry.Revision
+    local cached=state.FarmChestFocus
+    if now<(state.FarmChestScanAt or 0)and state.FarmChestCurrent==current and state.FarmChestRevision==revision
+        and (not cached or living(cached))then return cached end
+    state.FarmChestScanAt=now+.15;state.FarmChestCurrent=current;state.FarmChestRevision=revision
+    state.FarmChestFocus=nil;state.FarmChestPending=false
+    local focus=targetPriority.NextChest(current,trackedMobs,function(mob)return validMob(mob,folder,true)end,living)
+    state.FarmChestFocus=focus;state.FarmChestPending=focus~=nil
+    return focus
 end
 function state.IsFarmEnemyAlive()
     if not state.AutoFarm then return false end
@@ -333,7 +363,9 @@ function state.IsFarmEnemyAlive()
     return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
 end
 function state.GetFarmPriorityTarget(now)
-    if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
+    if not state.AutoFarm or state.Running==false or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy or state.AutoRegroupHolding then return nil end
+    if state.AccountProgression and state.ProgressionPhase~="Collecting chest"then return nil end
+    local chest=state.GetFarmChestTarget(now);if chest then return chest end
     local folder=refreshMobIndex()
     if not folder then return nil end
     local cached=state.FarmPriorityTarget
@@ -1118,9 +1150,9 @@ local function updateMovement(now)
     local previous=state.FarmTargetLock or state.FollowTarget
     local previousData=previous and getMobData(previous)
     local targetDefeated=previousData and (previousData.Health.Value<=0 or previousData.HitLives and previousData.HitLives.Value<=0)
-    if not state.AccountProgression then
+    if not state.AccountProgression or state.ProgressionPhase=="Collecting chest"then
         local common=state.GetFarmPriorityTarget(now)
-        if common and common~=previous and (not previous or targetPriority.FarmLess(common,previous))then
+        if common and common~=previous and (state.FarmChestPending or not previous or targetPriority.FarmLess(common,previous))then
             if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Synchronizing farm target")end
             state.FarmTargetLock=common;state.FollowTarget=common;state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob;nextAcquisition=0
         end
@@ -1154,8 +1186,10 @@ local function updateMovement(now)
             if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
         end
         local function admitted(mob)return validMob(mob,mobs)end
-        if not state.AccountProgression and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
-        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
+        local chestFocus=state.GetFarmChestTarget and state.GetFarmChestTarget(now)
+        if chestFocus then locked=chestFocus end
+        if not state.AccountProgression and not state.FarmChestPending and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
+        if locked and not state.FarmChestPending and not state.AccountProgression and state.GetFarmPriorityTarget then
             local higher=state.GetFarmPriorityTarget(now)
             if higher and targetPriority.FarmLess(higher,locked)then locked=higher end
         end

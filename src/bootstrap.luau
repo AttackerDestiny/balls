@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.regroup-friend-cooldown-v3.0.29"
-local VERSION="3.0.29"
+local BUILD="2026-11-08.chest-priority-trio-rank-v3.0.30"
+local VERSION="3.0.30"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

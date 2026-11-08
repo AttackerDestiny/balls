@@ -208,7 +208,7 @@ return function(ctx)
             clearBoss()
         end
         for mob in pairs(ctx.Mobs())do
-            if mob.Parent and ctx.Rank(mob)==1 and matches(spot,mob)then
+            if mob.Parent and ctx.Rank(mob)==1 and not(ctx.IsChest and ctx.IsChest(mob))and matches(spot,mob)then
                 local data=ctx.Data(mob)
                 if data and data.Health.Value>0 and (data.Root.Position-spot.Position).Magnitude<=220 then
                     observe(mob,data);return {Alive=true,Name=mob.Name}
@@ -226,6 +226,11 @@ return function(ctx)
                 and not(state.SafeController and state.SafeController.Seeking)and (not state.TravelBusy or state.ProgressionTravelOwned)
         end,
         CombatReady=function()return state.Enabled and state.AutoFarm end,
+        ChestTarget=function(now)
+            if state.TravelBusy or state.ProgressionTravelOwned or not state.GetFarmChestTarget then return end
+            local focus=state.GetFarmChestTarget(now)
+            return focus and ctx.IsChest and ctx.IsChest(focus)and focus or nil
+        end,
         NearBossSpot=function(spot)
             local r=root();if not r then return false end
             if (r.Position-spot.Position).Magnitude<=350 then return true end

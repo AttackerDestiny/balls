@@ -11,7 +11,7 @@ return function(encounterSource,validSource)
         local folder={}
         local state={MultiSpotAnchor=vector(0)}
         local mobs,data={},{}
-        local environment=setmetatable({state=state,targetPriority={Rank=function(mob)return mob.Name=="Boss"and 1 or mob.Name=="MiniBoss"and 2 or 3 end},trackedMobs=mobs,
+        local environment=setmetatable({state=state,targetPriority={IsChest=function()return false end,Rank=function(mob)return mob.Name=="Boss"and 1 or mob.Name=="MiniBoss"and 2 or 3 end},trackedMobs=mobs,
             getMobData=function(mob)return data[mob]end,
             os={clock=function()return now end}}, {__index=getfenv()})
         local scan=assert(loadstring(encounterSource));setfenv(scan,environment);scan()

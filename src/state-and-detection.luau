@@ -169,7 +169,8 @@ do
     end
     state.CreditDamagePlanner=createPlanner()
     state.CreditController=createCredit({State=state,Planner=state.CreditDamagePlanner,Options=options,
-        Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,Members=roster,MaxHealth=maxHealth,Damage=contribution})
+        Rank=function(mob)return targetPriority.IsChest(mob)and 3 or targetPriority.Rank(mob)end,
+        Now=os.clock,Self=function()return player end,Members=roster,MaxHealth=maxHealth,Damage=contribution})
     function state.SetCreditCheck(enabled)
         state.CreditCheck=enabled==true;state.CreditController.Reset()
         state.CreditCheckStatus=state.CreditCheck and "Credit Check · waiting for a boss or mini-boss"or "Credit Check is off"

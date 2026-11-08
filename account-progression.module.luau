@@ -98,6 +98,17 @@ return function(ctx)
         if state.ProgressionComplete then publish("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes");return end
         if not ctx.Ready()then travel.unlock=nil;publish("Waiting","Waiting for protection, character or current movement");return end
         if now<travel.due then return end
+        local chest=ctx.ChestTarget and ctx.CombatReady()and ctx.ChestTarget(now)
+        if chest then
+            if travel.spot and not state.ProgressionBossCleared then
+                local boss=ctx.Boss(travel.spot)
+                if boss and boss.Defeated and boss.Credited then
+                    state.ProgressionBossCleared=true;state.ProgressionBossClearedName=boss.Name;ctx.Save()
+                end
+            end
+            publish("Collecting chest","Opening "..chest.Name.." before progression continues")
+            return
+        end
         local number=state.ProgressionFloor
         local floor=ctx.Floor(number)
         if not floor then api.Pause("Floor "..tostring(number).." is unavailable");return end

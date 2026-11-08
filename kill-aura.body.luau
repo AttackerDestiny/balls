@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.regroup-friend-cooldown-v3.0.29"
-local VERSION="3.0.29"
+local BUILD="2026-11-08.chest-priority-trio-rank-v3.0.30"
+local VERSION="3.0.30"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -1271,9 +1271,15 @@ local targetPriority=(function()
 -- Rank metadata is merged across model/entity markers; tie ordering is deterministic.
 return function()
     local api={}
+    local namedMiniboss={frogazoid=true,da=true,ra=true,ka=true}
     local memo=setmetatable({}, {__mode="k"})
     local function normalize(value)return tostring(value or ""):lower():gsub("[^%w]","")end
     local function root(mob)return mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")end
+    function api.IsChest(mob)
+        if not mob then return false end
+        local name=tostring(mob.Name):lower():match("^%s*(.-)%s*$")
+        return name:find("%f[%a]chests?%f[%A]")~=nil or name:match("chests?$")~=nil
+    end
     local function marker(value)
         local key=normalize(value)
         if key:find("mainboss",1,true)or key:find("floorboss",1,true)then return 8 end
@@ -1294,7 +1300,7 @@ return function()
         include(modelTag);include(entityTag);include(level)
         for _,tag in ipairs(mob:GetTags())do include(tag)end
         if entity then for _,tag in ipairs(entity:GetTags())do include(tag)end end
-        local priority=flags[8]and 1 or (flags[4]or normalize(mob.Name)=="frogazoid")and 2 or flags[2]and 1 or 3
+        local priority=flags[8]and 1 or (flags[4]or namedMiniboss[normalize(mob.Name)])and 2 or flags[2]and 1 or 3
         memo[mob]={At=os.clock()+.15,Entity=entity,Model=modelTag,EntityRank=entityTag,Difficulty=level,Priority=priority}
         return priority
     end
@@ -1318,6 +1324,16 @@ return function()
         if av.X~=bv.X then return av.X<bv.X end
         if av.Z~=bv.Z then return av.Z<bv.Z end
         return av.Y<bv.Y
+    end
+    function api.NextChest(current,candidates,valid,living)
+        if current and api.IsChest(current)and living(current)then return current end
+        local best
+        for candidate in pairs(candidates)do
+            if api.IsChest(candidate)and valid(candidate)and (not best or api.FarmLess(candidate,best))then best=candidate end
+        end
+        if not best then return nil end
+        if current and living(current)then return current end
+        return best
     end
     return api
 end
@@ -1693,7 +1709,8 @@ end
     end
     state.CreditDamagePlanner=createPlanner()
     state.CreditController=createCredit({State=state,Planner=state.CreditDamagePlanner,Options=options,
-        Rank=targetPriority.Rank,Now=os.clock,Self=function()return player end,Members=roster,MaxHealth=maxHealth,Damage=contribution})
+        Rank=function(mob)return targetPriority.IsChest(mob)and 3 or targetPriority.Rank(mob)end,
+        Now=os.clock,Self=function()return player end,Members=roster,MaxHealth=maxHealth,Damage=contribution})
     function state.SetCreditCheck(enabled)
         state.CreditCheck=enabled==true;state.CreditController.Reset()
         state.CreditCheckStatus=state.CreditCheck and "Credit Check · waiting for a boss or mini-boss"or "Credit Check is off"
@@ -2844,6 +2861,7 @@ function state.SetAutoFarm(enabled,reason)
     state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
     state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
+    state.FarmChestFocus=nil;state.FarmChestPending=false;state.FarmChestScanAt=0
     if enabled then state.LastFarmStopReason=nil end
     farmToggle.Text=enabled and "Auto farm  ·  ON"or "Auto farm  ·  OFF"
     farmToggle.BackgroundColor3=enabled and Color3.fromRGB(114,88,229)or Color3.fromRGB(45,48,63)
@@ -2879,12 +2897,12 @@ return function(state,mobName,point,priority,place)
     if state.AccountProgression or not state.MultiSpot then return true end
     local catalog=state.AutomationCatalog
     if not catalog then return false end
-    local canonical=tostring(mobName):lower()
+    local canonical=tostring(mobName):lower():gsub("[^%w]","")
     for id,enabled in pairs(state.MultiSpotSelected or {})do
         local entry=enabled and catalog.SpotById[id]
         if entry and entry.PlaceId==place then
             if entry.EncounterNames and priority<=2 then
-                for name in pairs(entry.EncounterNames)do if name:lower()==canonical then return true end end
+                for name in pairs(entry.EncounterNames)do if name:lower():gsub("[^%w]","")==canonical then return true end end
             elseif point and entry.Position then
                 local squared=0
                 for _,axis in ipairs({"X","Y","Z"})do local delta=point[axis]-entry.Position[axis];squared+=delta*delta end
@@ -2898,16 +2916,17 @@ end
 -- END BUNDLED SELECTED FARM SPOTS
 end)()
 function state.IsSelectedFarmMob(mob,data)
+    if targetPriority.IsChest(mob)then return true end
     if not state.MultiSpot or state.AccountProgression then return true end
     local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
     return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
 end
-local function validMob(mob, mobs)
+local function validMob(mob, mobs,selection)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
     local data=getMobData(mob)
     if not data then return nil end
     if data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0)or data.Entity:FindFirstChild("Immortal")then return nil end
-    if not state.BlackoutHolding then
+    if not state.BlackoutHolding and not targetPriority.IsChest(mob)then
         local rank=targetPriority.Rank(mob)
         if state.AutoFarm and state.BossOnly and rank>2 then return nil end
         if state.AccountProgression and (state.ProgressionPhase~="Fighting"or state.ProgressionEquipping or mob~=state.ProgressionBossMob)then return nil end
@@ -2915,8 +2934,36 @@ local function validMob(mob, mobs)
         local inEncounter=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
         if state.MultiSpotAnchor and not (state.AutoFarm and rank<=2)and not inEncounter and (data.Root.Position-state.MultiSpotAnchor).Magnitude>220 then return nil end
     end
+    local focus=state.AutoFarm and not selection and state.FarmChestFocus
+    if focus and focus~=mob and focus.Parent==mobs then
+        local live=getMobData(focus)
+        if not live or live.Health.Value>0 and (not live.HitLives or live.HitLives.Value>0)then return nil end
+    end
     if os.clock()<(data.SkipUntil or 0)then return nil end
     return data.Root
+end
+function state.GetFarmChestTarget(now)
+    if not state.AutoFarm or state.Running==false or state.StopEverything or state.SafeModePanic
+        or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy or state.AutoRegroupHolding then
+        state.FarmChestFocus=nil;state.FarmChestPending=false;return nil
+    end
+    local folder=refreshMobIndex();if not folder then return nil end
+    local current=state.FarmTargetLock or state.FollowTarget
+    local function living(mob)
+        if not mob or mob.Parent~=folder then return false end
+        if not targetPriority.IsChest(mob)and state.MultiSpot and not state.IsSelectedFarmMob(mob)then return false end
+        local data=getMobData(mob)
+        return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
+    end
+    local revision=state.EnemyRegistry and state.EnemyRegistry.Revision
+    local cached=state.FarmChestFocus
+    if now<(state.FarmChestScanAt or 0)and state.FarmChestCurrent==current and state.FarmChestRevision==revision
+        and (not cached or living(cached))then return cached end
+    state.FarmChestScanAt=now+.15;state.FarmChestCurrent=current;state.FarmChestRevision=revision
+    state.FarmChestFocus=nil;state.FarmChestPending=false
+    local focus=targetPriority.NextChest(current,trackedMobs,function(mob)return validMob(mob,folder,true)end,living)
+    state.FarmChestFocus=focus;state.FarmChestPending=focus~=nil
+    return focus
 end
 function state.IsFarmEnemyAlive()
     if not state.AutoFarm then return false end
@@ -2927,7 +2974,9 @@ function state.IsFarmEnemyAlive()
     return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)
 end
 function state.GetFarmPriorityTarget(now)
-    if not state.AutoFarm or state.Running==false or state.AccountProgression or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy then return nil end
+    if not state.AutoFarm or state.Running==false or state.StopEverything or state.SafeModePanic or state.AutomationTeleporting or state.ModeratorBlocking or state.AutoTradeBusy or state.AutoRegroupHolding then return nil end
+    if state.AccountProgression and state.ProgressionPhase~="Collecting chest"then return nil end
+    local chest=state.GetFarmChestTarget(now);if chest then return chest end
     local folder=refreshMobIndex()
     if not folder then return nil end
     local cached=state.FarmPriorityTarget
@@ -5379,9 +5428,9 @@ local function updateMovement(now)
     local previous=state.FarmTargetLock or state.FollowTarget
     local previousData=previous and getMobData(previous)
     local targetDefeated=previousData and (previousData.Health.Value<=0 or previousData.HitLives and previousData.HitLives.Value<=0)
-    if not state.AccountProgression then
+    if not state.AccountProgression or state.ProgressionPhase=="Collecting chest"then
         local common=state.GetFarmPriorityTarget(now)
-        if common and common~=previous and (not previous or targetPriority.FarmLess(common,previous))then
+        if common and common~=previous and (state.FarmChestPending or not previous or targetPriority.FarmLess(common,previous))then
             if state.SkillCastRunning and state.CancelSkillAura then state.CancelSkillAura("Synchronizing farm target")end
             state.FarmTargetLock=common;state.FollowTarget=common;state.FarmLockArena=state.MultiSpotAnchor;state.FarmLockProgression=state.ProgressionBossMob;nextAcquisition=0
         end
@@ -5415,8 +5464,10 @@ local function updateMovement(now)
             if data and (data.Health.Value<=0 or (data.HitLives and data.HitLives.Value<=0))then locked=nil end
         end
         local function admitted(mob)return validMob(mob,mobs)end
-        if not state.AccountProgression and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
-        if locked and not state.AccountProgression and state.GetFarmPriorityTarget then
+        local chestFocus=state.GetFarmChestTarget and state.GetFarmChestTarget(now)
+        if chestFocus then locked=chestFocus end
+        if not state.AccountProgression and not state.FarmChestPending and state.CreditController then locked=state.CreditController.FarmTarget(locked,trackedMobs,admitted,targetPriority.FarmLess)end
+        if locked and not state.FarmChestPending and not state.AccountProgression and state.GetFarmPriorityTarget then
             local higher=state.GetFarmPriorityTarget(now)
             if higher and targetPriority.FarmLess(higher,locked)then locked=higher end
         end
@@ -9519,6 +9570,17 @@ return function(ctx)
         if state.ProgressionComplete then publish("Complete","Complete · F12 boss defeated · toggle OFF to restore your modes");return end
         if not ctx.Ready()then travel.unlock=nil;publish("Waiting","Waiting for protection, character or current movement");return end
         if now<travel.due then return end
+        local chest=ctx.ChestTarget and ctx.CombatReady()and ctx.ChestTarget(now)
+        if chest then
+            if travel.spot and not state.ProgressionBossCleared then
+                local boss=ctx.Boss(travel.spot)
+                if boss and boss.Defeated and boss.Credited then
+                    state.ProgressionBossCleared=true;state.ProgressionBossClearedName=boss.Name;ctx.Save()
+                end
+            end
+            publish("Collecting chest","Opening "..chest.Name.." before progression continues")
+            return
+        end
         local number=state.ProgressionFloor
         local floor=ctx.Floor(number)
         if not floor then api.Pause("Floor "..tostring(number).." is unavailable");return end
@@ -9884,7 +9946,7 @@ return function(ctx)
             clearBoss()
         end
         for mob in pairs(ctx.Mobs())do
-            if mob.Parent and ctx.Rank(mob)==1 and matches(spot,mob)then
+            if mob.Parent and ctx.Rank(mob)==1 and not(ctx.IsChest and ctx.IsChest(mob))and matches(spot,mob)then
                 local data=ctx.Data(mob)
                 if data and data.Health.Value>0 and (data.Root.Position-spot.Position).Magnitude<=220 then
                     observe(mob,data);return {Alive=true,Name=mob.Name}
@@ -9902,6 +9964,11 @@ return function(ctx)
                 and not(state.SafeController and state.SafeController.Seeking)and (not state.TravelBusy or state.ProgressionTravelOwned)
         end,
         CombatReady=function()return state.Enabled and state.AutoFarm end,
+        ChestTarget=function(now)
+            if state.TravelBusy or state.ProgressionTravelOwned or not state.GetFarmChestTarget then return end
+            local focus=state.GetFarmChestTarget(now)
+            return focus and ctx.IsChest and ctx.IsChest(focus)and focus or nil
+        end,
         NearBossSpot=function(spot)
             local r=root();if not r then return false end
             if (r.Position-spot.Position).Magnitude<=350 then return true end
@@ -9998,7 +10065,7 @@ end
     attach({State=state,Player=player,MakeController=makeController,MakeGear=makeGear,
         Parent=state.UI.Pages.Speacial,Button=uiButton,Label=uiLabel,Bind=bind,
         Mobs=function()refreshMobIndex();return trackedMobs end,Data=getMobData,
-        Rank=targetPriority.Rank,OwnDamage=state.ReadOwnDamage,
+        Rank=targetPriority.Rank,IsChest=targetPriority.IsChest,OwnDamage=state.ReadOwnDamage,
         SkillsBusy=function()return Skills.usingSkill~="none"end,
         StopCombat=function(reason)
             finishAttackBurst(reason);stopSword(true)

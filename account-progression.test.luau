@@ -16,6 +16,7 @@ return function(source)
             Moving=function()return f.Travelling end,Arrived=function()return f.AtBoss end,
             Arrival=function()f.Arrivals=(f.Arrivals or 0)+1 end,Boss=function()return f.Boss end,
             NearBossSpot=function()return f.Near~=false end,
+            ChestTarget=function()return f.Chest end,
             Complete=function()f.Completions+=1 end,Equipment=function()f.Equips+=1 end,
             Release=function()f.Releases+=1 end,Status=function(value)f.Status=value end,
             Save=function()f.Saves[#f.Saves+1]={Floor=f.State.ProgressionFloor,Cleared=f.State.ProgressionBossCleared,Name=f.State.ProgressionBossClearedName,Complete=f.State.ProgressionComplete}end})
@@ -42,6 +43,15 @@ return function(source)
         local f=fixture();f.State.ProgressionBossCleared=true;f.Unlocked[2]=false
         f.Api.Update(0);f.Api.Update(3);assert(#f.Trips==0 and f.Api.Phase=="Waiting for unlock")
         f.Unlocked[2]=true;f.Api.Update(4);assert(f.Trips[1]==2)
+    end)
+    test("Loaded chests pause floor advancement while preserving a credited boss receipt",function()
+        local f=fixture();f.Api.Update(0)
+        f.Boss={Defeated=true,Credited=true,Name="Main boss"}
+        f.Chest={Name="Reward Chest"};f.Api.Update(1)
+        assert(f.Api.Phase=="Collecting chest"and f.State.ProgressionFloor==1 and f.State.ProgressionBossClearedName=="Main boss"
+            and f.State.ProgressionBossCleared and #f.Trips==0)
+        f.Chest=nil;f.Api.Update(2)
+        assert(f.Trips[1]==2 and f.State.ProgressionFloor==2,"Resume ordinary native floor validation after the chest opens")
     end)
     test("A stale boss-clear checkpoint cannot wait forever for a locked next floor",function()
         local f=fixture();f.State.ProgressionFloor=2;f.FloorId=2;f.State.ProgressionBossCleared=true

@@ -134,7 +134,7 @@ Rotation uses the supplied **90s/45s respawn times** for the timed built-in aren
 
 Timers begin at the observed boss death, not at arrival or after clearing adds. Actual living spawns override predictions. An already-dead body or streaming disappearance does not fabricate a new kill. Timers belong to the current runtime/server; a rejoin does not import another server's spawn predictions. Untimed/custom spots receive periodic spawn checks instead of an invented timer.
 
-While Multi Spot is ON, Auto Farm only targets encounters selected in Saved Spot, plus normal adds inside those selected arenas. Unselected bosses cannot interrupt, even if they have higher priority; deselecting an encounter releases its old target lock. Empty current-floor selections do not fall back to global farming. Custom saved spots accept nearby enemies. Account Progression retains its own boss restriction.
+While Multi Spot is ON, Auto Farm targets encounters selected in Saved Spot, plus normal adds inside those selected arenas. Unselected bosses cannot interrupt, even if they have higher priority; deselecting an encounter releases its old target lock. Empty current-floor selections do not fall back to global farming. Loaded chests are the loot exception described below. Custom saved spots accept nearby enemies. Account Progression retains its own boss restriction.
 
 Within the selected encounters, higher-priority loaded enemies can interrupt lower-priority fights: main boss → mini-boss → regular mob. Same-rank fights remain locked. An active complete Credit Check group converges on a common eligible boss order, overriding conflicting locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must still be cleared before normal arena rotation leaves; selected boss priority can temporarily interrupt that clearing. With Boss Only ON, ordinary adds are excluded.
 
@@ -166,6 +166,10 @@ After **two failed join attempts**, Auto Join Friend waits **10 minutes** before
 ### Target selection and movement
 
 Target priority is **main boss = 1, mini-boss = 2, regular = 3**, with common name/world-position ordering for ties. A higher-priority enemy preempts a lower-priority lock; same-rank boss fights converge on the common selected-scope order. Active complete credit groups use the common boss order instead of retaining conflicting locks; Account Progression retains its own boss restriction. Death, exhausted hit lives, despawning, or an explicit scope/settings change can release a normal lock. Temporary invulnerability or missing streamed health is not a confirmed kill.
+
+When any live chest is loaded, **Auto Farm finishes its current enemy first, then opens the chest before choosing another enemy**. Once collecting a chest, new bosses do not interrupt it. All chest variants are eligible, including with Boss Only or Multi Spot enabled, and boss-credit waits do not apply to chests. Account Progression delays its next floor until loaded chests are cleared without counting them as a boss kill. Native invulnerability, safety, travel, dodge and trade checks still apply. Ordinary enemy priority resumes when no eligible chest remains.
+
+F11's **DA, RA, KA** encounter uses `5287433115/Miniboss`. Da, Ra and Ka have a name-based miniboss fallback when their native rank markers are missing; their case or name padding does not exclude them from this selected encounter.
 
 Range is unlimited over enemies **actually loaded on the client**. The script cannot see arbitrary enemies Roblox has not streamed to that account. Bosses/minis outside a selected Multi Spot arena can be eligible after the current fight.
 
