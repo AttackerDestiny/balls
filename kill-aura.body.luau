@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.reward-webhook-v3.0.22"
-local VERSION="3.0.22"
+local BUILD="2026-11-08.between-wipe-character-v3.0.23"
+local VERSION="3.0.23"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -10775,12 +10775,38 @@ end
     local localFloor=game.PlaceId==destination
     local native=localFloor and require(services.UI.WaveDefense.Revive)
     local function prompt()return native and native.Frame and native.Frame.Visible end
+    local incompleteSince=setmetatable({}, {__mode="k"})
     local function partyDefeated()
+        local now=os.clock()
+        local defeated=0
+        state.BetweenRetryBlocker=nil
         for _,person in ipairs(Players:GetPlayers())do
             local lives=person:GetAttribute("Lives")
-            if livingPlayer(person)or type(lives)~="number"or lives>0 then return false end
+            local character=person.Character
+            local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+            local entity=character and character:FindFirstChild("Entity")
+            local health=entity and entity:FindFirstChild("Health")
+            local reason
+            if type(lives)~="number"or lives~=lives then reason="Waiting for lives"
+            elseif lives>0 then reason="Free revives remain"
+            elseif humanoid and humanoid.Health>0 and health and health.Value>0 then reason="Living combatant"
+            elseif (humanoid and humanoid.Health<=0)or (health and health.Value<=0)
+                or person:GetAttribute("ReviveState")==true then
+                incompleteSince[person]=nil;defeated+=1
+            elseif not health and person:GetAttribute("ClientLoaded")~=true then
+                -- An uninitialized Roblox avatar can keep its default Humanoid HP after a wipe.
+                -- Give loading a grace period, then exclude it unless game combat data arrives.
+                incompleteSince[person]=incompleteSince[person]or now
+                if now-incompleteSince[person]<5 then reason="Waiting for combat character"end
+            else reason="Waiting for defeat confirmation"end
+            if reason then
+                if reason~="Waiting for combat character"then incompleteSince[person]=nil end
+                state.BetweenRetryBlocker=reason.." · "..person.Name
+                return false
+            end
         end
-        return true
+        -- Empty servers and initially loading avatars are never proof of a wipe.
+        return defeated>0
     end
     local retry
     local function isChest(name)return name:lower():find("%f[%a]chest%f[%A]")~=nil end

@@ -128,9 +128,13 @@ def main():
                "Destroy": destroy, "Adapter": read("server-isolation-client.module.luau"),
                "Friend": read("auto-join-friend.module.luau"), "Owner": read("runtime-owner.module.luau")}
     wave = read("wave-dodge.module.luau")
+    party_start=script.index("    local incompleteSince=setmetatable(")
+    party=script[party_start:script.index("    local retry\n",party_start)]
+    fixture_party="assert(loadstring(" + quote(read("between-party-state.test.luau")) + "))()(" + quote(party) + "," + quote(read("between-retry.module.luau")) + ")\n"
     idle_start = wave.index("    function api.Idle(anchor)")
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
+    fixture += fixture_party
     room_snapshot = script[script.index("    local function roomSnapshot(person)"):script.index("    local function send(action,partyId)")]
     room_resume = script[script.index("local betweenResume=env.SB2BetweenResumeRooms"):script.index("for _,key in ipairs({\"SelectedPlayerId\"")]
     fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("between-room.module.luau"), room_snapshot, room_resume)) + ")\n"

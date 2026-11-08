@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.reward-webhook-v3.0.22"
-local VERSION="3.0.22"
+local BUILD="2026-11-08.between-wipe-character-v3.0.23"
+local VERSION="3.0.23"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
