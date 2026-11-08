@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.16**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.17**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -351,7 +351,7 @@ Streaming loss, an unrelated miniboss, or an uncredited corpse is not a complete
 
 Export includes every field from the autosave snapshot: feature toggles, **both whitelists**, floor/skill/item selections, Multi Spot order, layout/theme, relevant saved preferences/checkpoints, and **custom Save Spot entries from all available floor files**. Custom-spot transfer requires executor file access.
 
-Preset files and automatic assignments are saved per account in the executor workspace. Changes made after loading a preset are saved to that preset's active profile, including custom spots. Config Export copies the active profile. Loading a preset can enable the toggles in its settings. Feather validates imported JSON as data. Credentials, temporary rejoin tickets, live server observations, and damage-learning caches are outside the portable configuration.
+Preset files, Auto Preset selections, shared preferences, and custom spots are available to every account using the same executor workspace. Each account's existing presets are added to the shared list when it next runs Feather. The first migrated account supplies the initial automatic selections if there is no shared list yet. Config Export copies the active profile. Loading a preset can enable the toggles in its settings. Feather validates imported JSON as data. Credentials, temporary rejoin tickets, live server observations, and damage-learning caches are outside the portable configuration.
 
 ## Built-in background features
 

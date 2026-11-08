@@ -509,6 +509,10 @@ return function(ctx)
         if current then state.UI.ActiveTab=current end
         if current~=cadence.Tab then cadence.Tab=current;cadence.Choices=0;cadence.Cursor=1 end
         if not api.Visible then return end
+        if current=="Settings" and stamp>=(cadence.Presets or 0) and state.RefreshPresetPreferences then
+            cadence.Presets=stamp+1
+            state.RefreshPresetPreferences()
+        end
         for _,projection in ipairs(projections)do if projection.Tab==current and projection.Definition.Kind~="Dropdown"then synchronize(projection,false)end end
         if stamp<cadence.Choices then return end
         while cadence.Cursor<=#projections do

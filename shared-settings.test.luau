@@ -22,6 +22,13 @@ return function(source)
     assert(a.Values.ProgressionFloor==nil and a.Values.AutomationRunId==nil)
     local b=make(context({Version=1,SafeMode=false,ProgressionFloor=1}))
     assert(b.Values.SafeMode and b.Values.SafeWhitelistIds['123'])
+    local presetCtx=context({Version=1,SafeMode=false,ProgressionFloor=8})
+    presetCtx.File="SB2Codex/shared-preset_2_settings.json";presetCtx.List=nil
+    local preset=make(presetCtx)
+    preset.Save({Version=1,SafeMode=false,AutoFarm=true,ProgressionFloor=9})
+    local fromOtherAccount=make(presetCtx)
+    assert(fromOtherAccount.Values.AutoFarm and fromOtherAccount.Values.ProgressionFloor==nil
+        and a.Values.SafeMode,"Share preset edits without mixing in default settings or account checkpoints")
     print("PASS Shared autosave migrates the configured account and shares preferences without account checkpoints")
     local initial=writes
     a.Save({SafeMode=true,SafeWhitelistText="Trusted",SafeWhitelistIds={['123']=true},ProgressionFloor=2})

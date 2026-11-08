@@ -703,12 +703,16 @@ if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid",
 local customSpotPrefix=presetBook.SpotPrefix or "custom-spots_"
 if importedConfig and filePersistence then
     for floor,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/"..customSpotPrefix..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        local path=configFolder.."/"..customSpotPrefix..floor..".json"
+        if not presetBook.ActiveId or not isfile(path)then
+            writefile(path,HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        end
     end
 end
 local customSpotPath=configFolder.."/"..customSpotPrefix..tostring(game.PlaceId)..".json"
 local lastCustomSpots
-if filePersistence then
+local function loadCustomSpots()
+    if not filePersistence then return end
     pcall(function()
         if not isfile(customSpotPath)then return end
         local raw=readfile(customSpotPath)
@@ -726,6 +730,7 @@ if filePersistence then
         lastCustomSpots=raw
     end)
 end
+loadCustomSpots()
 -- Fixed destination coordinates from the supplied source, available before areas stream in.
 do
     local supplied = ({
@@ -1076,8 +1081,9 @@ function state.SaveMultiSpot()
     local point=root.Position;local floor=waveDodge.FloorY(point)
     if type(floor)=="number"then point=Vector3.new(point.X,floor,point.Z)end
     if not finitePoint(point)then return false end
+    if presetBook.ActiveId then loadCustomSpots()end
     local count=0;for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
-    if count==20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
+    if count>=20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
     local id="saved:multispot:"..HttpService:GenerateGUID(false)
     rememberDestination(id,"Saved Spot "..(count+1),"Arena",point)
     state.FloorDestinations=destinations;saveDestinations()

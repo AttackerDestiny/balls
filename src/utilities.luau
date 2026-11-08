@@ -208,6 +208,7 @@ end
 do
     local function exportSpots()
         local floors={}
+        if presetBook.ActiveId then loadCustomSpots()end
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
                 local name=path:match("[^/\\]+$")
@@ -240,6 +241,9 @@ do
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
     state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
     state.PresetStatus=presetBook.Error
+    function state.RefreshPresetPreferences()
+        state.AutoPreset=presetBook.Refresh().Auto
+    end
     function state.LoadPreset(id)
         presetBook.Set("Manual",id)
         loadPreset(presetBook.Preferences.Manual)
@@ -251,6 +255,7 @@ do
     end
     function state.SetPresetRoute(key,id)
         presetBook.Set(key,id)
+        state.AutoPreset=presetBook.Preferences.Auto
         if state.AutoPreset then loadPreset(presetBook.Resolve())end
     end
 end

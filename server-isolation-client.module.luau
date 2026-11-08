@@ -15,7 +15,7 @@ return function(ctx)
     local StarterGui=game:GetService("StarterGui")
     local TeleportService=game:GetService("TeleportService")
     local GuiService=game:GetService("GuiService")
-    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_preset_"..state.PresetId or "")..".json"
+    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_shared-preset_"..state.PresetId or "")..".json"
     local queuedResume=getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket=nil
     local queue,savedSource,validatedSource,validatedPath,validatedGeneration
@@ -654,6 +654,7 @@ end
     end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
+            if not state.ServerTeleportStarted and state.RefreshPresetPreferences then state.RefreshPresetPreferences()end
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
             if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end

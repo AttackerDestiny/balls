@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-07.config-presets-v3.0.16"
-local VERSION="3.0.16"
+local BUILD="2026-11-08.shared-presets-v3.0.17"
+local VERSION="3.0.17"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -384,11 +384,11 @@ end
     end)()
     local make=(function()
 -- BEGIN BUNDLED CONFIG PRESETS
--- Keep imported snapshots and active per-account settings in separate files.
+-- Shared preset snapshots and routing, with account-scoped runtime checkpoints.
 return function(ctx)
-    local prefix=ctx.Folder.."/preset_"..ctx.UserId.."_"
+    local prefix=ctx.Folder.."/shared-preset_"
     local controlPath=prefix.."index.json"
-    local maxSlots=50
+    local maxSlots=200
     local function slot(value,count)
         return type(value)=="number" and value%1==0 and value>=1 and value<=count and value or 0
     end
@@ -397,22 +397,96 @@ return function(ctx)
         assert(#bytes<=limit,"Preset file exceeds its size limit")
         return ctx.Decode(bytes)
     end
-    local prefs={Version=1,Count=0,Manual=0,Outside=0,Between=0,Auto=false}
+    local prefs={Version=1,Count=0,Manual=0,Outside=0,Between=0,Auto=false,Migrated={}}
     local api={Preferences=prefs}
     local function saved(id)return prefix..id..".json"end
     local function persist(nextPrefs)
         ctx.Write(controlPath,ctx.Encode(nextPrefs))
         for key,value in pairs(nextPrefs)do prefs[key]=value end
     end
-    local ok,reason=pcall(function()
-        if not ctx.Available or not ctx.Exists(controlPath)then return end
-        local raw=decode(controlPath,8192)
+    local function index(path,limit)
+        local raw=decode(path,8192)
         assert(type(raw)=="table"and raw.Version==1,"Invalid preset index")
-        prefs.Count=slot(raw.Count,maxSlots)
-        for _,key in ipairs({"Manual","Outside","Between"})do prefs[key]=slot(raw[key],prefs.Count)end
-        prefs.Auto=raw.Auto==true
-    end)
-    if not ok then api.Error=tostring(reason)end
+        local count=slot(raw.Count,limit)
+        return {Version=1,Count=count,Manual=slot(raw.Manual,count),Outside=slot(raw.Outside,count),
+            Between=slot(raw.Between,count),Auto=raw.Auto==true,Migrated=type(raw.Migrated)=="table"and raw.Migrated or {}}
+    end
+    local function refresh()
+        if not ctx.Available or not ctx.Exists(controlPath)then return end
+        for key,value in pairs(index(controlPath,maxSlots))do prefs[key]=value end
+    end
+    function api.Refresh()
+        local ok,reason=pcall(refresh)
+        api.Error=not ok and tostring(reason)or nil
+        return prefs
+    end
+    local function writePreset(id,package)
+        local bytes=ctx.Encode(package)
+        assert(#bytes<=262144,"Config exceeds 256 KB")
+        ctx.Write(saved(id),bytes)
+    end
+    local function migrate()
+        refresh()
+        local legacy=ctx.Folder.."/preset_"..ctx.UserId.."_"
+        if prefs.Migrated[ctx.UserId]or not ctx.Exists(legacy.."index.json")then return end
+        local old=index(legacy.."index.json",50)
+        local nextPrefs=table.clone(prefs)
+        nextPrefs.Migrated=table.clone(prefs.Migrated)
+        local remap={}
+        local spotFiles={}
+        if ctx.List then
+            local listed,paths=pcall(ctx.List,ctx.Folder)
+            if listed and type(paths)=="table"then
+                local pattern="^custom%-spots_"..ctx.UserId.."_preset_(%d+)_(%d+)%.json$"
+                for _,path in ipairs(paths)do
+                    local name=path:match("[^/\\]+$")
+                    if name then
+                        local id,floor=name:match(pattern)
+                        if id then
+                            id=tonumber(id);spotFiles[id]=spotFiles[id]or {};spotFiles[id][floor]=true
+                        end
+                    end
+                end
+            end
+        end
+        for oldId=1,old.Count do
+            local source=legacy..oldId..".json"
+            if ctx.Exists(source)then
+                local id=nextPrefs.Count+1
+                assert(id<=maxSlots,"Shared preset limit reached (200)")
+                local package=ctx.Validate(decode(source,262144))
+                local settingsPath=ctx.Folder.."/settings_"..ctx.UserId.."_preset_"..oldId..".json"
+                if ctx.Exists(settingsPath)then
+                    local current=decode(settingsPath,32768)
+                    local edited=table.clone(package);edited.Settings=current
+                    if pcall(ctx.Validate,edited)then package=edited end
+                end
+                local spots=table.clone(package.CustomSpots)
+                local prefixName="custom-spots_"..ctx.UserId.."_preset_"..oldId.."_"
+                local function copySpots(floor)
+                    local spotPath=ctx.Folder.."/"..prefixName..floor..".json"
+                    if not ctx.Exists(spotPath)then return end
+                    local stored=decode(spotPath,32768)
+                    if stored.Version==1 and tostring(stored.PlaceId)==floor then spots[floor]=stored.Areas end
+                end
+                for floor in pairs(package.CustomSpots)do copySpots(floor)end
+                for floor in pairs(spotFiles[oldId]or {})do if package.CustomSpots[floor]==nil then copySpots(floor)end end
+                package=table.clone(package);package.CustomSpots=spots
+                writePreset(id,ctx.Validate(package))
+                remap[oldId]=id;nextPrefs.Count=id
+            end
+        end
+        if not ctx.Exists(controlPath)then
+            for _,key in ipairs({"Manual","Outside","Between"})do nextPrefs[key]=remap[old[key]]or 0 end
+            nextPrefs.Auto=old.Auto
+        end
+        nextPrefs.Migrated[ctx.UserId]=true
+        persist(nextPrefs)
+    end
+    if ctx.Available then
+        local ok,reason=pcall(migrate)
+        if not ok then api.Error=tostring(reason)end
+    end
     function api.Resolve(override)
         if override~=nil and (override==0 or slot(override,prefs.Count)>0)then return override end
         local selected=prefs[ctx.InBetween and "Between" or "Outside"]
@@ -425,18 +499,16 @@ return function(ctx)
     end
     function api.SavePreset(package)
         assert(ctx.Available,"Preset storage is unavailable in this executor")
-        assert(not api.Error,api.Error)
+        refresh()
         local id=prefs.Count+1
-        assert(id<=maxSlots,"Preset limit reached (50)")
-        local bytes=ctx.Encode(package)
-        assert(#bytes<=262144,"Config exceeds 256 KB")
-        ctx.Write(saved(id),bytes)
+        assert(id<=maxSlots,"Shared preset limit reached (200)")
+        writePreset(id,package)
         local nextPrefs=table.clone(prefs);nextPrefs.Count=id;persist(nextPrefs)
         return id
     end
     function api.Set(key,value)
         assert(ctx.Available,"Preset storage is unavailable in this executor")
-        assert(not api.Error,api.Error)
+        refresh()
         assert(key=="Auto"or key=="Manual"or key=="Outside"or key=="Between","Invalid preset setting")
         local nextPrefs=table.clone(prefs)
         if key=="Auto"then nextPrefs.Auto=value==true else nextPrefs[key]=slot(value,prefs.Count)end
@@ -446,12 +518,13 @@ return function(ctx)
         local id=api.Resolve(override)
         if id==0 then return end
         local loaded,problem=pcall(function()
-            local path=ctx.Folder.."/settings_"..ctx.UserId.."_preset_"..id..".json"
+            local path=ctx.Folder.."/settings_"..ctx.UserId.."_shared-preset_"..id..".json"
             assert(ctx.Exists(saved(id)),"Preset file is missing")
             if not ctx.Exists(path)then api.Seed=api.Load(id)end
             api.ActiveId=id
             api.SettingsPath=path
-            api.SpotPrefix="custom-spots_"..ctx.UserId.."_preset_"..id.."_"
+            api.SharedSettingsPath=prefix..id.."_settings.json"
+            api.SpotPrefix="custom-spots_shared-preset_"..id.."_"
         end)
         if not loaded then api.Error=tostring(problem)end
     end
@@ -461,7 +534,7 @@ end
 -- END BUNDLED CONFIG PRESETS
     end)()
     local book=make({Folder=configFolder,UserId=tostring(player.UserId),InBetween=game.PlaceId==78945654064532,
-        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,Validate=makeTransfer({}).Validate,
+        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,List=listfiles,Validate=makeTransfer({}).Validate,
         Encode=function(value)return HttpService:JSONEncode(value)end,Decode=function(bytes)return HttpService:JSONDecode(bytes)end})
     local manual=env.SB2ManualPreset
     env.SB2ManualPreset=nil
@@ -488,12 +561,12 @@ if filePersistence and isfile(configPath)then
     if ok then configData=value else configLoadError=tostring(value)end
 end
 local sharedSettings,sharedPreferences=nil,{}
-if filePersistence and not presetBook.ActiveId then
+if filePersistence then
     local attachShared=(function()
 -- BEGIN BUNDLED SHARED SETTINGS
 -- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
-    local file="SB2Codex/shared-settings.json"
+    local file=ctx.File or "SB2Codex/shared-settings.json"
     local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
@@ -561,7 +634,8 @@ end
 
 -- END BUNDLED SHARED SETTINGS
     end)()
-    local ok,value=pcall(attachShared,{Current=configData,IsFile=isfile,Read=readfile,Write=writefile,List=listfiles,
+    local ok,value=pcall(attachShared,{File=presetBook.SharedSettingsPath,Current=presetBook.Seed and presetBook.Seed.Settings or configData,
+        IsFile=isfile,Read=readfile,Write=writefile,List=not presetBook.ActiveId and listfiles or nil,
         Encode=function(data)return HttpService:JSONEncode(data)end,Decode=function(text)return HttpService:JSONDecode(text)end})
     if ok then sharedSettings=value;sharedPreferences=value.Values else configLoadError=tostring(value)end
 end
@@ -570,6 +644,7 @@ env.SB2ConfigImport=nil
 if type(importedConfig)~="table"or importedConfig.UserId~=player.UserId then importedConfig=nil end
 importedConfig=importedConfig or presetBook.Seed
 local function preference(key,fallback)
+    if presetBook.ActiveId and sharedPreferences[key]~=nil then return sharedPreferences[key]end
     if importedConfig then local value=importedConfig.Settings[key];if value~=nil then return value end;return fallback end
     local sources={sharedPreferences,previous and previous.StopEverything and previous.ResumeFeatures or {},previous or {},configData}
     if key=="StopEverything"and previous and previous.ResumeRequested then return false end
@@ -4537,12 +4612,16 @@ if game.PlaceId==582198062 then rememberDestination("mob:Frogazoid","Frogazoid",
 local customSpotPrefix=presetBook.SpotPrefix or "custom-spots_"
 if importedConfig and filePersistence then
     for floor,areas in pairs(importedConfig.CustomSpots or {})do
-        writefile(configFolder.."/"..customSpotPrefix..floor..".json",HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        local path=configFolder.."/"..customSpotPrefix..floor..".json"
+        if not presetBook.ActiveId or not isfile(path)then
+            writefile(path,HttpService:JSONEncode({Version=1,PlaceId=tonumber(floor),Areas=areas}))
+        end
     end
 end
 local customSpotPath=configFolder.."/"..customSpotPrefix..tostring(game.PlaceId)..".json"
 local lastCustomSpots
-if filePersistence then
+local function loadCustomSpots()
+    if not filePersistence then return end
     pcall(function()
         if not isfile(customSpotPath)then return end
         local raw=readfile(customSpotPath)
@@ -4560,6 +4639,7 @@ if filePersistence then
         lastCustomSpots=raw
     end)
 end
+loadCustomSpots()
 -- Fixed destination coordinates from the supplied source, available before areas stream in.
 do
     local supplied = ({
@@ -5049,8 +5129,9 @@ function state.SaveMultiSpot()
     local point=root.Position;local floor=waveDodge.FloorY(point)
     if type(floor)=="number"then point=Vector3.new(point.X,floor,point.Z)end
     if not finitePoint(point)then return false end
+    if presetBook.ActiveId then loadCustomSpots()end
     local count=0;for id in pairs(destinations)do if id:sub(1,16)=="saved:multispot:"then count+=1 end end
-    if count==20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
+    if count>=20 then state.MultiSpotStatus="Saved spot limit reached (20 per floor)";return false end
     local id="saved:multispot:"..HttpService:GenerateGUID(false)
     rememberDestination(id,"Saved Spot "..(count+1),"Arena",point)
     state.FloorDestinations=destinations;saveDestinations()
@@ -7967,7 +8048,7 @@ return function(ctx)
     local StarterGui=game:GetService("StarterGui")
     local TeleportService=game:GetService("TeleportService")
     local GuiService=game:GetService("GuiService")
-    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_preset_"..state.PresetId or "")..".json"
+    local path="SB2Codex/solo-search_"..player.UserId..(state.PresetId and "_shared-preset_"..state.PresetId or "")..".json"
     local queuedResume=getgenv().SB2SoloResumeTicket
     getgenv().SB2SoloResumeTicket=nil
     local queue,savedSource,validatedSource,validatedPath,validatedGeneration
@@ -8606,6 +8687,7 @@ end
     end
     ctx.Bind(player.OnTeleport,function(stage)
         if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then
+            if not state.ServerTeleportStarted and state.RefreshPresetPreferences then state.RefreshPresetPreferences()end
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
             if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
@@ -10064,6 +10146,7 @@ end
 do
     local function exportSpots()
         local floors={}
+        if presetBook.ActiveId then loadCustomSpots()end
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
                 local name=path:match("[^/\\]+$")
@@ -10096,6 +10179,9 @@ do
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
     state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
     state.PresetStatus=presetBook.Error
+    function state.RefreshPresetPreferences()
+        state.AutoPreset=presetBook.Refresh().Auto
+    end
     function state.LoadPreset(id)
         presetBook.Set("Manual",id)
         loadPreset(presetBook.Preferences.Manual)
@@ -10107,6 +10193,7 @@ do
     end
     function state.SetPresetRoute(key,id)
         presetBook.Set(key,id)
+        state.AutoPreset=presetBook.Preferences.Auto
         if state.AutoPreset then loadPreset(presetBook.Resolve())end
     end
 end
@@ -28598,6 +28685,10 @@ return function(ctx)
         if current then state.UI.ActiveTab=current end
         if current~=cadence.Tab then cadence.Tab=current;cadence.Choices=0;cadence.Cursor=1 end
         if not api.Visible then return end
+        if current=="Settings" and stamp>=(cadence.Presets or 0) and state.RefreshPresetPreferences then
+            cadence.Presets=stamp+1
+            state.RefreshPresetPreferences()
+        end
         for _,projection in ipairs(projections)do if projection.Tab==current and projection.Definition.Kind~="Dropdown"then synchronize(projection,false)end end
         if stamp<cadence.Choices then return end
         while cadence.Cursor<=#projections do

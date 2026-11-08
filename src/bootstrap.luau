@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-07.config-presets-v3.0.16"
-local VERSION="3.0.16"
+local BUILD="2026-11-08.shared-presets-v3.0.17"
+local VERSION="3.0.17"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -109,7 +109,7 @@ local presetBook=(function()
 -- END BUNDLED CONFIG PRESETS
     end)()
     local book=make({Folder=configFolder,UserId=tostring(player.UserId),InBetween=game.PlaceId==78945654064532,
-        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,Validate=makeTransfer({}).Validate,
+        Available=filePersistence,Exists=isfile,Read=readfile,Write=writefile,List=listfiles,Validate=makeTransfer({}).Validate,
         Encode=function(value)return HttpService:JSONEncode(value)end,Decode=function(bytes)return HttpService:JSONDecode(bytes)end})
     local manual=env.SB2ManualPreset
     env.SB2ManualPreset=nil
@@ -136,12 +136,13 @@ if filePersistence and isfile(configPath)then
     if ok then configData=value else configLoadError=tostring(value)end
 end
 local sharedSettings,sharedPreferences=nil,{}
-if filePersistence and not presetBook.ActiveId then
+if filePersistence then
     local attachShared=(function()
 -- BEGIN BUNDLED SHARED SETTINGS
 -- END BUNDLED SHARED SETTINGS
     end)()
-    local ok,value=pcall(attachShared,{Current=configData,IsFile=isfile,Read=readfile,Write=writefile,List=listfiles,
+    local ok,value=pcall(attachShared,{File=presetBook.SharedSettingsPath,Current=presetBook.Seed and presetBook.Seed.Settings or configData,
+        IsFile=isfile,Read=readfile,Write=writefile,List=not presetBook.ActiveId and listfiles or nil,
         Encode=function(data)return HttpService:JSONEncode(data)end,Decode=function(text)return HttpService:JSONDecode(text)end})
     if ok then sharedSettings=value;sharedPreferences=value.Values else configLoadError=tostring(value)end
 end
@@ -150,6 +151,7 @@ env.SB2ConfigImport=nil
 if type(importedConfig)~="table"or importedConfig.UserId~=player.UserId then importedConfig=nil end
 importedConfig=importedConfig or presetBook.Seed
 local function preference(key,fallback)
+    if presetBook.ActiveId and sharedPreferences[key]~=nil then return sharedPreferences[key]end
     if importedConfig then local value=importedConfig.Settings[key];if value~=nil then return value end;return fallback end
     local sources={sharedPreferences,previous and previous.StopEverything and previous.ResumeFeatures or {},previous or {},configData}
     if key=="StopEverything"and previous and previous.ResumeRequested then return false end
