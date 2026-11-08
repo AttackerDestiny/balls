@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.shared-presets-v3.0.17"
-local VERSION="3.0.17"
+local BUILD="2026-11-08.portable-presets-v3.0.18"
+local VERSION="3.0.18"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -355,27 +355,61 @@ return function(ctx)
         end
     end
     local api={}
+    local snapshotLimit=262144
+    local libraryLimit=64*1024*1024
+    local function snapshot(value)
+        data(value,0,{})
+        settings(value.Settings);arenas(value.CustomSpots)
+    end
     function api.Validate(package)
         assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
-        data(package,0,{})
-        settings(package.Settings);arenas(package.CustomSpots)
+        for key in pairs(package)do
+            assert(key=="Format" or key=="Version" or key=="Settings" or key=="CustomSpots" or key=="Presets","Invalid config field")
+        end
+        snapshot({Settings=package.Settings,CustomSpots=package.CustomSpots})
+        local library=package.Presets
+        if library~=nil then
+            assert(type(library)=="table" and type(library.Items)=="table" and type(library.Auto)=="boolean","Invalid preset library")
+            local count=#library.Items
+            assert(count>=1 and count<=200,"Invalid preset count")
+            for _,key in ipairs({"Active","Manual","Outside","Between"})do
+                local id=library[key]
+                assert(type(id)=="number" and id%1==0 and id>=0 and id<=count,"Invalid preset selection: "..key)
+            end
+            local total=0
+            for id,item in pairs(library.Items)do
+                assert(type(id)=="number" and id%1==0 and id>=1 and id<=count and type(item)=="table","Invalid preset entry")
+                snapshot(item);total+=1
+            end
+            assert(total==count,"Invalid preset list")
+        end
         return package
     end
     local function withinStorage(package)
-        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
+        local function check(item)
+            assert(#ctx.Encode(item.Settings)<=32768,"Settings exceed their storage limit")
+            local stored={Format="FeatherConfig",Version=1,Settings=item.Settings,CustomSpots=item.CustomSpots}
+            assert(#ctx.Encode(stored)<=snapshotLimit,"A preset exceeds 256 KB")
+        end
+        check(package)
+        if package.Presets then for _,item in ipairs(package.Presets.Items)do check(item)end end
     end
     function api.Export()
-        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        local active={Settings=ctx.Settings(),CustomSpots=ctx.Spots()}
+        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=active.Settings,CustomSpots=active.CustomSpots,
+            Presets=ctx.Presets and ctx.Presets(active)})
         withinStorage(package)
         local bytes=ctx.Encode(package)
-        assert(#bytes<=262144,"Config exceeds 256 KB")
+        assert(#bytes<=(package.Presets and libraryLimit or snapshotLimit),"Config exceeds its size limit")
         assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
         ctx.Copy(bytes)
         return bytes
     end
     function api.Import(bytes)
-        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
-        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
+        assert(type(bytes)=="string"and #bytes<=libraryLimit,"Config exceeds its size limit")
+        local package=api.Validate(ctx.Decode(bytes))
+        assert(package.Presets or #bytes<=snapshotLimit,"Config exceeds 256 KB")
+        withinStorage(package)
         return ctx.Apply(package)or true
     end
     return api
@@ -506,6 +540,72 @@ return function(ctx)
         writePreset(id,package)
         local nextPrefs=table.clone(prefs);nextPrefs.Count=id;persist(nextPrefs)
         return id
+    end
+    function api.ExportLibrary(active)
+        refresh()
+        if prefs.Count==0 then return nil end
+        local library={Items={},Active=api.ActiveId or 0,Manual=prefs.Manual,Outside=prefs.Outside,Between=prefs.Between,Auto=prefs.Auto}
+        local spotFiles={}
+        if ctx.List then
+            for _,path in ipairs(ctx.List(ctx.Folder))do
+                local name=path:match("[^/\\]+$")
+                local id,floor=(name or ""):match("^custom%-spots_shared%-preset_(%d+)_(%d+)%.json$")
+                if id then
+                    id=tonumber(id);spotFiles[id]=spotFiles[id]or {};spotFiles[id][floor]=path
+                end
+            end
+        end
+        for id=1,prefs.Count do
+            if id==library.Active then
+                library.Items[id]=active
+                continue
+            end
+            local package=table.clone(api.Load(id))
+            local settings=table.clone(package.Settings)
+            local accountPath=ctx.Folder.."/settings_"..ctx.UserId.."_shared-preset_"..id..".json"
+            local sharedPath=prefix..id.."_settings.json"
+            if ctx.Exists(accountPath)then settings=decode(accountPath,32768)end
+            if ctx.Exists(sharedPath)then
+                for key,value in pairs(decode(sharedPath,32768))do settings[key]=value end
+            end
+            local spots=table.clone(package.CustomSpots)
+            local function copySpots(floor,path)
+                if not ctx.Exists(path)then return end
+                local stored=decode(path,32768)
+                if stored.Version==1 and tostring(stored.PlaceId)==floor then spots[floor]=stored.Areas end
+            end
+            for floor in pairs(package.CustomSpots)do
+                copySpots(floor,ctx.Folder.."/custom-spots_shared-preset_"..id.."_"..floor..".json")
+            end
+            for floor,path in pairs(spotFiles[id]or {})do copySpots(floor,path)end
+            library.Items[id]={Settings=settings,CustomSpots=spots}
+        end
+        return library
+    end
+    function api.Import(package)
+        local library=package.Presets
+        if not library then return api.SavePreset(package)end
+        assert(ctx.Available,"Preset storage is unavailable in this executor")
+        refresh()
+        local offset=prefs.Count
+        local count=offset+#library.Items+(library.Active==0 and 1 or 0)
+        assert(count<=maxSlots,"Shared preset limit reached (200)")
+        local entries={}
+        for id,item in ipairs(library.Items)do
+            entries[id]={Format="FeatherConfig",Version=1,Settings=item.Settings,CustomSpots=item.CustomSpots}
+        end
+        if library.Active==0 then
+            entries[#entries+1]={Format="FeatherConfig",Version=1,Settings=package.Settings,CustomSpots=package.CustomSpots}
+        end
+        for id,item in ipairs(entries)do writePreset(offset+id,item)end
+        local nextPrefs=table.clone(prefs)
+        nextPrefs.Count=count;nextPrefs.Auto=library.Auto
+        for _,key in ipairs({"Manual","Outside","Between"})do
+            local id=library[key]
+            nextPrefs[key]=id>0 and offset+id or 0
+        end
+        persist(nextPrefs)
+        return library.Active>0 and offset+library.Active or count
     end
     function api.Set(key,value)
         assert(ctx.Available,"Preset storage is unavailable in this executor")
@@ -10147,18 +10247,28 @@ end
 do
     local function exportSpots()
         local floors={}
-        if presetBook.ActiveId then loadCustomSpots()end
+        local function readSpots(floor,path)
+            local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
+            local saved=HttpService:JSONDecode(bytes)
+            assert(saved.Version==1 and type(saved.Areas)=="table","Invalid custom spots file")
+            floors[floor]=saved.Areas
+        end
+        if presetBook.ActiveId then
+            loadCustomSpots()
+            if type(listfiles)~="function"then
+                floors=table.clone(presetBook.Load(presetBook.ActiveId).CustomSpots)
+                for floor in pairs(floors)do
+                    local path=configFolder.."/"..customSpotPrefix..floor..".json"
+                    if isfile(path)then readSpots(floor,path)end
+                end
+            end
+        end
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
                 local name=path:match("[^/\\]+$")
                 local floor=name and name:sub(1,#customSpotPrefix)==customSpotPrefix
                     and name:sub(#customSpotPrefix+1):match("^(%d+)%.json$")
-                if floor then
-                    local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
-                    local saved=HttpService:JSONDecode(bytes)
-                    assert(saved.Version==1 and type(saved.Areas)=="table","Invalid custom spots file")
-                    floors[floor]=saved.Areas
-                end
+                if floor then readSpots(floor,path)end
             end
         end
         local current={}
@@ -10175,10 +10285,15 @@ do
         env.SB2ManualPreset={UserId=player.UserId,Id=id}
         state.Destroy(true);launch(embeddedSource)
     end
-    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Apply=presetBook.SavePreset,
+    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Presets=presetBook.ExportLibrary,Apply=presetBook.Import,
         Encode=function(value)return HttpService:JSONEncode(value)end,
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
-    state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
+    state.ExportConfig=transfer.Export
+    function state.ImportConfig(bytes)
+        local id=transfer.Import(bytes)
+        state.AutoPreset=presetBook.Preferences.Auto
+        return id
+    end
     state.PresetStatus=presetBook.Error
     function state.RefreshPresetPreferences()
         state.AutoPreset=presetBook.Refresh().Auto
@@ -28648,7 +28763,7 @@ return function(ctx)
         end)
         button("Settings","ConfigExport","Config Export",function()
             action("ExportConfig")
-            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied settings, saved spots, and presets to clipboard",Duration=3})end
         end)
         section("Settings","PresetSection","Presets")
         dropdown("Settings","PresetSelection","Preset",function()return presetView(pickedPreset,"Default")end,

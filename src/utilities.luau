@@ -208,18 +208,28 @@ end
 do
     local function exportSpots()
         local floors={}
-        if presetBook.ActiveId then loadCustomSpots()end
+        local function readSpots(floor,path)
+            local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
+            local saved=HttpService:JSONDecode(bytes)
+            assert(saved.Version==1 and type(saved.Areas)=="table","Invalid custom spots file")
+            floors[floor]=saved.Areas
+        end
+        if presetBook.ActiveId then
+            loadCustomSpots()
+            if type(listfiles)~="function"then
+                floors=table.clone(presetBook.Load(presetBook.ActiveId).CustomSpots)
+                for floor in pairs(floors)do
+                    local path=configFolder.."/"..customSpotPrefix..floor..".json"
+                    if isfile(path)then readSpots(floor,path)end
+                end
+            end
+        end
         if filePersistence and type(listfiles)=="function"then
             for _,path in ipairs(listfiles(configFolder))do
                 local name=path:match("[^/\\]+$")
                 local floor=name and name:sub(1,#customSpotPrefix)==customSpotPrefix
                     and name:sub(#customSpotPrefix+1):match("^(%d+)%.json$")
-                if floor then
-                    local bytes=readfile(path);assert(#bytes<=32768,"Custom spots file too large")
-                    local saved=HttpService:JSONDecode(bytes)
-                    assert(saved.Version==1 and type(saved.Areas)=="table","Invalid custom spots file")
-                    floors[floor]=saved.Areas
-                end
+                if floor then readSpots(floor,path)end
             end
         end
         local current={}
@@ -236,10 +246,15 @@ do
         env.SB2ManualPreset={UserId=player.UserId,Id=id}
         state.Destroy(true);launch(embeddedSource)
     end
-    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Apply=presetBook.SavePreset,
+    local transfer=presetBook.MakeTransfer({Settings=settingsPayload,Spots=exportSpots,Presets=presetBook.ExportLibrary,Apply=presetBook.Import,
         Encode=function(value)return HttpService:JSONEncode(value)end,
         Decode=function(bytes)return HttpService:JSONDecode(bytes)end,Copy=setclipboard or toclipboard})
-    state.ExportConfig=transfer.Export;state.ImportConfig=transfer.Import
+    state.ExportConfig=transfer.Export
+    function state.ImportConfig(bytes)
+        local id=transfer.Import(bytes)
+        state.AutoPreset=presetBook.Preferences.Auto
+        return id
+    end
     state.PresetStatus=presetBook.Error
     function state.RefreshPresetPreferences()
         state.AutoPreset=presetBook.Refresh().Auto

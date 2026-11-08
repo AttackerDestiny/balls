@@ -120,6 +120,72 @@ return function(ctx)
         local nextPrefs=table.clone(prefs);nextPrefs.Count=id;persist(nextPrefs)
         return id
     end
+    function api.ExportLibrary(active)
+        refresh()
+        if prefs.Count==0 then return nil end
+        local library={Items={},Active=api.ActiveId or 0,Manual=prefs.Manual,Outside=prefs.Outside,Between=prefs.Between,Auto=prefs.Auto}
+        local spotFiles={}
+        if ctx.List then
+            for _,path in ipairs(ctx.List(ctx.Folder))do
+                local name=path:match("[^/\\]+$")
+                local id,floor=(name or ""):match("^custom%-spots_shared%-preset_(%d+)_(%d+)%.json$")
+                if id then
+                    id=tonumber(id);spotFiles[id]=spotFiles[id]or {};spotFiles[id][floor]=path
+                end
+            end
+        end
+        for id=1,prefs.Count do
+            if id==library.Active then
+                library.Items[id]=active
+                continue
+            end
+            local package=table.clone(api.Load(id))
+            local settings=table.clone(package.Settings)
+            local accountPath=ctx.Folder.."/settings_"..ctx.UserId.."_shared-preset_"..id..".json"
+            local sharedPath=prefix..id.."_settings.json"
+            if ctx.Exists(accountPath)then settings=decode(accountPath,32768)end
+            if ctx.Exists(sharedPath)then
+                for key,value in pairs(decode(sharedPath,32768))do settings[key]=value end
+            end
+            local spots=table.clone(package.CustomSpots)
+            local function copySpots(floor,path)
+                if not ctx.Exists(path)then return end
+                local stored=decode(path,32768)
+                if stored.Version==1 and tostring(stored.PlaceId)==floor then spots[floor]=stored.Areas end
+            end
+            for floor in pairs(package.CustomSpots)do
+                copySpots(floor,ctx.Folder.."/custom-spots_shared-preset_"..id.."_"..floor..".json")
+            end
+            for floor,path in pairs(spotFiles[id]or {})do copySpots(floor,path)end
+            library.Items[id]={Settings=settings,CustomSpots=spots}
+        end
+        return library
+    end
+    function api.Import(package)
+        local library=package.Presets
+        if not library then return api.SavePreset(package)end
+        assert(ctx.Available,"Preset storage is unavailable in this executor")
+        refresh()
+        local offset=prefs.Count
+        local count=offset+#library.Items+(library.Active==0 and 1 or 0)
+        assert(count<=maxSlots,"Shared preset limit reached (200)")
+        local entries={}
+        for id,item in ipairs(library.Items)do
+            entries[id]={Format="FeatherConfig",Version=1,Settings=item.Settings,CustomSpots=item.CustomSpots}
+        end
+        if library.Active==0 then
+            entries[#entries+1]={Format="FeatherConfig",Version=1,Settings=package.Settings,CustomSpots=package.CustomSpots}
+        end
+        for id,item in ipairs(entries)do writePreset(offset+id,item)end
+        local nextPrefs=table.clone(prefs)
+        nextPrefs.Count=count;nextPrefs.Auto=library.Auto
+        for _,key in ipairs({"Manual","Outside","Between"})do
+            local id=library[key]
+            nextPrefs[key]=id>0 and offset+id or 0
+        end
+        persist(nextPrefs)
+        return library.Active>0 and offset+library.Active or count
+    end
     function api.Set(key,value)
         assert(ctx.Available,"Preset storage is unavailable in this executor")
         refresh()

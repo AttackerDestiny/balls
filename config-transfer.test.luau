@@ -1,6 +1,6 @@
 return function(source)
     local make=assert(loadstring(source))()
-    local clipboard,applied,encoded
+    local clipboard,applied,encoded,library
     local settings={Version=1,Enabled=true,SafeMode=true,SafeFloorId=11,SafeWhitelistText="One, 123",SafeWhitelistIds={123},
         AntiSuspicious=true,AntiSuspiciousLimits={Hops=10,Window=10,Min=40,Max=60},
         BetweenRooms={{Host="Host",Alt="Alt, 123",Mode="Friends",Difficulty="Hard",Start=true,AutoRetry=true},{Host="Legacy",Alt=""}},
@@ -10,6 +10,7 @@ return function(source)
         WindUIPosition={.5,0,.5,0},HealthHUDPosition={.5,0,.7,0},ViewingPlayerInventory=true,SelectedPlayerId=123}
     local spots={["11"]={{Id="saved:multispot:a",Name="Custom",Position={1,2,3}}},["22"]={{Id="saved:multispot:b",Name="Other floor",Position={4,5,6}}}}
     local api=make({Settings=function()return settings end,Spots=function()return spots end,
+        Presets=function()return library end,
         Encode=function(value)if value.Format then encoded=value end;return "encoded-config"end,Decode=function(text)assert(text=="encoded-config");return encoded end,
         Copy=function(text)clipboard=text end,Apply=function(value)applied=value end})
     assert(api.Export()=="encoded-config"and clipboard=="encoded-config")
@@ -26,6 +27,13 @@ return function(source)
     spots["../escape"]={};invalid(encoded);spots["../escape"]=nil
     spots["11"][1].Position[1]=math.huge;invalid(encoded);spots["11"][1].Position[1]=1
     assert(not pcall(api.Import,string.rep("x",262145)))
+    library={Items={{Settings=settings,CustomSpots=spots},{Settings={Version=1},CustomSpots={}}},
+        Auto=true,Active=1,Manual=1,Outside=1,Between=2}
+    api.Export()
+    assert(api.Import(clipboard) and applied.Presets.Outside==1 and applied.Presets.Between==2)
+    api.Export()
+    library.Between=3;invalid(encoded);library.Between=2
+    library.Items[2].Settings.Enabled="yes";invalid(encoded);library.Items[2].Settings.Enabled=nil
     local noClipboard=make({Settings=function()return settings end,Spots=function()return spots end,Encode=function()return "ok"end})
     assert(not pcall(noClipboard.Export),"Unsupported clipboard must report failure")
     print("PASS Config transfer: all snapshot fields, multi-floor custom spots, clipboard roundtrip, type/path/size validation and unsupported clipboard")

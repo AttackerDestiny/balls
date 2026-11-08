@@ -74,27 +74,61 @@ return function(ctx)
         end
     end
     local api={}
+    local snapshotLimit=262144
+    local libraryLimit=64*1024*1024
+    local function snapshot(value)
+        data(value,0,{})
+        settings(value.Settings);arenas(value.CustomSpots)
+    end
     function api.Validate(package)
         assert(type(package)=="table"and package.Format=="FeatherConfig"and package.Version==1,"Not a Feather config")
-        data(package,0,{})
-        settings(package.Settings);arenas(package.CustomSpots)
+        for key in pairs(package)do
+            assert(key=="Format" or key=="Version" or key=="Settings" or key=="CustomSpots" or key=="Presets","Invalid config field")
+        end
+        snapshot({Settings=package.Settings,CustomSpots=package.CustomSpots})
+        local library=package.Presets
+        if library~=nil then
+            assert(type(library)=="table" and type(library.Items)=="table" and type(library.Auto)=="boolean","Invalid preset library")
+            local count=#library.Items
+            assert(count>=1 and count<=200,"Invalid preset count")
+            for _,key in ipairs({"Active","Manual","Outside","Between"})do
+                local id=library[key]
+                assert(type(id)=="number" and id%1==0 and id>=0 and id<=count,"Invalid preset selection: "..key)
+            end
+            local total=0
+            for id,item in pairs(library.Items)do
+                assert(type(id)=="number" and id%1==0 and id>=1 and id<=count and type(item)=="table","Invalid preset entry")
+                snapshot(item);total+=1
+            end
+            assert(total==count,"Invalid preset list")
+        end
         return package
     end
     local function withinStorage(package)
-        assert(#ctx.Encode(package.Settings)<=32768,"Settings exceed their storage limit")
+        local function check(item)
+            assert(#ctx.Encode(item.Settings)<=32768,"Settings exceed their storage limit")
+            local stored={Format="FeatherConfig",Version=1,Settings=item.Settings,CustomSpots=item.CustomSpots}
+            assert(#ctx.Encode(stored)<=snapshotLimit,"A preset exceeds 256 KB")
+        end
+        check(package)
+        if package.Presets then for _,item in ipairs(package.Presets.Items)do check(item)end end
     end
     function api.Export()
-        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=ctx.Settings(),CustomSpots=ctx.Spots()})
+        local active={Settings=ctx.Settings(),CustomSpots=ctx.Spots()}
+        local package=api.Validate({Format="FeatherConfig",Version=1,Settings=active.Settings,CustomSpots=active.CustomSpots,
+            Presets=ctx.Presets and ctx.Presets(active)})
         withinStorage(package)
         local bytes=ctx.Encode(package)
-        assert(#bytes<=262144,"Config exceeds 256 KB")
+        assert(#bytes<=(package.Presets and libraryLimit or snapshotLimit),"Config exceeds its size limit")
         assert(type(ctx.Copy)=="function","Clipboard is unavailable in this executor")
         ctx.Copy(bytes)
         return bytes
     end
     function api.Import(bytes)
-        assert(type(bytes)=="string"and #bytes<=262144,"Config exceeds 256 KB")
-        local package=api.Validate(ctx.Decode(bytes));withinStorage(package)
+        assert(type(bytes)=="string"and #bytes<=libraryLimit,"Config exceeds its size limit")
+        local package=api.Validate(ctx.Decode(bytes))
+        assert(package.Presets or #bytes<=snapshotLimit,"Config exceeds 256 KB")
+        withinStorage(package)
         return ctx.Apply(package)or true
     end
     return api

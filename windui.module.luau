@@ -471,7 +471,7 @@ return function(ctx)
         end)
         button("Settings","ConfigExport","Config Export",function()
             action("ExportConfig")
-            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied all settings and saved spots to clipboard",Duration=3})end
+            if ctx.WindUI.Notify then ctx.WindUI:Notify({Title="Config Export",Content="Copied settings, saved spots, and presets to clipboard",Duration=3})end
         end)
         section("Settings","PresetSection","Presets")
         dropdown("Settings","PresetSelection","Preset",function()return presetView(pickedPreset,"Default")end,
