@@ -98,11 +98,11 @@ return function(source,snapshotSource,resumeSource)
     assert(starts==4,"Removing or changing an assignment cancels a start waiting to dispatch")
 
     local nativeParty
-    local snapshot=assert(loadstring(snapshotSource.."\nreturn roomSnapshot,missingRoomAlts"))
+    local snapshot=assert(loadstring(snapshotSource.."\nreturn roomSnapshot,missingRoomAlts,joinedHostRoom"))
     local env={localFloor=true,player={GetAttribute=function()return 23 end},
         ReplicatedStorage={FindFirstChild=function()return {FindFirstChild=function()return nativeParty end}end}}
     setfenv(snapshot,setmetatable(env,{__index=getfenv()}))
-    local read,missingRoomAlts=snapshot()
+    local read,missingRoomAlts,joinedHostRoom=snapshot()
     assert(not read(),"A stale PartyID cannot prevent room creation inside The Between")
     nativeParty={GetAttribute=function(_,name)return name=="Host"and 10 or nil end}
     assert(read().Host==10 and read().Id=="23","Recognize a real retained party")
@@ -137,6 +137,16 @@ return function(source,snapshotSource,resumeSource)
     assert(starts==5 and not worker,"Start once after all seven alts have joined")
     env.localFloor=true;members["10"]=true
     assert(#missingRoomAlts(read(),names)==3,"An old PartyID is insufficient when the retained native roster is available")
+    env.player.UserId=12
+    members["10"]=nil
+    assert(not joinedHostRoom(read()),"An unknown native roster cannot confirm an alt joined inside The Between")
+    members["10"]=true
+    assert(not joinedHostRoom(read()),"A missing native member keeps an alt joining despite a stale PartyID")
+    members["12"]=true
+    assert(joinedHostRoom(read()),"A positive native roster receipt stops the join loop")
+    members["12"]=nil;members["10"]=nil;env.localFloor=false
+    assert(joinedHostRoom(read()),"Preserve the lobby's PartyID fallback before its native roster appears")
+    env.localFloor=true
 
     ctx.Read=function()return room end
     ctx.MissingAlts=function()return missing end

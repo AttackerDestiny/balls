@@ -135,6 +135,11 @@ def main():
     sources["Idle"] = wave[idle_start:wave.index("    function api.Destroy()", idle_start)]
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     fixture += fixture_party
+    active_start=script.index("    local function roomActive()")
+    active=script[active_start:script.index("    local function queueRoom()",active_start)]
+    find_start=script.index("    local function findHostRoom(name)")
+    find_host=script[find_start:active_start]
+    fixture += "assert(loadstring(" + quote(read("between-alt-join.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("between-room.module.luau"),active,find_host)) + ")\n"
     room_snapshot = script[script.index("    local function roomSnapshot(person)"):script.index("    local function send(action,partyId)")]
     room_resume = script[script.index("local betweenResume=env.SB2BetweenResumeRooms"):script.index("for _,key in ipairs({\"SelectedPlayerId\"")]
     fixture += "assert(loadstring(" + quote(read("between-room.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("between-room.module.luau"), room_snapshot, room_resume)) + ")\n"

@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.between-wipe-character-v3.0.23"
-local VERSION="3.0.23"
+local BUILD="2026-11-08.between-alt-continuous-join-v3.0.24"
+local VERSION="3.0.24"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

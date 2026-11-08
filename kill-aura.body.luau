@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.between-wipe-character-v3.0.23"
-local VERSION="3.0.23"
+local BUILD="2026-11-08.between-alt-continuous-join-v3.0.24"
+local VERSION="3.0.24"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -11084,6 +11084,10 @@ end
         if localFloor and room.Instance and room.Instance:GetAttribute(tostring(room.Host))~=nil then return false end
         return nil
     end
+    local function joinedHostRoom(room)
+        local member=nativeRoomMember(room,tostring(player.UserId))
+        return member==true or (not localFloor and member~=false)
+    end
     local function missingRoomAlts(room,names)
         local missing={}
         if #names==0 then return missing end
@@ -11116,26 +11120,31 @@ end
         local host=findPlayer(name)
         local found=host and roomSnapshot(host)
         if found and found.Host==host.UserId and found.PlaceId==destination then return found end
+        -- The native room can arrive before the host's PartyID attribute updates.
+        local parties=host and ReplicatedStorage:FindFirstChild("LobbyParties")
+        if parties then for _,party in ipairs(parties:GetChildren())do
+            if party:GetAttribute("Host")==host.UserId and party:GetAttribute("PlaceId")==destination then
+                return {Id=tostring(party.Name),Instance=party,Host=host.UserId,PlaceId=destination,
+                    Status=party:GetAttribute("Status"),Mode=party:GetAttribute("Mode")}
+            end
+        end end
     end
-    local altRetryReady=false
+    local function roomActive()
+        if not state.Running or not state.AutoCreateBetween or state.StopEverything
+            or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
+        if not localFloor then return true end
+        if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
+        -- Start is the alt's permission to keep joining its assigned host, independent of run results.
+        if assignment.Role=="Alt" then return true end
+        return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
+    end
     local function queueRoom()if state.QueueAutomation then pcall(state.QueueAutomation)end end
     local controller=create({UserId=player.UserId,PlaceId=destination,Read=roomSnapshot,Send=send,Spawn=task.spawn,
         InBetween=localFloor,Now=os.clock,
-        Active=function()
-            if not state.Running or not state.AutoCreateBetween or state.StopEverything
-                or state.AutomationTeleporting or state.ServerTeleportStarted then return false end
-            if not localFloor then return true end
-            if assignment.Role=="Alt" then
-                altRetryReady=altRetryReady or partyDefeated()
-                    or (workspace:GetAttribute("Wave")==100 and workspace:GetAttribute("MobsLeft")==0)
-            end
-            if state.SafeMode and state.SafeController and state.SafeController.Seeking then return false end
-            if assignment.Role=="Alt" then return altRetryReady end
-            return assignment.Room.AutoRetry and retry.Update(os.clock())~=nil
-        end,
+        Active=roomActive,
         Assignment=function()return assignment end,
         FindHostRoom=findHostRoom,
-        HasJoined=function(room)return nativeRoomMember(room,tostring(player.UserId))~=false end,
+        HasJoined=joinedHostRoom,
         MissingAlts=missingRoomAlts,
         Selection=function()
             local room=assignment.Room
