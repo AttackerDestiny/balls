@@ -157,12 +157,15 @@ do
 -- END BUNDLED ANTI AFK
     end)()
     local input
-    state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=function()
-        input=input or game:GetService("VirtualUser")
-        pcall(input.CaptureController,input)
-        local camera=workspace.CurrentCamera
-        input:ClickButton2(Vector2.zero,camera and camera.CFrame or CFrame.new())
-    end})
+    local makeIdleInput=(function()
+-- BEGIN BUNDLED ANTI AFK INPUT
+-- END BUNDLED ANTI AFK INPUT
+    end)()
+    state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=makeIdleInput({
+        Input=function()input=input or game:GetService("VirtualUser");return input end,
+        Point=function()return Vector2.zero end,
+        Frame=function()local camera=workspace.CurrentCamera;return camera and camera.CFrame or CFrame.new()end,
+        Wait=task.wait})})
     local attachVisibility=(function()
 -- BEGIN BUNDLED HIDE PLAYERS
 -- END BUNDLED HIDE PLAYERS

@@ -394,7 +394,7 @@ Preset files, Auto Preset selections, shared preferences, and custom spots are a
 
 | Feature | Behavior |
 | --- | --- |
-| **Anti-AFK** | One idle listener requests supported VirtualUser input with duplicate-event pacing; no continuous movement loop |
+| **Anti-AFK** | Always enabled with Feather. One idle listener requests VirtualUser input, with a paired press/release fallback if ClickButton2 fails. Duplicate events are paced; no continuous movement loop. Works while farming is paused and disconnects on unload/reload. |
 | **Completed quest claiming** | Reads native completion state and requests rewards for completed owned quest instances, with paced/bounded retries |
 | **Moderator protection** | Matches the script's moderator list, confirms native blocking before disconnecting, and arms bounded recovery |
 | **Rejoin recovery** | Queues installed source/loader where supported; build-specific caches avoid mixing different account builds |

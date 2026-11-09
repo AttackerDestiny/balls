@@ -12,12 +12,13 @@ return function(ctx)
         local success,reason=pcall(ctx.Pulse)
         lease.Running=false
         if lease.Closed or state.Running==false then return end
-        if success then
+        if success and reason~=false then
             result.Pulses+=1
             state.LastAntiAfkError=nil
+            state.AntiAfkInputMethod=type(reason)=="string"and reason or nil
             state.AntiAfkStatus="Active · idle input sent"
         else
-            state.LastAntiAfkError=tostring(reason)
+            state.LastAntiAfkError=success and "Executor rejected idle input"or tostring(reason)
             state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
         end
     end
@@ -26,7 +27,7 @@ return function(ctx)
         if lease.Closed then return end
         lease.Closed=true;result.Enabled=false
         subscription:Disconnect();subscription=nil
-        state.AntiAfkStatus="Stopped"
+        state.AntiAfkStatus="Stopped";state.AntiAfkInputMethod=nil
     end
     return result
 end

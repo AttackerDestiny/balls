@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-09.regroup-lobby-return-v3.0.36"
-local VERSION="3.0.36"
+local BUILD="2026-11-09.built-in-idle-protection-v3.0.37"
+local VERSION="3.0.37"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2097,12 +2097,13 @@ return function(ctx)
         local success,reason=pcall(ctx.Pulse)
         lease.Running=false
         if lease.Closed or state.Running==false then return end
-        if success then
+        if success and reason~=false then
             result.Pulses+=1
             state.LastAntiAfkError=nil
+            state.AntiAfkInputMethod=type(reason)=="string"and reason or nil
             state.AntiAfkStatus="Active · idle input sent"
         else
-            state.LastAntiAfkError=tostring(reason)
+            state.LastAntiAfkError=success and "Executor rejected idle input"or tostring(reason)
             state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
         end
     end
@@ -2111,7 +2112,7 @@ return function(ctx)
         if lease.Closed then return end
         lease.Closed=true;result.Enabled=false
         subscription:Disconnect();subscription=nil
-        state.AntiAfkStatus="Stopped"
+        state.AntiAfkStatus="Stopped";state.AntiAfkInputMethod=nil
     end
     return result
 end
@@ -2119,12 +2120,34 @@ end
 -- END BUNDLED ANTI AFK
     end)()
     local input
-    state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=function()
-        input=input or game:GetService("VirtualUser")
+    local makeIdleInput=(function()
+-- BEGIN BUNDLED ANTI AFK INPUT
+-- Lazy idle-only input with a paired press/release fallback for restricted executors.
+return function(ctx)
+    return function()
+        local input=ctx.Input()
+        local point,frame=ctx.Point(),ctx.Frame()
         pcall(input.CaptureController,input)
-        local camera=workspace.CurrentCamera
-        input:ClickButton2(Vector2.zero,camera and camera.CFrame or CFrame.new())
-    end})
+        local clicked,clickError=pcall(input.ClickButton2,input,point,frame)
+        if clicked then return "VirtualUser ClickButton2"end
+        local pressed,pressError=pcall(function()
+            input:Button2Down(point,frame)
+            ctx.Wait(.05)
+        end)
+        -- Release even when a partial press errors, or the runtime closes during the wait.
+        local released,releaseError=pcall(input.Button2Up,input,point,frame)
+        assert(pressed and released,"Idle input unavailable: "..tostring(pressError or releaseError or clickError))
+        return "VirtualUser Button2Down/Up"
+    end
+end
+
+-- END BUNDLED ANTI AFK INPUT
+    end)()
+    state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=makeIdleInput({
+        Input=function()input=input or game:GetService("VirtualUser");return input end,
+        Point=function()return Vector2.zero end,
+        Frame=function()local camera=workspace.CurrentCamera;return camera and camera.CFrame or CFrame.new()end,
+        Wait=task.wait})})
     local attachVisibility=(function()
 -- BEGIN BUNDLED HIDE PLAYERS
 -- Visibility is a reversible property overlay scoped to remote player roots.

@@ -90,6 +90,7 @@ def main():
         ("MULTI SPOT HUD", "multi-spot-hud.module.luau"),
         ("WINDUI", "windui.module.luau"),
         ("ANTI AFK", "anti-afk.module.luau"),
+        ("ANTI AFK INPUT", "anti-afk-input.module.luau"),
         ("TARGET PRIORITY", "target-priority.module.luau"),
         ("ATTACK SCHEDULER", "attack-scheduler.module.luau"),
         ("SKILL ACTIVATION", "skill-activation.module.luau"),
@@ -243,6 +244,7 @@ def main():
     fixture += "assert(loadstring(" + quote(read("respawn-schedule.test.luau")) + "))()(" + quote(read("respawn-schedule.module.luau")) + "," + quote(read("multi-spot.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("startup-below.test.luau")) + "))()(" + quote(read("startup-below.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("anti-afk.test.luau")) + "))()(" + quote(read("anti-afk.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("anti-afk-input.test.luau")) + "))()(" + quote(read("anti-afk-input.module.luau")) + "," + quote(read("anti-afk.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("credit-roster.test.luau")) + "))()(" + quote(read("credit-roster.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("credit-damage-plan.test.luau")) + "))()(" + quote(read("credit-damage-plan.module.luau")) + "," + quote(read("credit-check.module.luau")) + ")\n"
     credit_send_start=script.index("                Send=function(mob,entry)")+len("                Send=")

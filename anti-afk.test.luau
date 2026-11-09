@@ -7,13 +7,14 @@ return function(source)
         listener=fn;connected=true
         return {Disconnect=function()connected=false end}
     end
-    local fail,reenter=false,false
+    local fail,reenter,rejected=false,false,false
     local make=assert(loadstring(source))()
     local function create()
         return make({State=state,Player={Idled=signal},Clock=function()return time end,Pulse=function()
             calls+=1
             if reenter then listener()end
             if fail then error("Executor input denied")end
+            if rejected then return false end
         end})
     end
     local api=create()
@@ -30,6 +31,10 @@ return function(source)
     api.Destroy();api.Destroy();assert(not connected and not api.Enabled)
     time=105;listener();assert(calls==5,"A stale callback cannot send input after cleanup")
     api=create();state.Running=false;listener();assert(calls==5,"A stopped runtime cannot pulse")
+    api.Destroy()
+    state.Running=true;time=126;api=create();rejected=true;listener()
+    assert(api.Pulses==0 and state.LastAntiAfkError=="Executor rejected idle input",
+        "An explicit input rejection must not count as successful idle protection")
     api.Destroy()
     print("PASS Anti-AFK: idle-only input, pacing, reentrancy, mobile permission failure/recovery, paused farming, replacement and cleanup")
 end

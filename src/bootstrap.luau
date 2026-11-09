@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-09.regroup-lobby-return-v3.0.36"
-local VERSION="3.0.36"
+local BUILD="2026-11-09.built-in-idle-protection-v3.0.37"
+local VERSION="3.0.37"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

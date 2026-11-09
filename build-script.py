@@ -56,6 +56,7 @@ MODULES = {
     "MULTI SPOT HUD": "multi-spot-hud.module.luau",
     "WINDUI": "windui.module.luau",
     "ANTI AFK": "anti-afk.module.luau",
+    "ANTI AFK INPUT": "anti-afk-input.module.luau",
     "TARGET PRIORITY": "target-priority.module.luau",
     "AURA TOUCH": "aura-touch.module.luau",
     "ATTACK SCHEDULER": "attack-scheduler.module.luau",
