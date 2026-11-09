@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.delta-open-prompt-recovery-v3.0.33"
-local VERSION="3.0.33"
+local BUILD="2026-11-08.delta-input-coordinate-spaces-v3.0.34"
+local VERSION="3.0.34"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -7505,7 +7505,7 @@ return function(ctx)
     end
     local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
         "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered",
-        "another roblox block dialog is open"}
+        "another roblox block dialog is open","block button is not ready or covered"}
     local function retryable(reason)
         local text=tostring(reason or ""):lower()
         for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end
@@ -8456,27 +8456,46 @@ return function(ctx)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=inputPoint(button)
         assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
+        local diagnostic={Attempt=attempt or 1,Errors={}}
+        state.LastBlockInput=diagnostic
         local function touch()
             touchId+=1
             local id=touchId
-            virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
-            task.wait(.03)
-            virtualInput:SendTouchEvent(id,Enum.UserInputState.End.Value,point.X,point.Y)
+            local pressed,reason=pcall(function()
+                virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
+                task.wait(.03)
+            end)
+            local released,releaseReason=pcall(virtualInput.SendTouchEvent,virtualInput,id,Enum.UserInputState.End.Value,point.X,point.Y)
+            assert(pressed and released,tostring(reason or releaseReason))
         end
         local function mouse()
             pcall(function()virtualInput:SendMouseMoveEvent(point.X,point.Y,game)end)
-            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
-            task.wait(.03)
-            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+            local pressed,reason=pcall(function()
+                virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
+                task.wait(.03)
+            end)
+            local released,releaseReason=pcall(virtualInput.SendMouseButtonEvent,virtualInput,point.X,point.Y,0,false,game,0)
+            assert(pressed and released,tostring(reason or releaseReason))
         end
         local function activate()fireActivation(button.Activated,nil,1)end
+        local function send(name,fn)
+            -- Recheck the actual hit target before changing input method.
+            point=inputPoint(button)
+            assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
+            diagnostic.X=point.X;diagnostic.Y=point.Y
+            local ok,reason=pcall(fn)
+            if ok then diagnostic.Method=name;diagnostic.Dispatched=true;return true end
+            diagnostic.Errors[#diagnostic.Errors+1]=name..": "..tostring(reason)
+            return false
+        end
         attempt=attempt or 1
         local primary=canTouch and (attempt%2==1 or not canMouse) and touch or canMouse and mouse
         local secondary=primary==touch and canMouse and mouse or primary==mouse and canTouch and touch
-        if fireActivation and (attempt==3 or not primary) and pcall(activate)then return end
-        if primary and pcall(primary)then return end
-        if secondary and pcall(secondary)then return end
-        if fireActivation and attempt~=3 and primary then pcall(activate)end
+        if fireActivation and (attempt==3 or not primary)and send("Activated",activate)then return true end
+        if primary and send(primary==touch and "Touch"or "Mouse",primary)then return true end
+        if secondary and send(secondary==touch and "Touch"or "Mouse",secondary)then return true end
+        if fireActivation and attempt~=3 and primary and send("Activated",activate)then return true end
+        error("Automatic block input failed: "..table.concat(diagnostic.Errors," | "))
     end
     local function directBlock(target,active)
         local button,cancel=findPrompt(target)
@@ -9051,15 +9070,13 @@ end
     end)()
     local blockPoint=(function()
 -- BEGIN BUNDLED BLOCK INPUT
--- CoreGui coordinate transforms vary across client layouts. Verify each candidate.
+-- CoreGui hit-test positions exclude the inset; injected input includes it.
 return function(button,inset,hit)
     local origin=button.AbsolutePosition
     local half=button.AbsoluteSize/2
     if hit then
         local center=origin+half
-        if hit(center)then return center end
-        local shifted=center+inset
-        if (inset.X~=0 or inset.Y~=0)and hit(shifted)then return shifted end
+        if hit(center)then return center+inset end
         return nil
     end
     return origin+inset+half
@@ -9083,15 +9100,18 @@ return function(ctx)
         if not initial and not pending then ctx.Prompt(target);prompted=true end
         local expires=ctx.Now()+8
         local ready
+        local observed=initial~=nil
         repeat
             if not active()then return cancel(target)end
             local button,_,waiting=ctx.Find(target)
             pending=waiting
+            observed=observed or button~=nil
             if not button and not waiting and not prompted then ctx.Prompt(target);prompted=true end
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
         if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
+        if not ready and observed then error("Native block button is not ready or covered; no rejoin attempted")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")
         local began=ctx.Now()
         local geometry=ctx.Key(ready)

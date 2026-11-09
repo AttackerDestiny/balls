@@ -163,27 +163,46 @@ return function(ctx)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=inputPoint(button)
         assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
+        local diagnostic={Attempt=attempt or 1,Errors={}}
+        state.LastBlockInput=diagnostic
         local function touch()
             touchId+=1
             local id=touchId
-            virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
-            task.wait(.03)
-            virtualInput:SendTouchEvent(id,Enum.UserInputState.End.Value,point.X,point.Y)
+            local pressed,reason=pcall(function()
+                virtualInput:SendTouchEvent(id,Enum.UserInputState.Begin.Value,point.X,point.Y)
+                task.wait(.03)
+            end)
+            local released,releaseReason=pcall(virtualInput.SendTouchEvent,virtualInput,id,Enum.UserInputState.End.Value,point.X,point.Y)
+            assert(pressed and released,tostring(reason or releaseReason))
         end
         local function mouse()
             pcall(function()virtualInput:SendMouseMoveEvent(point.X,point.Y,game)end)
-            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
-            task.wait(.03)
-            virtualInput:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
+            local pressed,reason=pcall(function()
+                virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
+                task.wait(.03)
+            end)
+            local released,releaseReason=pcall(virtualInput.SendMouseButtonEvent,virtualInput,point.X,point.Y,0,false,game,0)
+            assert(pressed and released,tostring(reason or releaseReason))
         end
         local function activate()fireActivation(button.Activated,nil,1)end
+        local function send(name,fn)
+            -- Recheck the actual hit target before changing input method.
+            point=inputPoint(button)
+            assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
+            diagnostic.X=point.X;diagnostic.Y=point.Y
+            local ok,reason=pcall(fn)
+            if ok then diagnostic.Method=name;diagnostic.Dispatched=true;return true end
+            diagnostic.Errors[#diagnostic.Errors+1]=name..": "..tostring(reason)
+            return false
+        end
         attempt=attempt or 1
         local primary=canTouch and (attempt%2==1 or not canMouse) and touch or canMouse and mouse
         local secondary=primary==touch and canMouse and mouse or primary==mouse and canTouch and touch
-        if fireActivation and (attempt==3 or not primary) and pcall(activate)then return end
-        if primary and pcall(primary)then return end
-        if secondary and pcall(secondary)then return end
-        if fireActivation and attempt~=3 and primary then pcall(activate)end
+        if fireActivation and (attempt==3 or not primary)and send("Activated",activate)then return true end
+        if primary and send(primary==touch and "Touch"or "Mouse",primary)then return true end
+        if secondary and send(secondary==touch and "Touch"or "Mouse",secondary)then return true end
+        if fireActivation and attempt~=3 and primary and send("Activated",activate)then return true end
+        error("Automatic block input failed: "..table.concat(diagnostic.Errors," | "))
     end
     local function directBlock(target,active)
         local button,cancel=findPrompt(target)

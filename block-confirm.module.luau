@@ -12,15 +12,18 @@ return function(ctx)
         if not initial and not pending then ctx.Prompt(target);prompted=true end
         local expires=ctx.Now()+8
         local ready
+        local observed=initial~=nil
         repeat
             if not active()then return cancel(target)end
             local button,_,waiting=ctx.Find(target)
             pending=waiting
+            observed=observed or button~=nil
             if not button and not waiting and not prompted then ctx.Prompt(target);prompted=true end
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
         if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
+        if not ready and observed then error("Native block button is not ready or covered; no rejoin attempted")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")
         local began=ctx.Now()
         local geometry=ctx.Key(ready)

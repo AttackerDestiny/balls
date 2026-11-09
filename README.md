@@ -114,7 +114,9 @@ On Delta Android, the adapter accepts the native vertical and horizontal block-b
 
 If an interrupted attempt leaves a recognized block dialog for an eligible outsider, Safe Mode resumes that target before selecting a different pending outsider. A whitelisted, departed or otherwise ineligible user is never selected through this recovery path.
 
-Block input coordinates are verified against CoreGui's actual hit targets. The raw button center is checked first, then the inset-adjusted point only if needed. A different active control, including Block and Report, is never accepted as the intended button; missing or obstructed hit targets stop mouse, touch and signal activation. A read-only hit check on Delta Android confirmed the raw center, while the old fixed inset landed on the neighboring report button.
+Block input uses two coordinate spaces: CoreGui hit-testing verifies the raw button center, then touch/mouse injection adds the GuiService inset. Checking an inset-shifted point in CoreGui is not equivalent to injecting input at that screen position. A different active control, including Block and Report, is never accepted as the intended button; missing or obstructed hit targets stop mouse, touch and signal activation. On VanguardSlasher's Delta Android client, the corrected production click function delivered exactly one event for each touch, mouse and Activated attempt to a harmless fixture button. The fixture shield prevented input reaching gameplay or block dialogs.
+
+The latest block-input attempt records its method, screen coordinates and per-method exceptions separately from the authoritative block acknowledgment. All failed methods now produce an explicit error, and partially failed presses still send a release. A visible but covered button is reported separately from a dialog that never appeared. These bounded diagnostics are runtime-only and are not exported with settings.
 
 **Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 

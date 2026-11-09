@@ -69,6 +69,12 @@ return function(source)
         f.OnClick=function(v)v.ConfirmAt=v.Now;v.Visible=false end
         assert(f.Run({},f.Live)and f.Prompts==0 and f.Clicks==1)
     end)
+    test("A visible but blocked input target reports readiness separately from a missing dialog",function()
+        local f=fixture();f.Visible=true;f.ReadyAt=100
+        local ok,reason=pcall(f.Run,{},f.Live)
+        assert(not ok and tostring(reason):find("Native block button is not ready or covered",1,true)
+            and f.Prompts==0 and f.Clicks==0)
+    end)
     test("Authoritative block acknowledgment can return on its first observation",function()
         local now,clicks,confirmAt=0,0,math.huge
         local run=make({Now=function()return now end,Find=function()return {}end,
