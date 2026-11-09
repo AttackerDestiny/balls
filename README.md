@@ -112,6 +112,8 @@ Native block confirmations run with the recognized target's modal visuals transp
 
 On Delta Android, the adapter accepts the native vertical and horizontal block-button orders, checks visibility through the entire modal hierarchy, and waits for partially mounted buttons. A recognized different-target dialog causes a bounded wait and Safe Mode retries after it closes; genuinely unsupported layouts stay paused. Native Roblox UI code and isolated real-instance fixtures were checked on VanguardSlasher. No real blocks or kicks were performed to test this change; an end-to-end block/rejoin on the new version remains unverified.
 
+Block input coordinates are verified against CoreGui's actual hit targets. The raw button center is checked first, then the inset-adjusted point only if needed. A different active control, including Block and Report, is never accepted as the intended button; missing or obstructed hit targets stop mouse, touch and signal activation. A read-only hit check on Delta Android confirmed the raw center, while the old fixed inset landed on the neighboring report button.
+
 **Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 
 The inline **X** clears only the editor. The old active/saved list remains until a new non-empty replacement is submitted. Native blocks can remain on the account afterward; the script does not automatically unblock every searched player.

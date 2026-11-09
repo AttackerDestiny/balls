@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.delta-block-dialog-recovery-v3.0.31"
-local VERSION="3.0.31"
+local BUILD="2026-11-08.delta-verified-block-input-v3.0.32"
+local VERSION="3.0.32"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -8315,7 +8315,7 @@ return function(ctx)
     local queue,savedSource,validatedSource,validatedPath,validatedGeneration
     local virtualInput
     pcall(function()virtualInput=game:GetService("VirtualInputManager")end)
-    local blockPoint=ctx.BlockPoint or function(button,inset)return button.AbsolutePosition+button.AbsoluteSize/2+inset end
+    local blockPoint=ctx.BlockPoint
     local touchEnabled=false
     pcall(function()touchEnabled=game:GetService("UserInputService").TouchEnabled end)
     local function supportsInput(name)
@@ -8440,9 +8440,23 @@ return function(ctx)
         error("Native block dialog recognition is unavailable; no rejoin attempted")
     end
     local touchId=0
+    local function inputPoint(button)
+        if not blockPoint then return nil end
+        local core=game:GetService("CoreGui")
+        return blockPoint(button,GuiService:GetGuiInset(),function(point)
+            local ok,objects=pcall(core.GetGuiObjectsAtPosition,core,point.X,point.Y)
+            if not ok or type(objects)~="table"then return false end
+            for _,object in ipairs(objects)do
+                if object==button or object:IsDescendantOf(button)then return true end
+                if object:IsA("GuiButton")or object:IsA("GuiObject")and object.Active then return false end
+            end
+            return false
+        end)
+    end
     local function click(button,attempt)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
-        local point=blockPoint(button,GuiService:GetGuiInset())
+        local point=inputPoint(button)
+        assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
         local function touch()
             touchId+=1
             local id=touchId
@@ -8494,7 +8508,7 @@ return function(ctx)
     local block=directBlock
     if ctx.MakeBlockConfirm then
         block=ctx.MakeBlockConfirm({Find=findPrompt,Prompt=function(target)StarterGui:SetCore("PromptBlockPlayer",target)end,
-            Ready=function(button)return button.Visible and button.Active and button.AbsoluteSize.X>0 end,
+            Ready=function(button)return button.Visible and button.Active and button.AbsoluteSize.X>0 and inputPoint(button)~=nil end,
             Key=function(button)return tostring(button.AbsolutePosition).."/"..tostring(button.AbsoluteSize)end,
             Click=click,Now=os.clock,Sleep=task.wait,
             Blocked=function(target)return nativeBlockedEvents[target.UserId]==true or getBlocked()[target.UserId]==true end,
@@ -9031,10 +9045,17 @@ end
     end)()
     local blockPoint=(function()
 -- BEGIN BUNDLED BLOCK INPUT
--- FoundationOverlay's native coordinate space includes the GuiService inset.
-return function(button,inset)
+-- CoreGui coordinate transforms vary across client layouts. Verify each candidate.
+return function(button,inset,hit)
     local origin=button.AbsolutePosition
     local half=button.AbsoluteSize/2
+    if hit then
+        local center=origin+half
+        if hit(center)then return center end
+        local shifted=center+inset
+        if (inset.X~=0 or inset.Y~=0)and hit(shifted)then return shifted end
+        return nil
+    end
     return origin+inset+half
 end
 

@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.delta-block-dialog-recovery-v3.0.31"
-local VERSION="3.0.31"
+local BUILD="2026-11-08.delta-verified-block-input-v3.0.32"
+local VERSION="3.0.32"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
