@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-09.arena-membership-room-validation-v3.0.35"
-local VERSION="3.0.35"
+local BUILD="2026-11-09.regroup-lobby-return-v3.0.36"
+local VERSION="3.0.36"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -6624,7 +6624,12 @@ end
 local function runFrame()
     local at=os.clock()
     workScheduler.Step("TradeHold",at);workScheduler.Step("AuraTouch",at)
-    if state.StopEverything or priorityOnly()then return end
+    if state.StopEverything then return end
+    if state.AutoRegroupHolding and not state.ModeratorBlocking then
+        workScheduler.Step("AutoRegroup",at)
+        if state.AutoRegroupHolding then return end
+    end
+    if priorityOnly()then return end
     for _,name in ipairs(frameOrder)do
         if state.Running and (not state.AutoRegroupHolding or name=="AutoRegroup")then workScheduler.Step(name,at)end
     end
@@ -8630,7 +8635,7 @@ while not player do task.wait();player=Players.LocalPlayer end
 local HttpService=game:GetService("HttpService")
 local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
 if valid and type(settings)=="table"and settings.AutomationRunId==%q
-    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or %s)and game.GameId==%s then
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or settings.AutoRegroup or %s)and game.GameId==%s then
     local active=getgenv().SB2KillAura
     if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
@@ -9012,6 +9017,11 @@ end
         if who==player then
             local requested=state.SafeRejoinRequested
             state.ServerTeleportStarted=false
+            if state.AutoRegroupHolding and state.AutoRegroupController then
+                state.AutomationTeleporting=false
+                state.AutoRegroupController.TeleportFailed(reason or result.Name)
+                return
+            end
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
             if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
             if requested and kickFallback then kickFallback.TeleportFailed()end
@@ -9064,7 +9074,13 @@ end
             if not state.ServerTeleportStarted and state.RefreshPresetPreferences then state.RefreshPresetPreferences()end
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoRegroup or state.AutoPreset then
+                local ok,reason=pcall(state.QueueAutomation)
+                if not ok then
+                    if state.AutoRegroupHolding then state.AutoRegroupPrepareError=tostring(reason)
+                    else fail(reason)end
+                end
+            end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
             state.ServerTeleportStarted=false
@@ -11536,6 +11552,7 @@ return function(ctx)
     local api={Phase="Idle"}
     local signature,armedAt,missingAt
     local resetAt,returnAt,returns=0,0,0
+    local teleportDeadline
     local closed=false
     local function status(message)state.AutoRegroupStatus=message end
     local function release()
@@ -11544,33 +11561,66 @@ return function(ctx)
     end
     function api.Reset()
         release();signature=nil;armedAt=nil;missingAt=nil
-        resetAt=0;returnAt=0;returns=0;api.Phase="Idle"
+        resetAt=0;returnAt=0;returns=0;api.Phase="Idle";teleportDeadline=nil
+        api.ReturnAttempts=0;api.LastReturnError=nil;api.PrepareError=nil;api.ResetError=nil;api.PauseError=nil
+        state.AutoRegroupPrepareError=nil;state.AutoRegroupReturnError=nil
         status(state.AutoRegroup and "Waiting for room users"or "Auto Regroup is off")
+    end
+    function api.MarkTeleportStarted(now)
+        if closed or api.Phase~="Returning"or returns==0 then return end
+        teleportDeadline=(now or (ctx.Now or os.clock)())+25
+    end
+    function api.TeleportFailed(reason)
+        if closed or api.Phase~="Returning"or returns==0 then return end
+        teleportDeadline=nil
+        api.LastReturnError=tostring(reason or "Lobby teleport failed")
+        state.AutoRegroupReturnError=api.LastReturnError
+        status("Lobby return failed · retrying")
     end
     function api.Update(now)
         if closed then return end
         if not state.Running or not state.AutoRegroup or not ctx.InBetween()then api.Reset();return end
-        if state.StopEverything or state.ModeratorBlocking or state.SafeModePanic or state.AutomationTeleporting
-            or state.ServerTeleportStarted or state.AutoJoinFriendHolding or state.AutoTradeBusy
+        if state.StopEverything or state.ModeratorBlocking then missingAt=nil;return end
+        -- Once reset is committed, finish the exit even if combat/roster/safety state changes.
+        if api.Phase=="Returning"then
+            if teleportDeadline then
+                if now<teleportDeadline then status("Returning to lobby · waiting for teleport");return end
+                teleportDeadline=nil
+                if ctx.ClearTeleportWait then ctx.ClearTeleportWait()end
+                api.TeleportFailed("Lobby teleport timed out")
+            elseif state.ServerTeleportStarted or state.AutomationTeleporting then return end
+            if now<returnAt then return end
+            if returns>=3 then api.Phase="Failed";status("Return was not confirmed · toggle Auto Regroup OFF/ON to retry");return end
+            returnAt=now+10
+            local prepared,problem=pcall(ctx.PrepareReturn)
+            api.PrepareError=not prepared and tostring(problem)or problem==false and "Reload preparation was not confirmed"or nil
+            state.AutoRegroupPrepareError=api.PrepareError
+            if closed or not state.Running or not state.AutoRegroup or state.StopEverything or state.ModeratorBlocking then return end
+            returns+=1;api.ReturnAttempts=returns
+            local sent,reason=pcall(ctx.Return)
+            api.LastReturnError=not sent and tostring(reason)or reason==false and "Lobby return was rejected"or nil
+            state.AutoRegroupReturnError=api.LastReturnError
+            status(api.LastReturnError and "Lobby return failed · retrying"or
+                api.PrepareError and "Returning to lobby · automatic reload unavailable"or "Returning to lobby · regrouping")
+            return
+        end
+        if api.Phase=="Failed"then return end
+        if api.Phase=="Resetting"then
+            if state.AutomationTeleporting or state.ServerTeleportStarted then return end
+            if not ctx.Dead()and now-resetAt<5 then return end
+            -- Local Humanoid death can precede the server's revive/return UI.
+            if ctx.ReturnReady and not ctx.ReturnReady()and now-resetAt<8 then
+                status("Reset complete · waiting for lobby return to become ready");return
+            end
+            api.Phase="Returning";returnAt=now
+            return
+        end
+        if state.SafeModePanic or state.AutomationTeleporting or state.ServerTeleportStarted or state.AutoJoinFriendHolding or state.AutoTradeBusy
             or (state.SafeMode and state.SafeController and state.SafeController.Seeking)then missingAt=nil;return end
         local names=ctx.Users()
         if #names==0 then api.Reset();status("Add room Host + Alts or Regroup Users");return end
         local key=table.concat(names,"\0"):lower()
         if signature~=key then api.Reset();signature=key;armedAt=now end
-        if api.Phase=="Returning"then
-            if now<returnAt then return end
-            if returns>=3 then api.Phase="Failed";status("Return was not confirmed · toggle Auto Regroup OFF/ON to retry");return end
-            returns+=1;returnAt=now+10
-            ctx.PrepareReturn();ctx.Return()
-            status("Returning to lobby · regrouping")
-            return
-        end
-        if api.Phase=="Failed"then return end
-        if api.Phase=="Resetting"then
-            if not ctx.Dead()and now-resetAt<5 then return end
-            api.Phase="Returning";returnAt=now
-            return
-        end
         if now-armedAt<15 then status("Waiting for server users to load");return end
         local present=ctx.Present()
         local missing={}
@@ -11580,7 +11630,10 @@ return function(ctx)
         status("Missing: "..table.concat(missing,", "))
         if now-missingAt<5 then return end
         state.AutoRegroupHolding=true;api.Phase="Resetting";resetAt=now
-        ctx.Pause();ctx.ResetCharacter()
+        local paused,pauseError=pcall(ctx.Pause)
+        if not paused then api.PauseError=tostring(pauseError)end
+        local reset,resetError=pcall(ctx.ResetCharacter)
+        if not reset then api.ResetError=tostring(resetError)end
         status("Resetting to regroup · missing "..table.concat(missing,", "))
     end
     function api.Destroy()
@@ -11620,7 +11673,7 @@ end
         table.sort(names,function(a,b)return a:lower()<b:lower()end)
         return names
     end
-    state.AutoRegroupController=makeRegroup({State=state,InBetween=function()return localFloor end,Users=regroupUsers,
+    state.AutoRegroupController=makeRegroup({State=state,Now=os.clock,InBetween=function()return localFloor end,Users=regroupUsers,
         Present=function()
             local roster={}
             for _,person in ipairs(Players:GetPlayers())do roster[person.Name:lower()]=true;roster[tostring(person.UserId)]=true end
@@ -11643,8 +11696,21 @@ end
             local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
             return player:GetAttribute("ReviveState")==true or not humanoid or humanoid.Health<=0
         end,
-        PrepareReturn=function()state.SaveNow();if state.QueueAutomation then state.QueueAutomation()end end,
+        ReturnReady=function()return player:GetAttribute("ReviveState")==true or prompt()==true end,
+        ClearTeleportWait=function()state.ServerTeleportStarted=false;state.AutomationTeleporting=false end,
+        PrepareReturn=function()
+            local saved,reason=pcall(state.SaveNow)
+            local queued,queueError=pcall(function()assert(state.QueueAutomation,"Automatic reload is unavailable");state.QueueAutomation()end)
+            assert(queued,queueError)
+            assert(saved and reason~=false,"Could not save regroup settings")
+            return true
+        end,
         Return=function()ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"WaveDefense","Return"})end})
+    bind(player.OnTeleport,function(stage)
+        local regroup=state.AutoRegroupController
+        if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then regroup.MarkTeleportStarted(os.clock())
+        elseif stage==Enum.TeleportState.Failed then regroup.TeleportFailed("Native lobby teleport failed")end
+    end)
     function state.SetAutoRegroup(value)
         state.AutoRegroup=value==true;state.AutoRegroupController.Reset();requestSave()
     end

@@ -705,7 +705,7 @@ local function installBetweenAutomation()
         table.sort(names,function(a,b)return a:lower()<b:lower()end)
         return names
     end
-    state.AutoRegroupController=makeRegroup({State=state,InBetween=function()return localFloor end,Users=regroupUsers,
+    state.AutoRegroupController=makeRegroup({State=state,Now=os.clock,InBetween=function()return localFloor end,Users=regroupUsers,
         Present=function()
             local roster={}
             for _,person in ipairs(Players:GetPlayers())do roster[person.Name:lower()]=true;roster[tostring(person.UserId)]=true end
@@ -728,8 +728,21 @@ local function installBetweenAutomation()
             local character=player.Character;local humanoid=character and character:FindFirstChildOfClass("Humanoid")
             return player:GetAttribute("ReviveState")==true or not humanoid or humanoid.Health<=0
         end,
-        PrepareReturn=function()state.SaveNow();if state.QueueAutomation then state.QueueAutomation()end end,
+        ReturnReady=function()return player:GetAttribute("ReviveState")==true or prompt()==true end,
+        ClearTeleportWait=function()state.ServerTeleportStarted=false;state.AutomationTeleporting=false end,
+        PrepareReturn=function()
+            local saved,reason=pcall(state.SaveNow)
+            local queued,queueError=pcall(function()assert(state.QueueAutomation,"Automatic reload is unavailable");state.QueueAutomation()end)
+            assert(queued,queueError)
+            assert(saved and reason~=false,"Could not save regroup settings")
+            return true
+        end,
         Return=function()ReplicatedStorage.Event:FireServer("UniqueFloorTypes",{"WaveDefense","Return"})end})
+    bind(player.OnTeleport,function(stage)
+        local regroup=state.AutoRegroupController
+        if stage==Enum.TeleportState.Started or stage==Enum.TeleportState.InProgress then regroup.MarkTeleportStarted(os.clock())
+        elseif stage==Enum.TeleportState.Failed then regroup.TeleportFailed("Native lobby teleport failed")end
+    end)
     function state.SetAutoRegroup(value)
         state.AutoRegroup=value==true;state.AutoRegroupController.Reset();requestSave()
     end

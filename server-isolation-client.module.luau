@@ -295,7 +295,7 @@ while not player do task.wait();player=Players.LocalPlayer end
 local HttpService=game:GetService("HttpService")
 local valid,settings=pcall(function()return HttpService:JSONDecode(readfile(%q))end)
 if valid and type(settings)=="table"and settings.AutomationRunId==%q
-    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or %s)and game.GameId==%s then
+    and (settings.SafeMode or settings.MultiSpot or settings.AccountProgression or settings.AutoCreateBetween or settings.AutoRegroup or %s)and game.GameId==%s then
     local active=getgenv().SB2KillAura
     if not(active and active.Running and active.AutomationLoadedJob==game.JobId and active.AutomationRunId==settings.AutomationRunId)then
         local source=readfile(%q)
@@ -677,6 +677,11 @@ end
         if who==player then
             local requested=state.SafeRejoinRequested
             state.ServerTeleportStarted=false
+            if state.AutoRegroupHolding and state.AutoRegroupController then
+                state.AutomationTeleporting=false
+                state.AutoRegroupController.TeleportFailed(reason or result.Name)
+                return
+            end
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
             if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
             if requested and kickFallback then kickFallback.TeleportFailed()end
@@ -729,7 +734,13 @@ end
             if not state.ServerTeleportStarted and state.RefreshPresetPreferences then state.RefreshPresetPreferences()end
             state.ServerTeleportStarted=true
             if kickFallback then kickFallback.MarkStarted()end
-            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoPreset then local ok,reason=pcall(state.QueueAutomation);if not ok then fail(reason)end end
+            if state.SafeMode or state.MultiSpot or state.AccountProgression or state.AutoCreateBetween or state.AutoRegroup or state.AutoPreset then
+                local ok,reason=pcall(state.QueueAutomation)
+                if not ok then
+                    if state.AutoRegroupHolding then state.AutoRegroupPrepareError=tostring(reason)
+                    else fail(reason)end
+                end
+            end
         elseif stage==Enum.TeleportState.Failed then
             local requested=state.SafeRejoinRequested
             state.ServerTeleportStarted=false

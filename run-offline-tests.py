@@ -153,6 +153,9 @@ def main():
     adapter_start=script.index("    state.AutoRegroupController=makeRegroup(")
     regroup_adapter=script[adapter_start:script.index("    function state.SetAutoRegroup(",adapter_start)]
     fixture += "assert(loadstring(" + quote(read("auto-regroup-adapter.test.luau")) + "))()(" + quote(regroup_adapter) + ")\n"
+    frame_start=script.index("local function runFrame()")
+    frame=script[frame_start:script.index("\ndo\n",frame_start)]
+    fixture += "assert(loadstring(" + quote(read("auto-regroup-coordinator.test.luau")) + "))()(" + quote(frame) + ")\n"
     active_start=script.index("    local function roomActive()")
     active=script[active_start:script.index("    local function queueRoom()",active_start)]
     find_start=script.index("    local function findHostRoom(name)")
@@ -267,6 +270,8 @@ def main():
     save = script[save_start:script.index("requestSave=function()", save_start)]
     fixture += "assert(loadstring(" + quote(read("storage-bootstrap.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("storage-bootstrap.module.luau"), script, read("kill-aura.luau"), save)) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    resume_template=adapter.split("local code=string.format([[\n",1)[1].split("]],state.ConfigPath",1)[0]
+    fixture += "assert(loadstring(" + quote(read("auto-regroup-resume.test.luau")) + "))()(" + quote(resume_template) + ")\n"
     choose_start=adapter.index("    local function chooseBlockTarget(people)")
     choose=adapter[choose_start:adapter.index("    local api=ctx.Make(",choose_start)]
     fixture += "assert(loadstring(" + quote(read("safe-block-target.test.luau")) + "))()(" + quote(choose) + ")\n"
