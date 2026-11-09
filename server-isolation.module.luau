@@ -14,7 +14,8 @@ return function(ctx)
         return text:match(":%d+: (.*)")or text
     end
     local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
-        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
+        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered",
+        "another roblox block dialog is open"}
     local function retryable(reason)
         local text=tostring(reason or ""):lower()
         for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end

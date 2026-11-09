@@ -6,17 +6,21 @@ return function(ctx)
         return false
     end
     return function(target,active)
-        local initial=ctx.Find(target)
+        local initial,_,pending=ctx.Find(target)
         if not active()then return false end
-        if not initial then ctx.Prompt(target)end
+        local prompted=false
+        if not initial and not pending then ctx.Prompt(target);prompted=true end
         local expires=ctx.Now()+8
         local ready
         repeat
             if not active()then return cancel(target)end
-            local button=ctx.Find(target)
+            local button,_,waiting=ctx.Find(target)
+            pending=waiting
+            if not button and not waiting and not prompted then ctx.Prompt(target);prompted=true end
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
+        if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")
         local began=ctx.Now()
         local geometry=ctx.Key(ready)

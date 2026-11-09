@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.chest-priority-trio-rank-v3.0.30"
-local VERSION="3.0.30"
+local BUILD="2026-11-08.delta-block-dialog-recovery-v3.0.31"
+local VERSION="3.0.31"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -7505,7 +7505,8 @@ return function(ctx)
         return text:match(":%d+: (.*)")or text
     end
     local transient={"block dialog did not open","did not confirm the block","block was not confirmed",
-        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered"}
+        "rejected the block","getblockeduserids","blocked-user list","another native block confirmation","has not been registered",
+        "another roblox block dialog is open"}
     local function retryable(reason)
         local text=tostring(reason or ""):lower()
         for _,phrase in ipairs(transient)do if text:find(phrase,1,true)then return true end end
@@ -8435,32 +8436,8 @@ return function(ctx)
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
-    local function findPrompt(target)
-        local core=game:GetService("CoreGui")
-        assert(core,"The search worker cannot access Roblox's block dialog")
-        for _,overlay in ipairs(core:GetChildren())do
-            if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
-                for _,title in ipairs(overlay:QueryDescendants("TextLabel"))do
-                    if title.Name=="Title"and title.Visible then
-                        local contents=title.Parent and title.Parent.Parent and title.Parent.Parent.Parent
-                        local modal=contents and contents.Parent
-                        if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
-                            and modal.Parent and modal.Parent.Name=="BlockingModal"then
-                            local footer=contents:FindFirstChild("Footer")
-                            local buttons=footer and footer:FindFirstChild("Buttons")
-                            local confirm=buttons and buttons:FindFirstChild("3")
-                            local cancel=buttons and buttons:FindFirstChild("1")
-                            local report=buttons and buttons:FindFirstChild("2")
-                            local matches=title.Text:find(target.DisplayName,1,true)or title.Text:find(target.Name,1,true)
-                            local supported=confirm and cancel and report and confirm:IsA("GuiButton")
-                                and confirm.LayoutOrder==0 and cancel.LayoutOrder==2 and report.LayoutOrder==1
-                            assert(matches and supported,"Another or unsupported Roblox block dialog is open")
-                            return confirm,cancel
-                        end
-                    end
-                end
-            end
-        end
+    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui")})or function()
+        error("Native block dialog recognition is unavailable; no rejoin attempted")
     end
     local touchId=0
     local function click(button,attempt)
@@ -8524,7 +8501,13 @@ return function(ctx)
             Settle=function()return 0 end})
     end
     local blockBusy=false
-    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender})
+    local maskTarget
+    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender,
+        Match=function(modal)
+            if not maskTarget then return false end
+            local button=findPrompt(maskTarget)
+            return button~=nil and button:IsDescendantOf(modal)
+        end})
     state.BlockDialogMask=blockMask
     local function performBlock(target,active)
         local expires=os.clock()+10
@@ -8535,6 +8518,7 @@ return function(ctx)
             task.wait(.04)
         until false
         blockBusy=true
+        maskTarget=target
         local sent,result=pcall(function()
             if blockMask then blockMask.Begin()end
             return block(target,active)
@@ -8545,6 +8529,7 @@ return function(ctx)
             local restored,reason=pcall(blockMask.End)
             if not restored then state.LastBlockMaskError=tostring(reason)end
         end
+        maskTarget=nil
         blockBusy=false
         if not sent then error(result)end
         return result==true
@@ -9065,17 +9050,21 @@ return function(ctx)
         return false
     end
     return function(target,active)
-        local initial=ctx.Find(target)
+        local initial,_,pending=ctx.Find(target)
         if not active()then return false end
-        if not initial then ctx.Prompt(target)end
+        local prompted=false
+        if not initial and not pending then ctx.Prompt(target);prompted=true end
         local expires=ctx.Now()+8
         local ready
         repeat
             if not active()then return cancel(target)end
-            local button=ctx.Find(target)
+            local button,_,waiting=ctx.Find(target)
+            pending=waiting
+            if not button and not waiting and not prompted then ctx.Prompt(target);prompted=true end
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
+        if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")
         local began=ctx.Now()
         local geometry=ctx.Key(ready)
@@ -9110,6 +9099,81 @@ end
 
 -- END BUNDLED BLOCK CONFIRM
     end)()
+    local makeBlockPrompt=(function()
+-- BEGIN BUNDLED BLOCK PROMPT
+-- Recognize only the native Settings block modal; never interact with another dialog.
+return function(ctx)
+    local function visible(object,root)
+        local node=object
+        while node and node~=root do
+            if node:IsA("GuiObject")and not node.Visible then return false end
+            if node:IsA("LayerCollector")and not node.Enabled then return false end
+            node=node.Parent
+        end
+        return node==root
+    end
+    local function contains(text,name)
+        if type(name)~="string"or name==""then return false end
+        local from=1
+        repeat
+            local first,last=text:find(name,from,true)
+            if not first then return false end
+            local before=first>1 and text:sub(first-1,first-1)or ""
+            local after=text:sub(last+1,last+1)
+            if not before:match("[%w_]")and not after:match("[%w_]")then return true end
+            from=last+1
+        until from>#text
+        return false
+    end
+    return function(target)
+        local busy,loading=false,false
+        local confirm,cancel
+        for _,overlay in ipairs(ctx.Root:GetChildren())do
+            if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
+                for _,title in ipairs(overlay:QueryDescendants("#BlockingModal >> TextLabel"))do
+                    if title.Name=="Title"and visible(title,overlay)then
+                        local contents=title.Parent
+                        for _=1,6 do
+                            if not contents or contents==overlay or contents.Name=="AlertContents"then break end
+                            contents=contents.Parent
+                        end
+                        local modal=contents and contents.Parent
+                        if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
+                            and modal.Parent and modal.Parent.Name=="BlockingModal"then
+                            local text=title.Text:gsub("<[^>]*>",""):gsub("&amp;","&"):gsub("&lt;","<"):gsub("&gt;",">")
+                            if not(contains(text,target.DisplayName)or contains(text,target.Name))then busy=true
+                            else
+                                local footer=contents:FindFirstChild("Footer")
+                                local buttons=footer and footer:FindFirstChild("Buttons")
+                                local yes=buttons and buttons:FindFirstChild("3")
+                                local no=buttons and buttons:FindFirstChild("1")
+                                local report=buttons and buttons:FindFirstChild("2")
+                                if not(yes and no and report)then loading=true
+                                else
+                                    local vertical=yes.LayoutOrder==0 and no.LayoutOrder==2 and report.LayoutOrder==1
+                                    local horizontal=yes.LayoutOrder==3 and no.LayoutOrder==1 and report.LayoutOrder==2
+                                    local supported=yes:IsA("GuiButton")and no:IsA("GuiButton")and report:IsA("GuiButton")
+                                        and (vertical or horizontal)
+                                    assert(supported,"Unsupported Roblox block dialog layout; no rejoin attempted")
+                                    if visible(yes,overlay)and visible(no,overlay)and visible(report,overlay)then
+                                        confirm,cancel=yes,no
+                                    else loading=true end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- Another modal can cover an otherwise matching button; don't click through it.
+        if busy then return nil,nil,"Busy"end
+        if confirm then return confirm,cancel end
+        if loading then return nil,nil,"Loading"end
+    end
+end
+
+-- END BUNDLED BLOCK PROMPT
+    end)()
     local makeBlockMask=(function()
 -- BEGIN BUNDLED BLOCK UI MASK
 -- Reversible alpha overlay owned only while a native block prompt is active.
@@ -9141,15 +9205,21 @@ return function(ctx)
         for object,saved in pairs(active.Saved)do
             if object.Parent then for property,value in pairs(saved)do pcall(function()object[property]=value end)end end
         end
-        table.clear(active.Saved);table.clear(active.Modals);table.clear(active.Connections)
+        table.clear(active.Saved);table.clear(active.Modals);table.clear(active.Candidates);table.clear(active.Connections)
     end
     function api.Begin()
         api.End()
-        local active={Saved={},Modals={},Connections={}}
+        local active={Saved={},Modals={},Candidates={},Connections={},NextMatch=0}
         session=active
         local function discover(object)
             if session~=active then return end
             if object.Name=="BlockingModal"and object:IsA("GuiObject")then
+                active.Candidates[object]=true
+                if ctx.Match then
+                    local ok,matches=pcall(ctx.Match,object)
+                    if not ok or not matches then return end
+                end
+                if active.Modals[object]then return end
                 active.Modals[object]=true;overlay(active,object)
                 for _,child in ipairs(object:QueryDescendants("GuiObject, UIStroke"))do overlay(active,child)end
                 return
@@ -9164,6 +9234,14 @@ return function(ctx)
             active.Connections[1]=ctx.Root.DescendantAdded:Connect(discover)
             for _,modal in ipairs(ctx.Root:QueryDescendants("#BlockingModal"))do discover(modal)end
             active.Connections[2]=ctx.Render:Connect(function()
+                local now=os.clock()
+                if now>=active.NextMatch then
+                    active.NextMatch=now+.1
+                    for modal in pairs(active.Candidates)do
+                        if not modal.Parent then active.Candidates[modal]=nil
+                        elseif not active.Modals[modal]then discover(modal)end
+                    end
+                end
                 for object,saved in pairs(active.Saved)do
                     if object.Parent then for property in pairs(saved)do object[property]=1 end
                     else active.Saved[object]=nil;active.Modals[object]=nil end
@@ -9462,7 +9540,7 @@ end
 
 -- END BUNDLED ANTI SUSPICIOUS
     end)()
-    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    attach({MakeBlockPrompt=makeBlockPrompt,MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end

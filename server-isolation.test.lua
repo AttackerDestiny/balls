@@ -218,4 +218,17 @@ test("A late block acknowledgment recovers without prompting or blocking twice",
     assert(f.api.Retry());f.tick(9)
     assert(f.blocks==1 and f.hops==1 and f.saved.LastBlockedUserId==2)
 end)
+test("A recognized dialog conflict recovers after closure while unsupported layouts stay paused",function()
+    local f=fixture();f.start()
+    f.ctx.Block=function()error("Another Roblox block dialog is open; waiting for it to close")end
+    f.tick(8)
+    assert(f.api.Retryable and not f.api.Active and f.blocks==0 and f.hops==0)
+    f.ctx.Block=function(person)f.blocks=f.blocks+1;f.blocked[person.UserId]=true;return true end
+    assert(f.api.Retry());f.tick(9);f.tick(12)
+    assert(f.blocks==1 and f.hops==1,"Recovery must use the ordinary confirmed-block flow")
+    local g=fixture();g.start()
+    g.ctx.Block=function()error("Unsupported Roblox block dialog layout; no rejoin attempted")end
+    g.tick(8)
+    assert(not g.api.Retryable and not g.api.Active and not g.api.Retry()and g.blocks==0 and g.hops==0)
+end)
 print("All " .. count .. " server-isolation scenarios passed")

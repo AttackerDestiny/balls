@@ -369,6 +369,10 @@ do
 -- BEGIN BUNDLED BLOCK CONFIRM
 -- END BUNDLED BLOCK CONFIRM
     end)()
+    local makeBlockPrompt=(function()
+-- BEGIN BUNDLED BLOCK PROMPT
+-- END BUNDLED BLOCK PROMPT
+    end)()
     local makeBlockMask=(function()
 -- BEGIN BUNDLED BLOCK UI MASK
 -- END BUNDLED BLOCK UI MASK
@@ -385,7 +389,7 @@ do
 -- BEGIN BUNDLED ANTI SUSPICIOUS
 -- END BUNDLED ANTI SUSPICIOUS
     end)()
-    attach({MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
+    attach({MakeBlockPrompt=makeBlockPrompt,MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})
 end

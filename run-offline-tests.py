@@ -121,6 +121,7 @@ def main():
         ("FARM NOCLIP", "farm-noclip.module.luau"),
         ("BLOCK CONFIRM", "block-confirm.module.luau"),
         ("BLOCK INPUT", "block-input.module.luau"),
+        ("BLOCK PROMPT", "block-prompt.module.luau"),
         ("STORAGE BOOTSTRAP", "storage-bootstrap.module.luau"),
     ]:
         actual = script.split(f"-- BEGIN BUNDLED {marker}\n", 1)[1].split(
@@ -266,6 +267,7 @@ def main():
     block_click = adapter[adapter.index("    local touchId=0"):adapter.index("    local function directBlock(")]
     fixture += "assert(loadstring(" + quote(read("block-input.test.luau")) + "))()(" + quote(read("block-input.module.luau")) + "," + quote(block_click) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("block-prompt.test.luau")) + "))()(" + quote(read("block-prompt.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
     order_adapter = adapter[adapter.index("    local function spotOrder("):adapter.index("    local function joinFriendAtPad(")]
     fixture += "assert(loadstring(" + quote(read("multi-order.test.luau")) + "))()(" + quote(order_adapter) + ")\n"

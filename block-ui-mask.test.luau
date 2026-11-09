@@ -36,6 +36,13 @@ return function(source)
         assert(late.TextTransparency==.4 and next(added.Listeners)==nil and next(render.Listeners)==nil)
     end
     mask.Begin();mask.Destroy();assert(next(render.Listeners)==nil)
+    local approved=false
+    local scoped=assert(loadstring(source))()({Root=root,Render=render,Match=function(candidate)return candidate==modal and approved end})
+    scoped.Begin()
+    assert(modal.ImageTransparency==.3 and button.TextTransparency==.4,"A different or unconfirmed dialog must remain visible")
+    approved=true;render:Fire()
+    assert(button.TextTransparency==1,"Apply masking after the matching native prompt finishes mounting")
+    scoped.End();assert(button.TextTransparency==.4 and next(render.Listeners)==nil)
     function root:QueryDescendants()error("unsupported")end
     assert(not pcall(mask.Begin)and next(added.Listeners)==nil,"Initialization failure must release listeners")
     print("PASS Hidden block dialog: scoped transparency, active hit targets, late UI, animation suppression, restore, repeated cleanup and errors")

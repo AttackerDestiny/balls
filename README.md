@@ -108,7 +108,9 @@ At startup, the floor runtime holds the character at the current X/Z and detecte
 
 Selecting **The Between** from elsewhere waits for you to enter through a room. Inside The Between, Safe Mode protects the current server. When an unlisted player is present, it confirms the block, kicks the local account, and then requests a rejoin to The Between without a teleport-pad detour.
 
-Native block confirmations run with the blocking modal's visuals transparent while its controls remain active. The script still requires Roblox's blocked-user acknowledgment before rejoining or moderator disconnects. Only the blocking modal is masked, and visual properties/listeners are restored after each attempt or shutdown. This approach was live-tested on the connected desktop executor; other executors still need device-specific verification.
+Native block confirmations run with the recognized target's modal visuals transparent while its controls remain active. The script still requires Roblox's blocked-user acknowledgment before rejoining or moderator disconnects. Visual properties/listeners are restored after each attempt or shutdown. Unrelated or unrecognized dialogs remain visible and are never clicked.
+
+On Delta Android, the adapter accepts the native vertical and horizontal block-button orders, checks visibility through the entire modal hierarchy, and waits for partially mounted buttons. A recognized different-target dialog causes a bounded wait and Safe Mode retries after it closes; genuinely unsupported layouts stay paused. Native Roblox UI code and isolated real-instance fixtures were checked on VanguardSlasher. No real blocks or kicks were performed to test this change; an end-to-end block/rejoin on the new version remains unverified.
 
 **Whitelist** accepts usernames or user IDs separated by spaces, commas, or lines. Entries are normalized and deduplicated. Use usernames, not display names. **Auto Trade uses this same whitelist.**
 

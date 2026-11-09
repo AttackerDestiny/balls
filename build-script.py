@@ -74,6 +74,7 @@ MODULES = {
     "FARM NOCLIP": "farm-noclip.module.luau",
     "BLOCK CONFIRM": "block-confirm.module.luau",
     "BLOCK INPUT": "block-input.module.luau",
+    "BLOCK PROMPT": "block-prompt.module.luau",
     "STORAGE BOOTSTRAP": "storage-bootstrap.module.luau",
     "RUNTIME OWNER": "runtime-owner.module.luau",
     "LOBBY PLAY": "lobby-play.module.luau",

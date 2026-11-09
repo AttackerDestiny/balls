@@ -27,15 +27,21 @@ return function(ctx)
         for object,saved in pairs(active.Saved)do
             if object.Parent then for property,value in pairs(saved)do pcall(function()object[property]=value end)end end
         end
-        table.clear(active.Saved);table.clear(active.Modals);table.clear(active.Connections)
+        table.clear(active.Saved);table.clear(active.Modals);table.clear(active.Candidates);table.clear(active.Connections)
     end
     function api.Begin()
         api.End()
-        local active={Saved={},Modals={},Connections={}}
+        local active={Saved={},Modals={},Candidates={},Connections={},NextMatch=0}
         session=active
         local function discover(object)
             if session~=active then return end
             if object.Name=="BlockingModal"and object:IsA("GuiObject")then
+                active.Candidates[object]=true
+                if ctx.Match then
+                    local ok,matches=pcall(ctx.Match,object)
+                    if not ok or not matches then return end
+                end
+                if active.Modals[object]then return end
                 active.Modals[object]=true;overlay(active,object)
                 for _,child in ipairs(object:QueryDescendants("GuiObject, UIStroke"))do overlay(active,child)end
                 return
@@ -50,6 +56,14 @@ return function(ctx)
             active.Connections[1]=ctx.Root.DescendantAdded:Connect(discover)
             for _,modal in ipairs(ctx.Root:QueryDescendants("#BlockingModal"))do discover(modal)end
             active.Connections[2]=ctx.Render:Connect(function()
+                local now=os.clock()
+                if now>=active.NextMatch then
+                    active.NextMatch=now+.1
+                    for modal in pairs(active.Candidates)do
+                        if not modal.Parent then active.Candidates[modal]=nil
+                        elseif not active.Modals[modal]then discover(modal)end
+                    end
+                end
                 for object,saved in pairs(active.Saved)do
                     if object.Parent then for property in pairs(saved)do object[property]=1 end
                     else active.Saved[object]=nil;active.Modals[object]=nil end

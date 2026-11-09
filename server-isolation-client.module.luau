@@ -142,32 +142,8 @@ return function(ctx)
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
-    local function findPrompt(target)
-        local core=game:GetService("CoreGui")
-        assert(core,"The search worker cannot access Roblox's block dialog")
-        for _,overlay in ipairs(core:GetChildren())do
-            if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
-                for _,title in ipairs(overlay:QueryDescendants("TextLabel"))do
-                    if title.Name=="Title"and title.Visible then
-                        local contents=title.Parent and title.Parent.Parent and title.Parent.Parent.Parent
-                        local modal=contents and contents.Parent
-                        if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
-                            and modal.Parent and modal.Parent.Name=="BlockingModal"then
-                            local footer=contents:FindFirstChild("Footer")
-                            local buttons=footer and footer:FindFirstChild("Buttons")
-                            local confirm=buttons and buttons:FindFirstChild("3")
-                            local cancel=buttons and buttons:FindFirstChild("1")
-                            local report=buttons and buttons:FindFirstChild("2")
-                            local matches=title.Text:find(target.DisplayName,1,true)or title.Text:find(target.Name,1,true)
-                            local supported=confirm and cancel and report and confirm:IsA("GuiButton")
-                                and confirm.LayoutOrder==0 and cancel.LayoutOrder==2 and report.LayoutOrder==1
-                            assert(matches and supported,"Another or unsupported Roblox block dialog is open")
-                            return confirm,cancel
-                        end
-                    end
-                end
-            end
-        end
+    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui")})or function()
+        error("Native block dialog recognition is unavailable; no rejoin attempted")
     end
     local touchId=0
     local function click(button,attempt)
@@ -231,7 +207,13 @@ return function(ctx)
             Settle=function()return 0 end})
     end
     local blockBusy=false
-    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender})
+    local maskTarget
+    local blockMask=ctx.MakeBlockMask and ctx.MakeBlockMask({Root=game:GetService("CoreGui"),Render=game:GetService("RunService").PreRender,
+        Match=function(modal)
+            if not maskTarget then return false end
+            local button=findPrompt(maskTarget)
+            return button~=nil and button:IsDescendantOf(modal)
+        end})
     state.BlockDialogMask=blockMask
     local function performBlock(target,active)
         local expires=os.clock()+10
@@ -242,6 +224,7 @@ return function(ctx)
             task.wait(.04)
         until false
         blockBusy=true
+        maskTarget=target
         local sent,result=pcall(function()
             if blockMask then blockMask.Begin()end
             return block(target,active)
@@ -252,6 +235,7 @@ return function(ctx)
             local restored,reason=pcall(blockMask.End)
             if not restored then state.LastBlockMaskError=tostring(reason)end
         end
+        maskTarget=nil
         blockBusy=false
         if not sent then error(result)end
         return result==true

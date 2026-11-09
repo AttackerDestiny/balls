@@ -6,7 +6,10 @@ return function(source)
         local f={Now=0,Visible=false,Active=true,Clicks=0,Cancels=0,Prompts=0,ReadyAt=0,ConfirmAt=math.huge}
         local button,cancel={},{}
         f.Run=make({Now=function()return f.Now end,
-            Find=function()if f.Visible then return button,cancel end end,
+            Find=function()
+                if f.Pending then return nil,nil,f.Pending end
+                if f.Visible then return button,cancel end
+            end,
             Prompt=function()f.Prompts+=1;f.Visible=true end,
             Ready=function()return f.Now>=f.ReadyAt end,
             Key=function()return f.MovingUntil and f.Now<f.MovingUntil and tostring(f.Now)or"settled"end,
@@ -44,6 +47,27 @@ return function(source)
     test("An existing confirmed native block needs no redundant click",function()
         local f=fixture();f.Visible=true;f.ConfirmAt=0
         assert(f.Run({},f.Live)and f.Prompts==0 and f.Clicks==0)
+    end)
+    test("A different-target modal waits without prompting or clicking, then recovers after it closes",function()
+        local f=fixture();f.Pending="Busy"
+        f.OnStep=function(v)
+            assert(v.Now>=.4 or v.Prompts==0 and v.Clicks==0,"Do not replace or click another player's prompt")
+            if v.Now>=.4 then v.Pending=nil end
+        end
+        f.OnClick=function(v)v.ConfirmAt=v.Now;v.Visible=false end
+        assert(f.Run({},f.Live)and f.Prompts==1 and f.Clicks==1 and f.Now>=.4)
+    end)
+    test("A persistent dialog conflict times out without touching the unrelated prompt",function()
+        local f=fixture();f.Pending="Busy"
+        local ok,reason=pcall(f.Run,{},f.Live)
+        assert(not ok and tostring(reason):find("Another Roblox block dialog is open",1,true)
+            and f.Prompts==0 and f.Clicks==0 and f.Cancels==0)
+    end)
+    test("A partially mounted matching dialog is not opened twice",function()
+        local f=fixture();f.Pending="Loading"
+        f.OnStep=function(v)if v.Now>=.2 then v.Pending=nil;v.Visible=true end end
+        f.OnClick=function(v)v.ConfirmAt=v.Now;v.Visible=false end
+        assert(f.Run({},f.Live)and f.Prompts==0 and f.Clicks==1)
     end)
     test("Authoritative block acknowledgment can return on its first observation",function()
         local now,clicks,confirmAt=0,0,math.huge
