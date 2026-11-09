@@ -144,6 +144,8 @@ Timers begin at the observed boss death, not at arrival or after clearing adds. 
 
 While Multi Spot is ON, Auto Farm targets encounters selected in Saved Spot, plus normal adds inside those selected arenas. Unselected bosses cannot interrupt, even if they have higher priority; deselecting an encounter releases its old target lock. Empty current-floor selections do not fall back to global farming. Loaded chests are the loot exception described below. Custom saved spots accept nearby enemies. Account Progression retains its own boss restriction.
 
+Ordinary mobs observed in the current selected arena remain eligible if they chase beyond its initial 220-stud radius. Their membership is tied to that encounter and ends when it is deselected or replaced. The remaining-mob counter uses the same named-encounter policy, so nearby unselected bosses cannot keep it artificially above zero. Loading, invulnerability and temporary retry waits are shown in the counter; missing data does not prove a kill. Spawn-side movement waits identify the character, protection, combat or travel condition being awaited.
+
 Within the selected encounters, higher-priority loaded enemies can interrupt lower-priority fights: main boss → mini-boss → regular mob. Same-rank fights remain locked. An active complete Credit Check group converges on a common eligible boss order, overriding conflicting locks to avoid split-group credit deadlocks. With Boss Only OFF, remaining arena mobs must still be cleared before normal arena rotation leaves; selected boss priority can temporarily interrupt that clearing. With Boss Only ON, ordinary adds are excluded.
 
 After five seconds without a target, empty arenas can return to their selected anchor. Travel failures automatically retry with increasing cooldowns capped at 60 seconds; success clears the backoff. Explicit protection/controller pauses are separate from travel-retry cooldowns.
@@ -218,6 +220,8 @@ This gates local scripted hits. It cannot undo in-flight damage, split a single 
 ## Waves Defense
 
 Use **Create Room** to add a numbered setup with **Host**, **Alt**, **Difficulty**, **Mode**, and **Start**. Paste up to seven Alt usernames or IDs and Feather formats them with commas and spaces. Enable the same room setup on the assigned accounts in the same server. The host creates and configures the room, then starts after every listed Alt joins. An empty Alt list starts a solo room. The game's access rules still apply. A failed start pauses that setup until you toggle **Start** again.
+
+The native party limit is eight accounts total: one Host and seven Alts. Repeating the host in Alt is ignored when resolving the assignment. Too many alts, malformed assignments or conflicting enabled rooms show a warning under the affected **Start** toggle; the roster is never silently truncated. Correcting the setup clears its warning without restarting the script.
 
 While **Start** is ON, each Alt continuously searches for its configured Host's room and attempts to join every three seconds until native party membership is confirmed. This does not wait for a wipe, Wave 100, or the Alt's Auto Retry setting. If the host replaces the room or membership is lost, joining resumes automatically. Start OFF, Stop Everything, teleport and active Safe Mode recovery pause the loop. Update/reload the script on each Alt to use this behavior.
 

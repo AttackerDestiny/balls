@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-08.delta-input-coordinate-spaces-v3.0.34"
-local VERSION="3.0.34"
+local BUILD="2026-11-09.arena-membership-room-validation-v3.0.35"
+local VERSION="3.0.35"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

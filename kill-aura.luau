@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-08.delta-input-coordinate-spaces-v3.0.34"
-local VERSION="3.0.34"
+local BUILD="2026-11-09.arena-membership-room-validation-v3.0.35"
+local VERSION="3.0.35"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2894,21 +2894,28 @@ end
 local selectedFarmSpot=(function()
 -- BEGIN BUNDLED SELECTED FARM SPOTS
 -- Selected encounters are an admission policy, independent of local target locks.
-return function(state,mobName,point,priority,place)
-    if state.AccountProgression or not state.MultiSpot then return true end
+return function(state,mobName,point,priority,place,onlySpot)
+    if not onlySpot and (state.AccountProgression or not state.MultiSpot)then return true end
+    local canonical=tostring(mobName):lower():gsub("[^%w]","")
+    local function belongs(entry)
+        if entry.EncounterNames then
+            for name in pairs(entry.EncounterNames)do if name:lower():gsub("[^%w]","")==canonical then return true end end
+            if priority<=2 then return false end
+        end
+        if point and entry.Position then
+            local squared=0
+            for _,axis in ipairs({"X","Y","Z"})do local delta=point[axis]-entry.Position[axis];squared+=delta*delta end
+            if squared<=48400 then return true end
+        end
+        return false
+    end
+    if onlySpot then return (onlySpot.PlaceId==nil or onlySpot.PlaceId==place)and belongs(onlySpot)end
     local catalog=state.AutomationCatalog
     if not catalog then return false end
-    local canonical=tostring(mobName):lower():gsub("[^%w]","")
     for id,enabled in pairs(state.MultiSpotSelected or {})do
         local entry=enabled and catalog.SpotById[id]
         if entry and entry.PlaceId==place then
-            if entry.EncounterNames and priority<=2 then
-                for name in pairs(entry.EncounterNames)do if name:lower():gsub("[^%w]","")==canonical then return true end end
-            elseif point and entry.Position then
-                local squared=0
-                for _,axis in ipairs({"X","Y","Z"})do local delta=point[axis]-entry.Position[axis];squared+=delta*delta end
-                if squared<=48400 then return true end
-            end
+            if belongs(entry)then return true end
         end
     end
     return false
@@ -2920,7 +2927,13 @@ function state.IsSelectedFarmMob(mob,data)
     if targetPriority.IsChest(mob)then return true end
     if not state.MultiSpot or state.AccountProgression then return true end
     local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-    return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
+    local rank=targetPriority.Rank(mob)
+    if selectedFarmSpot(state,mob.Name,root and root.Position,rank,game.PlaceId)then return true end
+    local scope=state.MultiSpotEncounterScope
+    local retained=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+    local entry=scope and state.AutomationCatalog and state.AutomationCatalog.SpotById[scope.Id]
+    return rank>2 and retained==true and entry~=nil and entry.PlaceId==game.PlaceId
+        and state.MultiSpotSelected[scope.Id]==true and state.MultiSpotAnchor==scope.Position or false
 end
 local function validMob(mob, mobs,selection)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
@@ -5066,7 +5079,10 @@ end)
 state.FloorName = floorName
 function state.ReadAutomationEncounter(spot)
     local remembered=state.MultiSpotEncounter or {}
+    local scope=state.MultiSpotEncounterScope
+    if scope and (scope.Id~=spot.Id or scope.PlaceId~=spot.PlaceId)then remembered={}end
     state.MultiSpotEncounter=remembered
+    state.MultiSpotEncounterScope=spot
     local now=os.clock()
     local function eligible(mob)return not state.BossOnly or targetPriority.Rank(mob)<=2 end
     local function living(data)return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)end
@@ -5076,7 +5092,7 @@ function state.ReadAutomationEncounter(spot)
             if mob.Parent and eligible(mob)then
                 local data=getMobData(mob)
                 local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-                local belongs=root and ((spot.EncounterNames and spot.EncounterNames[mob.Name])or (root.Position-spot.Position).Magnitude<=220)
+                local belongs=root and selectedFarmSpot(state,mob.Name,root.Position,targetPriority.Rank(mob),game.PlaceId,spot)
                 if belongs and living(data)then remembered[mob]=true end
                 if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1)end
             end
@@ -5084,22 +5100,35 @@ function state.ReadAutomationEncounter(spot)
     end
     local function summarize()
         local count,seen=0,false
+        local waiting={Loading=0,Invulnerable=0,Retry=0}
         for mob in pairs(remembered)do
             if not mob.Parent then remembered[mob]=nil;seen=true
             elseif eligible(mob)then
-                seen=true
-                if living(getMobData(mob))then count+=1 else remembered[mob]=nil end
+                local data=getMobData(mob)
+                local rank=targetPriority.Rank(mob)
+                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+                local admitted=rank>2 or selectedFarmSpot(state,mob.Name,root and root.Position,rank,game.PlaceId,spot)
+                if not admitted then remembered[mob]=nil
+                else
+                    seen=true
+                    if living(data)then
+                        count+=1
+                        if not data then waiting.Loading+=1
+                        elseif data.Entity:FindFirstChild("Immortal")then waiting.Invulnerable+=1
+                        elseif now<(data.SkipUntil or 0)then waiting.Retry+=1 end
+                    else remembered[mob]=nil end
+                end
             end
         end
-        return count,seen
+        return count,seen,waiting
     end
     local refreshed=now>=(state.MultiSpotNextScan or 0)
     if refreshed then collect()end
-    local alive,observed=summarize()
+    local alive,observed,waiting=summarize()
     if alive==0 and not refreshed then
-        collect();local count,seen=summarize();alive=count;observed=observed or seen
+        collect();local count,seen,pending=summarize();alive=count;observed=observed or seen;waiting=pending
     end
-    return alive,observed
+    return alive,observed,waiting
 end
 
 do
@@ -7844,6 +7873,11 @@ return function(ctx)
     local function departureReady()
         return not ctx.DepartureReady or ctx.DepartureReady()
     end
+    local function canMove()
+        local allowed,reason=ctx.CanMove()
+        if not allowed then ctx.Status(reason or "Waiting for character, protection or current movement")end
+        return allowed
+    end
     local function go(spot,now,resume)
         if not resume then
             ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
@@ -7856,14 +7890,22 @@ return function(ctx)
         return true
     end
     local function observe()
-        local alive,seen=ctx.Encounter(api.Current)
+        local alive,seen,waiting=ctx.Encounter(api.Current)
         api.Remaining=alive
+        api.Waiting=waiting
         api.EncounterSeen=api.EncounterSeen or seen or alive>0
         return alive
     end
     local function holdLiving()
         clearingAt=nil;api.WaitingSince=nil;api.CurrentCleared=false;api.Phase="Clearing arena"
-        ctx.Status(api.Current.Name.." · "..api.Remaining.." mobs remaining")
+        local message=api.Current.Name.." · "..api.Remaining.." mobs remaining"
+        local waiting=api.Waiting
+        if waiting then
+            if waiting.Loading>0 then message=message.." · "..waiting.Loading.." waiting to load"end
+            if waiting.Invulnerable>0 then message=message.." · "..waiting.Invulnerable.." invulnerable"end
+            if waiting.Retry>0 then message=message.." · "..waiting.Retry.." waiting to retry"end
+        end
+        ctx.Status(message)
     end
     local function finishRound(now)
         clearingAt=clearingAt or now
@@ -7938,7 +7980,7 @@ return function(ctx)
             return true
         end
         if not api.PrioritySuspended then return false end
-        if not ctx.CanMove()or not departureReady()then return true end
+        if not canMove()or not departureReady()then return true end
         api.PrioritySuspended=false
         if ctx.Resume then ctx.Resume()end
         local resume
@@ -7984,16 +8026,16 @@ return function(ctx)
         if priority(now)then return end
         if api.Phase=="Retrying travel"then
             if now<retry.due then ctx.Status("Retrying arena in "..math.max(1,math.ceil(retry.due-now)).."s · "..tostring(api.LastError));return end
-            if not ctx.CanMove()then return end
+            if not canMove()then return end
             api.Current=nil;api.Phase="Idle"
         end
-        if not completeTravel(now)or not ctx.CanMove()then return end
+        if not completeTravel(now)or not canMove()then return end
         local options=selected()
         if #options==0 then ctx.Status(state.SafeMode and "Select arenas on the Safe Mode floor"or "Select at least one arena");return end
         if ctx.Respawns then api.UpdateTimed(now,options)else nextUntimed(options,now)end
     end
     function api.Reset()
-        api.Current=nil;api.Phase="Idle";api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil
+        api.Current=nil;api.Phase="Idle";api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.Waiting=nil
         api.LastVisits={};api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil
         retry={count=0,due=0};clearingAt=nil;ctx.Release()
     end
@@ -8761,15 +8803,27 @@ end
         end,
         Resume=function()state.MultiSpotPriorityActive=false end,CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false end
-            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
-            if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
+            if state.Running==false or state.StopEverything then return false,"Paused · Stop Everything or runtime stopped"end
+            if not state.AutoFarm then return false,"Enable Auto Farm to travel to selected arenas"end
+            if state.AccountProgression then return false,"Waiting · Account Progression owns travel"end
+            if state.ModeratorBlocking then return false,"Waiting · moderator protection"end
+            if state.AutoTradeBusy then return false,"Waiting · trading"end
+            if state.AutomationTeleporting then return false,"Waiting · floor teleport"end
+            if state.SafeModePanic or api.Active or state.SafeMode and safe.Seeking then return false,"Waiting · "..tostring(state.SafeModeStatus or "Safe Mode protection")end
+            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false,"Waiting · Atheon portal"end
+            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then
+                local target=state.FarmTargetLock or state.FollowTarget
+                return false,"Finishing current enemy"..(target and " · "..target.Name or "")
+            end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-            return not(state.AutomationTeleporting or state.SafeModePanic or api.Active or state.SafeMode and safe.Seeking
-                or state.TravelBusy or state.Dodging or state.Recovering)
+            if not root or not humanoid or humanoid.Health<=0 then return false,"Waiting for a living character to load"end
+            if root.Anchored then return false,"Waiting · character is anchored"end
+            if state.TravelBusy then return false,"Waiting · current movement"end
+            if state.Dodging then return false,"Waiting · dodging"end
+            if state.Recovering then return false,"Waiting · recovery"end
+            return true
         end,
         Moving=function()return state.TravelBusy end,
         Arrived=function(spot)
@@ -8788,12 +8842,12 @@ end
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
         Encounter=function(spot)return state.ReadAutomationEncounter(spot)end,
-        ClearEncounter=function()state.MultiSpotEncounter={};state.MultiSpotNextScan=0 end,
+        ClearEncounter=function()state.MultiSpotEncounter={};state.MultiSpotEncounterScope=nil;state.MultiSpotNextScan=0 end,
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release()end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
             state.MultiSpotPriorityActive=false;state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false
-            state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
+            state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotEncounterScope=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false;state.MultiSpotLandingPosition=nil
         end,Status=function(message)state.MultiSpotStatus=message end,Save=state.SaveNow})
     state.MultiSpotController=multi
@@ -11427,36 +11481,51 @@ end
     local function updateAssignment()
         assignment=nil
         state.AutoCreateBetween=false
-        for _,entry in ipairs(rooms)do
+        state.BetweenRoomErrors={}
+        local assignedIndex
+        for roomIndex,entry in ipairs(rooms)do
             if not entry.Start then continue end
             local host=hostName(entry)
+            local hostPlayer=host and findPlayer(host)
+            local isHost=host and matches(player,host)
             local alts,seen={},{}
             local isAlt,invalid=false,false
             for token in entry.Alt:gmatch("[^,%s;]+")do
                 local name=token:gsub("^@","")
                 local key=name:lower()
-                if not name:match("^[%w_]+$") or #name>20 then invalid=true
+                local repeatsHost=host and name:lower()==host:lower()or hostPlayer and matches(hostPlayer,name)
+                if repeatsHost then continue
+                elseif not name:match("^[%w_]+$") or #name>20 then invalid=true
                 elseif not seen[key] then
                     seen[key]=true
                     alts[#alts+1]=name
                     if matches(player,name) then isAlt=true end
                 end
             end
-            local isHost=host and matches(player,host)
             if isHost or isAlt then
-                if assignment or (isHost and isAlt) then
+                if assignment then
                     assignment={Role="Invalid",Message="This account has conflicting room assignments"}
+                    state.BetweenRoomErrors[roomIndex]=assignment.Message
+                    if assignedIndex then state.BetweenRoomErrors[assignedIndex]=assignment.Message end
                     break
                 end
-                if invalid or not host or #host>20 or #alts>7 then
+                assignedIndex=roomIndex
+                if #alts>7 then
+                    assignment={Role="Invalid",Message="Room "..roomIndex..": "..#alts.." alts configured; The Between supports at most 7"}
+                elseif invalid or not host or #host>20 then
                     assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
                 else
                     assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts,Room=entry}
                 end
+                if assignment.Role=="Invalid"then state.BetweenRoomErrors[roomIndex]=assignment.Message end
             end
         end
         assignment=assignment or {Role="Unassigned"}
         state.AutoCreateBetween=assignment.Room~=nil
+        local previousError=state.BetweenRoomError
+        state.BetweenRoomError=assignment.Role=="Invalid"and assignment.Message or nil
+        if state.BetweenRoomError then state.BetweenRoomStatus=state.BetweenRoomError
+        elseif previousError then state.BetweenRoomStatus="Checking configured room"end
         state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()
@@ -29246,6 +29315,7 @@ return function(ctx)
         if kind=="Section"then api.Controls[key]=tabObject:Section({Title=definition.Title,TextSize=17});return end
         local projection={Definition=definition,Tab=tab}
         local options={Title=definition.Title,Desc=definition.Desc}
+        if definition.DescRead then projection.Desc=definition.DescRead()or "";options.Desc=projection.Desc end
         if kind=="Button"then options.Callback=safe(definition.Action)
         elseif kind=="Paragraph"then projection.Text=tostring(definition.Read()or "");options.Desc=projection.Text
         elseif kind=="Toggle"then
@@ -29443,6 +29513,7 @@ return function(ctx)
                 return {Options={"Private","Friends","Game Party"},Value=entry().Mode}
             end,function(value)action("SetBetweenRoomField",index,"Mode",value)end)
             fields.Start=register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
+                DescRead=function()return state.BetweenRoomErrors and state.BetweenRoomErrors[index]end,
                 Read=function()return entry().Start==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
             fields.AutoRetry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
@@ -29590,6 +29661,10 @@ return function(ctx)
     end
     function synchronize(projection,choices)
         local definition=projection.Definition
+        if definition.DescRead then
+            local desc=definition.DescRead()or ""
+            if desc~=projection.Desc then projection.Desc=desc;projection.Control:SetDesc(desc)end
+        end
         if definition.Kind=="Toggle"then
             local value=definition.Read();if value~=projection.Value then projection.Value=value;projection.Control:Set(value,false)end
         elseif definition.Kind=="Paragraph"then

@@ -467,15 +467,27 @@ end
         end,
         Resume=function()state.MultiSpotPriorityActive=false end,CurrentFloor=function()return game.PlaceId end,ChangeFloor=state.ChangeAutomationFloor,
         CanMove=function()
-            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false end
-            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then return false end
-            if not state.AutoFarm or state.AutoTradeBusy or state.AccountProgression or state.ModeratorBlocking then return false end
+            if state.Running==false or state.StopEverything then return false,"Paused · Stop Everything or runtime stopped"end
+            if not state.AutoFarm then return false,"Enable Auto Farm to travel to selected arenas"end
+            if state.AccountProgression then return false,"Waiting · Account Progression owns travel"end
+            if state.ModeratorBlocking then return false,"Waiting · moderator protection"end
+            if state.AutoTradeBusy then return false,"Waiting · trading"end
+            if state.AutomationTeleporting then return false,"Waiting · floor teleport"end
+            if state.SafeModePanic or api.Active or state.SafeMode and safe.Seeking then return false,"Waiting · "..tostring(state.SafeModeStatus or "Safe Mode protection")end
+            if os.clock()<(state.AtheonUnlockPauseUntil or 0)then return false,"Waiting · Atheon portal"end
+            if state.IsFarmEnemyAlive and state.IsFarmEnemyAlive()then
+                local target=state.FarmTargetLock or state.FollowTarget
+                return false,"Finishing current enemy"..(target and " · "..target.Name or "")
+            end
             local character=player.Character
             local root=character and character:FindFirstChild("HumanoidRootPart")
             local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-            if not root or root.Anchored or not humanoid or humanoid.Health<=0 then return false end
-            return not(state.AutomationTeleporting or state.SafeModePanic or api.Active or state.SafeMode and safe.Seeking
-                or state.TravelBusy or state.Dodging or state.Recovering)
+            if not root or not humanoid or humanoid.Health<=0 then return false,"Waiting for a living character to load"end
+            if root.Anchored then return false,"Waiting · character is anchored"end
+            if state.TravelBusy then return false,"Waiting · current movement"end
+            if state.Dodging then return false,"Waiting · dodging"end
+            if state.Recovering then return false,"Waiting · recovery"end
+            return true
         end,
         Moving=function()return state.TravelBusy end,
         Arrived=function(spot)
@@ -494,12 +506,12 @@ end
             return state.TeleportToDestination(spot.DestinationId,false,true)
         end,
         Encounter=function(spot)return state.ReadAutomationEncounter(spot)end,
-        ClearEncounter=function()state.MultiSpotEncounter={};state.MultiSpotNextScan=0 end,
+        ClearEncounter=function()state.MultiSpotEncounter={};state.MultiSpotEncounterScope=nil;state.MultiSpotNextScan=0 end,
         Release=function()
             if state.ArenaFloat then state.ArenaFloat.Release()end
             if state.MultiSpotOwnsTravel and state.TravelBusy then state.TravelSerial=(state.TravelSerial or 0)+1;state.TravelBusy=false end
             state.MultiSpotPriorityActive=false;state.MultiSpotEmptySince=nil;state.MultiSpotOwnsTravel=false
-            state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotNextScan=0
+            state.MultiSpotAnchor=nil;state.MultiSpotEncounter=nil;state.MultiSpotEncounterScope=nil;state.MultiSpotNextScan=0
             state.MultiSpotTravelPending=false;state.MultiSpotLandingPosition=nil
         end,Status=function(message)state.MultiSpotStatus=message end,Save=state.SaveNow})
     state.MultiSpotController=multi

@@ -308,7 +308,13 @@ function state.IsSelectedFarmMob(mob,data)
     if targetPriority.IsChest(mob)then return true end
     if not state.MultiSpot or state.AccountProgression then return true end
     local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-    return selectedFarmSpot(state,mob.Name,root and root.Position,targetPriority.Rank(mob),game.PlaceId)
+    local rank=targetPriority.Rank(mob)
+    if selectedFarmSpot(state,mob.Name,root and root.Position,rank,game.PlaceId)then return true end
+    local scope=state.MultiSpotEncounterScope
+    local retained=state.MultiSpotEncounter and state.MultiSpotEncounter[mob]
+    local entry=scope and state.AutomationCatalog and state.AutomationCatalog.SpotById[scope.Id]
+    return rank>2 and retained==true and entry~=nil and entry.PlaceId==game.PlaceId
+        and state.MultiSpotSelected[scope.Id]==true and state.MultiSpotAnchor==scope.Position or false
 end
 local function validMob(mob, mobs,selection)
     if state.ModeratorBlocking or state.AutoTradeBusy or not mob or mob.Parent~=mobs then return nil end
@@ -926,7 +932,10 @@ end)
 state.FloorName = floorName
 function state.ReadAutomationEncounter(spot)
     local remembered=state.MultiSpotEncounter or {}
+    local scope=state.MultiSpotEncounterScope
+    if scope and (scope.Id~=spot.Id or scope.PlaceId~=spot.PlaceId)then remembered={}end
     state.MultiSpotEncounter=remembered
+    state.MultiSpotEncounterScope=spot
     local now=os.clock()
     local function eligible(mob)return not state.BossOnly or targetPriority.Rank(mob)<=2 end
     local function living(data)return not data or data.Health.Value>0 and (not data.HitLives or data.HitLives.Value>0)end
@@ -936,7 +945,7 @@ function state.ReadAutomationEncounter(spot)
             if mob.Parent and eligible(mob)then
                 local data=getMobData(mob)
                 local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
-                local belongs=root and ((spot.EncounterNames and spot.EncounterNames[mob.Name])or (root.Position-spot.Position).Magnitude<=220)
+                local belongs=root and selectedFarmSpot(state,mob.Name,root.Position,targetPriority.Rank(mob),game.PlaceId,spot)
                 if belongs and living(data)then remembered[mob]=true end
                 if not data then state.MultiSpotNextScan=math.min(state.MultiSpotNextScan,now+.1)end
             end
@@ -944,22 +953,35 @@ function state.ReadAutomationEncounter(spot)
     end
     local function summarize()
         local count,seen=0,false
+        local waiting={Loading=0,Invulnerable=0,Retry=0}
         for mob in pairs(remembered)do
             if not mob.Parent then remembered[mob]=nil;seen=true
             elseif eligible(mob)then
-                seen=true
-                if living(getMobData(mob))then count+=1 else remembered[mob]=nil end
+                local data=getMobData(mob)
+                local rank=targetPriority.Rank(mob)
+                local root=data and data.Root or mob:FindFirstChild("HumanoidRootPart")or mob.PrimaryPart or mob:FindFirstChild("RootPart")
+                local admitted=rank>2 or selectedFarmSpot(state,mob.Name,root and root.Position,rank,game.PlaceId,spot)
+                if not admitted then remembered[mob]=nil
+                else
+                    seen=true
+                    if living(data)then
+                        count+=1
+                        if not data then waiting.Loading+=1
+                        elseif data.Entity:FindFirstChild("Immortal")then waiting.Invulnerable+=1
+                        elseif now<(data.SkipUntil or 0)then waiting.Retry+=1 end
+                    else remembered[mob]=nil end
+                end
             end
         end
-        return count,seen
+        return count,seen,waiting
     end
     local refreshed=now>=(state.MultiSpotNextScan or 0)
     if refreshed then collect()end
-    local alive,observed=summarize()
+    local alive,observed,waiting=summarize()
     if alive==0 and not refreshed then
-        collect();local count,seen=summarize();alive=count;observed=observed or seen
+        collect();local count,seen,pending=summarize();alive=count;observed=observed or seen;waiting=pending
     end
-    return alive,observed
+    return alive,observed,waiting
 end
 
 do

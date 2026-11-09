@@ -626,36 +626,51 @@ local function installBetweenAutomation()
     local function updateAssignment()
         assignment=nil
         state.AutoCreateBetween=false
-        for _,entry in ipairs(rooms)do
+        state.BetweenRoomErrors={}
+        local assignedIndex
+        for roomIndex,entry in ipairs(rooms)do
             if not entry.Start then continue end
             local host=hostName(entry)
+            local hostPlayer=host and findPlayer(host)
+            local isHost=host and matches(player,host)
             local alts,seen={},{}
             local isAlt,invalid=false,false
             for token in entry.Alt:gmatch("[^,%s;]+")do
                 local name=token:gsub("^@","")
                 local key=name:lower()
-                if not name:match("^[%w_]+$") or #name>20 then invalid=true
+                local repeatsHost=host and name:lower()==host:lower()or hostPlayer and matches(hostPlayer,name)
+                if repeatsHost then continue
+                elseif not name:match("^[%w_]+$") or #name>20 then invalid=true
                 elseif not seen[key] then
                     seen[key]=true
                     alts[#alts+1]=name
                     if matches(player,name) then isAlt=true end
                 end
             end
-            local isHost=host and matches(player,host)
             if isHost or isAlt then
-                if assignment or (isHost and isAlt) then
+                if assignment then
                     assignment={Role="Invalid",Message="This account has conflicting room assignments"}
+                    state.BetweenRoomErrors[roomIndex]=assignment.Message
+                    if assignedIndex then state.BetweenRoomErrors[assignedIndex]=assignment.Message end
                     break
                 end
-                if invalid or not host or #host>20 or #alts>7 then
+                assignedIndex=roomIndex
+                if #alts>7 then
+                    assignment={Role="Invalid",Message="Room "..roomIndex..": "..#alts.." alts configured; The Between supports at most 7"}
+                elseif invalid or not host or #host>20 then
                     assignment={Role="Invalid",Message="Enter one Host and up to seven Alt usernames or user IDs"}
                 else
                     assignment={Role=isHost and "Host" or "Alt",Host=host,Alts=alts,Room=entry}
                 end
+                if assignment.Role=="Invalid"then state.BetweenRoomErrors[roomIndex]=assignment.Message end
             end
         end
         assignment=assignment or {Role="Unassigned"}
         state.AutoCreateBetween=assignment.Room~=nil
+        local previousError=state.BetweenRoomError
+        state.BetweenRoomError=assignment.Role=="Invalid"and assignment.Message or nil
+        if state.BetweenRoomError then state.BetweenRoomStatus=state.BetweenRoomError
+        elseif previousError then state.BetweenRoomStatus="Checking configured room"end
         state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
     end
     updateAssignment()

@@ -169,6 +169,7 @@ return function(ctx)
         if kind=="Section"then api.Controls[key]=tabObject:Section({Title=definition.Title,TextSize=17});return end
         local projection={Definition=definition,Tab=tab}
         local options={Title=definition.Title,Desc=definition.Desc}
+        if definition.DescRead then projection.Desc=definition.DescRead()or "";options.Desc=projection.Desc end
         if kind=="Button"then options.Callback=safe(definition.Action)
         elseif kind=="Paragraph"then projection.Text=tostring(definition.Read()or "");options.Desc=projection.Text
         elseif kind=="Toggle"then
@@ -366,6 +367,7 @@ return function(ctx)
                 return {Options={"Private","Friends","Game Party"},Value=entry().Mode}
             end,function(value)action("SetBetweenRoomField",index,"Mode",value)end)
             fields.Start=register(wavesTab,{Kind="Toggle",Key=key.."Start",Title="Start",
+                DescRead=function()return state.BetweenRoomErrors and state.BetweenRoomErrors[index]end,
                 Read=function()return entry().Start==true end,
                 Write=function(value)action("SetBetweenRoomField",index,"Start",value)end})
             fields.AutoRetry=register(wavesTab,{Kind="Toggle",Key=key.."AutoRetry",Title="Auto Retry",
@@ -513,6 +515,10 @@ return function(ctx)
     end
     function synchronize(projection,choices)
         local definition=projection.Definition
+        if definition.DescRead then
+            local desc=definition.DescRead()or ""
+            if desc~=projection.Desc then projection.Desc=desc;projection.Control:SetDesc(desc)end
+        end
         if definition.Kind=="Toggle"then
             local value=definition.Read();if value~=projection.Value then projection.Value=value;projection.Control:Set(value,false)end
         elseif definition.Kind=="Paragraph"then

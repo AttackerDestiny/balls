@@ -27,6 +27,11 @@ return function(ctx)
     local function departureReady()
         return not ctx.DepartureReady or ctx.DepartureReady()
     end
+    local function canMove()
+        local allowed,reason=ctx.CanMove()
+        if not allowed then ctx.Status(reason or "Waiting for character, protection or current movement")end
+        return allowed
+    end
     local function go(spot,now,resume)
         if not resume then
             ctx.Release();api.Current=spot;api.CurrentCleared=false;api.EncounterSeen=false;api.WaitingSince=nil
@@ -39,14 +44,22 @@ return function(ctx)
         return true
     end
     local function observe()
-        local alive,seen=ctx.Encounter(api.Current)
+        local alive,seen,waiting=ctx.Encounter(api.Current)
         api.Remaining=alive
+        api.Waiting=waiting
         api.EncounterSeen=api.EncounterSeen or seen or alive>0
         return alive
     end
     local function holdLiving()
         clearingAt=nil;api.WaitingSince=nil;api.CurrentCleared=false;api.Phase="Clearing arena"
-        ctx.Status(api.Current.Name.." · "..api.Remaining.." mobs remaining")
+        local message=api.Current.Name.." · "..api.Remaining.." mobs remaining"
+        local waiting=api.Waiting
+        if waiting then
+            if waiting.Loading>0 then message=message.." · "..waiting.Loading.." waiting to load"end
+            if waiting.Invulnerable>0 then message=message.." · "..waiting.Invulnerable.." invulnerable"end
+            if waiting.Retry>0 then message=message.." · "..waiting.Retry.." waiting to retry"end
+        end
+        ctx.Status(message)
     end
     local function finishRound(now)
         clearingAt=clearingAt or now
@@ -121,7 +134,7 @@ return function(ctx)
             return true
         end
         if not api.PrioritySuspended then return false end
-        if not ctx.CanMove()or not departureReady()then return true end
+        if not canMove()or not departureReady()then return true end
         api.PrioritySuspended=false
         if ctx.Resume then ctx.Resume()end
         local resume
@@ -167,16 +180,16 @@ return function(ctx)
         if priority(now)then return end
         if api.Phase=="Retrying travel"then
             if now<retry.due then ctx.Status("Retrying arena in "..math.max(1,math.ceil(retry.due-now)).."s · "..tostring(api.LastError));return end
-            if not ctx.CanMove()then return end
+            if not canMove()then return end
             api.Current=nil;api.Phase="Idle"
         end
-        if not completeTravel(now)or not ctx.CanMove()then return end
+        if not completeTravel(now)or not canMove()then return end
         local options=selected()
         if #options==0 then ctx.Status(state.SafeMode and "Select arenas on the Safe Mode floor"or "Select at least one arena");return end
         if ctx.Respawns then api.UpdateTimed(now,options)else nextUntimed(options,now)end
     end
     function api.Reset()
-        api.Current=nil;api.Phase="Idle";api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil
+        api.Current=nil;api.Phase="Idle";api.EncounterSeen=false;api.CurrentCleared=false;api.WaitingSince=nil;api.Waiting=nil
         api.LastVisits={};api.LastError=nil;api.MoveDeadline=nil;api.PrioritySuspended=false;api.RetryAt=nil
         retry={count=0,due=0};clearingAt=nil;ctx.Release()
     end

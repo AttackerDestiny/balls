@@ -276,12 +276,16 @@ return function(sources)
         assert(saved[#saved]==true and state.MultiSpot)
         queued[1]() -- actual background worker: rejected identity must not kill it
         assert(updates==1 and state.MultiSpot and saved[#saved]==true)
+        state.Running=true -- the bounded worker fixture stops its loop after one update
         assert(not multiContext.CanMove(),"Loading characters must not consume travel retries")
         local root={Anchored=true};local humanoid={Health=100}
         player.Character={FindFirstChild=function()return root end,FindFirstChildOfClass=function()return humanoid end}
         assert(not multiContext.CanMove())
         root.Anchored=false;humanoid.Health=0;assert(not multiContext.CanMove())
         humanoid.Health=100;assert(multiContext.CanMove())
+        state.Running=false;assert(not multiContext.CanMove(),"A stopped runtime cannot authorize an arena trip")
+        state.Running=true;state.StopEverything=true;assert(not multiContext.CanMove())
+        state.StopEverything=false
         state.AutoFarm=false;state.Enabled=true
         assert(not multiContext.CanMove(),"Kill Aura alone cannot authorize Multi Spot movement")
         state.AutoFarm=true

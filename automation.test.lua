@@ -112,7 +112,7 @@ local function multiFixture()
     f.Api=multiFactory({State=s,Spots=function()return f.Spots end,CanMove=function()return f.Allowed end,
         CurrentFloor=function()return f.Floor end,Moving=function()return f.Moving end,Arrived=function()return f.Arrived end,
         Go=function(spot,resume)f.Goes[#f.Goes+1]=spot.Id;f.Resuming=resume;return true end,ChangeFloor=function(id)f.Changes[#f.Changes+1]=id end,
-        Encounter=function()return f.Alive,f.Seen end,ClearEncounter=function()f.Seen=false end,
+        Encounter=function()return f.Alive,f.Seen,f.Waiting end,ClearEncounter=function()f.Seen=false end,
         PriorityTarget=function()return f.Priority end,
         Suspend=function()f.Suspends=(f.Suspends or 0)+1;f.Moving=false end,
         Resume=function()f.Resumes=(f.Resumes or 0)+1 end,
@@ -181,6 +181,16 @@ test("single arena stays in place for the next spawn",function()
 end)
 test("movement pauses for higher-priority actions",function()
     local f=multiFixture();f.Allowed=false;f.Api.Update(0);assert(#f.Goes==0)
+end)
+test("A spawn-side movement wait produces a reason and resumes when cleared",function()
+    local f=multiFixture();f.Allowed=false;f.Api.Update(0)
+    assert(f.Status and f.Status:find("Waiting",1,true)and #f.Goes==0)
+    f.Allowed=true;f.Api.Update(1);assert(#f.Goes==1)
+end)
+test("Remaining mobs report loading and immunity without marking the encounter cleared",function()
+    local f=multiFixture();f.Api.Update(0)
+    f.Waiting={Loading=1,Invulnerable=1,Retry=0};f.Api.Update(1)
+    assert(f.Status:find("waiting to load",1,true)and f.Status:find("invulnerable",1,true)and #f.Goes==1)
 end)
 test("failed arena travel retries same arena without saving toggle off",function()
     local f=multiFixture();f.Api.Update(0);f.Arrived=false;f.Api.Update(1)

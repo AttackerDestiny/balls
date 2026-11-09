@@ -144,6 +144,9 @@ def main():
     fixture = "local sources={" + ",".join(k + "=" + quote(v) for k, v in sources.items()) + "}\n"
     fixture += "assert(loadstring(" + quote(read("windui-providers.test.luau")) + "))()(" + quote(registry) + ")\n"
     fixture += fixture_party
+    assignment_start=script.index("    local function updateAssignment()")
+    assignment=script[assignment_start:script.index("    updateAssignment()\n",assignment_start)]
+    fixture += "assert(loadstring(" + quote(read("between-assignment.test.luau")) + "))()(" + quote(assignment) + ")\n"
     users_start=script.index("    local function regroupUsers()")
     users=script[users_start:script.index("    state.AutoRegroupController=",users_start)]
     fixture += "assert(loadstring(" + quote(read("auto-regroup.test.luau")) + "))()(" + quote(read("auto-regroup.module.luau")) + "," + quote(users) + ")\n"
@@ -196,7 +199,7 @@ def main():
     encounter = script[encounter_start:script.index("function state.RegisterAutomationDestination", encounter_start)]
     valid_start = script.index("local selectedFarmSpot=(function()")
     valid = script[valid_start:script.index("local function pauseHold", valid_start)] + "\nreturn validMob"
-    fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + ")\n"
+    fixture += "assert(loadstring(" + quote(read("arena-clear.test.luau")) + "))()(" + quote(encounter) + "," + quote(valid) + "," + quote(read("selected-farm-spots.module.luau")) + ")\n"
     data_start = script.index("local function getMobData(mob)")
     data = script[data_start:script.index("function state.ReadOwnDamage", data_start)]
     data = "local enemyRegistry=(function()\n" + read("enemy-registry.module.luau") + "\nend)()({Now=os.clock})\n" + data
