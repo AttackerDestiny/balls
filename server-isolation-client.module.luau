@@ -375,14 +375,21 @@ end
             end})
         state.AntiSuspiciousRestUntil=restTracker.Deadline()
     end
+    local function chooseBlockTarget(people)
+        for _,person in ipairs(people)do
+            if not allowed(person)then
+                local recognized,button=pcall(findPrompt,person)
+                if recognized and button then return person end
+            end
+        end
+        for _,person in ipairs(people)do if person.UserId==state.SafePendingUserId then return person end end
+        return people[math.random(1,#people)]
+    end
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
         Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
         SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
-        ChooseTarget=function(people)
-            for _,person in ipairs(people)do if person.UserId==state.SafePendingUserId then return person end end
-            return people[math.random(1,#people)]
-        end,IsPresent=function(person)return person.Parent==Players end,
+        ChooseTarget=chooseBlockTarget,IsPresent=function(person)return person.Parent==Players end,
         Block=function(person,active)
             local before=os.clock();local confirmed=performBlock(person,active)
             state.LastSafeBlockSeconds=os.clock()-before

@@ -264,6 +264,9 @@ def main():
     save = script[save_start:script.index("requestSave=function()", save_start)]
     fixture += "assert(loadstring(" + quote(read("storage-bootstrap.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("storage-bootstrap.module.luau"), script, read("kill-aura.luau"), save)) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    choose_start=adapter.index("    local function chooseBlockTarget(people)")
+    choose=adapter[choose_start:adapter.index("    local api=ctx.Make(",choose_start)]
+    fixture += "assert(loadstring(" + quote(read("safe-block-target.test.luau")) + "))()(" + quote(choose) + ")\n"
     block_click = adapter[adapter.index("    local touchId=0"):adapter.index("    local function directBlock(")]
     fixture += "assert(loadstring(" + quote(read("block-input.test.luau")) + "))()(" + quote(read("block-input.module.luau")) + "," + quote(block_click) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
