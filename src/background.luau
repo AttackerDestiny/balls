@@ -96,7 +96,8 @@ do
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
         local function groundRay(root,point,above,depth)
-            if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+            if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.PerformanceBoosters["Delete map"]
+                or state.PerformanceBoosters["Remove everything"]then return nil end
             local excluded={root.Parent}
             for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
                 local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
@@ -115,9 +116,6 @@ do
                     return nil,"Paused",owner=="Stopped" or owner=="Manual"
                 end
                 if state.TravelHold or state.ProtectionRetreating or (owner~="Manual" and owner~="Farm")then return nil,"Paused · "..owner end
-                if state.PerformanceBoosters["Delete map"] or state.PerformanceBoosters["Remove everything"]then
-                    return nil,"Desync requires solid terrain",true
-                end
                 return owner=="Farm" and "Farm" or "Hold"
             end,
             Character=function()
@@ -132,11 +130,19 @@ do
                 local floor=groundRay(root,point,1,10)
                 return floor and floor<=point.Y and floor or nil
             end,
-            BeginHold=function(root,humanoid,floor)
+            FarmReference=function(point)
+                if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.FixedFarmPosition then return nil end
+                if state.IdleBelowMap and type(state.IdleFloorY)=="number"then
+                    local depth=state.IdleFloorY-point.Y
+                    if depth>=6 and depth<=45 then return state.IdleFloorY end
+                end
+                if state.Moving then return point.Y+20 end
+            end,
+            BeginHold=function(root,humanoid,floor,fallback)
                 local point=root.Position
                 local below=Vector3.new(point.X,floor-20,point.Z)
                 if below.Y<=workspace.FallenPartsDestroyHeight+35 or movementRoot then return nil end
-                local surface=Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
+                local surface=fallback and point or Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
                 local attachment=create("Attachment",{Name="FeatherDesyncAttachment"},root)
                 local align=create("AlignPosition",{Name="FeatherDesyncHold",Mode=Enum.PositionAlignmentMode.OneAttachment,
                     Attachment0=attachment,Position=below,ApplyAtCenterOfMass=true,

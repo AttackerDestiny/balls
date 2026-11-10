@@ -7,13 +7,17 @@ return function(source)
     local surface,raycasts,created,removed=0,0,0,0
     local render
     local ended,held=0,0
+    local allowHold,farmReference=true,nil
     local api=make({Mode=function()return mode,"Paused"end,Character=function()return root,subject end,
         Camera=function()return camera end,CameraOffset=function(_,base,depth)return base+depth end,
         Surface=function()raycasts+=1;return surface end,
         Ground=function()return surface end,
-        BeginHold=function(characterRoot,_,floor)
+        FarmReference=function()return farmReference end,
+        BeginHold=function(characterRoot,_,floor,fallback)
+            if not allowHold then return nil end
             held+=1
             local point=characterRoot.Position
+            if fallback then assert(floor==point.Y)end
             characterRoot.Position={X=point.X,Y=floor-20,Z=point.Z}
             return {Floor=floor,Position=characterRoot.Position,Previous=point}
         end,
@@ -52,5 +56,14 @@ return function(source)
     assert(api.Active and camera.CameraSubject==thirdParty and root.Position.Y==-20,"Spectating does not prevent the physical hold or get interrupted")
     mode=nil;api.Update(4.1)
     assert(ended==3 and not api.Active,"Dodge and travel can take over the standalone hold")
-    print("PASS Farm Desync: standalone hold, verified surface, camera ownership, recovery and farm handoff")
+    mode="Hold";surface=nil;camera.CameraSubject=subject
+    root.Position={X=20,Y=100,Z=0}
+    api.Update(5);api.Update(5.5)
+    assert(api.Active and root.Position.Y==80 and api.Status:find("starting position",1,true)and held==4)
+    api.Release("Off",true);assert(root.Position.Y==100 and ended==4)
+    allowHold=false;api.Update(6)
+    assert(not api.Active and root.Position.Y==100 and api.Status:find("clearance",1,true))
+    mode="Farm";farmReference=120;api.Release();api.Update(7)
+    assert(api.Active and root.Position.Y==100 and api.Status:find("terrain-free",1,true)and held==4)
+    print("PASS Farm Desync: terrain-free hold and farm camera, clearance, ownership, recovery and handoff")
 end

@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-10.standalone-desync-v3.0.39"
-local VERSION="3.0.39"
+local BUILD="2026-11-10.terrain-free-desync-v3.0.40"
+local VERSION="3.0.40"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -30174,10 +30174,10 @@ do
     local function installFarmDesync()
         local make=(function()
 -- BEGIN BUNDLED FARM DESYNC
--- Own the surface camera and, in manual mode, one reversible underground hold.
+-- Own the raised camera and, in manual mode, one reversible underground hold.
 return function(ctx)
     local api={Active=false,Status="Off"}
-    local session,root,floor,sample,nextProbe,hold
+    local session,root,floor,sample,nextProbe,hold,fallback
     local function releaseCamera()
         local old=session
         session=nil;api.Active=false
@@ -30191,7 +30191,7 @@ return function(ctx)
             local old=hold;hold=nil
             ctx.EndHold(old,restore==true)
         end
-        root,floor,sample,nextProbe=nil,nil,nil,nil
+        root,floor,sample,nextProbe,fallback=nil,nil,nil,nil,nil
         api.Status=reason or "Off"
     end
     local function distanceSquared(a,b)
@@ -30215,24 +30215,28 @@ return function(ctx)
             floor=hold.Floor;sample=hold.Position
         elseif not sample or now>=nextProbe or distanceSquared(point,sample)>12*12 or math.abs(point.Y-sample.Y)>10 then
             floor=(mode=="Hold" and ctx.Ground(root,point)or nil)or ctx.Surface(root,point)
+            fallback=floor==nil
+            if fallback then floor=mode=="Hold" and point.Y or ctx.FarmReference(point)end
             sample=point;nextProbe=now+.25
         end
         if mode=="Hold" and not hold and floor then
-            hold=ctx.BeginHold(root,humanoid,floor)
-            if not hold then api.Status="Unable to hold underground";return end
+            hold=ctx.BeginHold(root,humanoid,floor,fallback)
+            if not hold then api.Status="Waiting for safe hold clearance";return end
             point=root.Position;sample=hold.Position
         end
         local depth=floor and floor-point.Y
         if not depth or depth<6 or depth>45 then
-            releaseCamera();api.Status=mode=="Hold" and "Waiting for nearby solid ground" or "Waiting for Auto Farm to move below ground";return
+            releaseCamera();api.Status="Waiting for Auto Farm position";return
         end
+        local status=hold and (fallback and "Holding 20 studs below starting position" or "Holding 20 studs below ground")
+            or (fallback and "Auto Farm · terrain-free camera active" or "Auto Farm · surface camera active")
         local camera=ctx.Camera()
         if session and (camera~=session.Camera or camera.CameraSubject~=session.Subject)then releaseCamera()end
-        if session then return end
+        if session then api.Status=status;return end
         local subject=camera and camera.CameraSubject
         if not camera or subject~=humanoid then
             api.Active=hold~=nil
-            api.Status=hold and "Holding underground · camera is viewing another subject" or "Waiting for character camera"
+            api.Status=hold and "Holding position · camera is viewing another subject" or "Waiting for character camera"
             return
         end
         local active={Camera=camera,Subject=humanoid,Base=humanoid.CameraOffset}
@@ -30254,7 +30258,7 @@ return function(ctx)
             active.Render=ctx.Render:Connect(render)
         end)
         if not ok then releaseCamera();api.Status="Character camera unavailable";return end
-        api.Active=true;api.Status=hold and "Holding 20 studs below ground" or "Auto Farm · surface camera active"
+        api.Active=true;api.Status=status
     end
     return api
 end
@@ -30264,7 +30268,8 @@ end
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
         local function groundRay(root,point,above,depth)
-            if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+            if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.PerformanceBoosters["Delete map"]
+                or state.PerformanceBoosters["Remove everything"]then return nil end
             local excluded={root.Parent}
             for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
                 local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
@@ -30283,9 +30288,6 @@ end
                     return nil,"Paused",owner=="Stopped" or owner=="Manual"
                 end
                 if state.TravelHold or state.ProtectionRetreating or (owner~="Manual" and owner~="Farm")then return nil,"Paused · "..owner end
-                if state.PerformanceBoosters["Delete map"] or state.PerformanceBoosters["Remove everything"]then
-                    return nil,"Desync requires solid terrain",true
-                end
                 return owner=="Farm" and "Farm" or "Hold"
             end,
             Character=function()
@@ -30300,11 +30302,19 @@ end
                 local floor=groundRay(root,point,1,10)
                 return floor and floor<=point.Y and floor or nil
             end,
-            BeginHold=function(root,humanoid,floor)
+            FarmReference=function(point)
+                if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.FixedFarmPosition then return nil end
+                if state.IdleBelowMap and type(state.IdleFloorY)=="number"then
+                    local depth=state.IdleFloorY-point.Y
+                    if depth>=6 and depth<=45 then return state.IdleFloorY end
+                end
+                if state.Moving then return point.Y+20 end
+            end,
+            BeginHold=function(root,humanoid,floor,fallback)
                 local point=root.Position
                 local below=Vector3.new(point.X,floor-20,point.Z)
                 if below.Y<=workspace.FallenPartsDestroyHeight+35 or movementRoot then return nil end
-                local surface=Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
+                local surface=fallback and point or Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
                 local attachment=create("Attachment",{Name="FeatherDesyncAttachment"},root)
                 local align=create("AlignPosition",{Name="FeatherDesyncHold",Mode=Enum.PositionAlignmentMode.OneAttachment,
                     Attachment0=attachment,Position=below,ApplyAtCenterOfMass=true,
