@@ -25,7 +25,7 @@ return function(source,nativeInstances)
         return object
     end
     local make=assert(loadstring(source))()
-    local function fixture(target,text,horizontal)
+    local function fixture(target,text,horizontal,roster)
         local root=node("Folder","CoreGui")
         local overlay=node("ScreenGui","FoundationOverlay",root)
         local blocking=node("Frame","BlockingModal",overlay)
@@ -40,7 +40,7 @@ return function(source,nativeInstances)
         local report=node("TextButton","2",buttons);report.LayoutOrder=horizontal and 2 or 1
         local yes=node("TextButton","3",buttons);yes.LayoutOrder=horizontal and 3 or 0
         return {Root=root,Overlay=overlay,Blocking=blocking,Modal=modal,Contents=contents,Title=title,Buttons=buttons,
-            Confirm=yes,Cancel=no,Report=report,Find=make({Root=root})}
+            Confirm=yes,Cancel=no,Report=report,Find=make({Root=root,Targets=roster and function()return roster end or nil})}
     end
     local ok,result=pcall(function()
         local target={Name="Target_User",DisplayName="Target Name"}
@@ -75,6 +75,21 @@ return function(source,nativeInstances)
         local blank={Name="Target_User",DisplayName=""}
         f.Blocking.Visible=true;f.Title.Text="Block Other?"
         local _,_,pending=f.Find(blank);assert(pending=="Busy","Empty display names cannot match every dialog")
+        local intended={Name="IntendedUser",DisplayName="SameDisplay",UserId=20}
+        local peer={Name="OtherUser",DisplayName="SameDisplay",UserId=10}
+        local duplicate=fixture(intended,"Block SameDisplay?",false,{peer,intended})
+        for _,person in ipairs({peer,intended})do
+            local button,cancel,pending=duplicate.Find(person)
+            assert(not button and not cancel and pending=="Ambiguous",
+                "A shared display name cannot authorize a click or cancellation for either user ID")
+        end
+        duplicate.Title.Text="Block @IntendedUser?"
+        assert(duplicate.Find(intended)==duplicate.Confirm,"An unambiguous username still identifies its own prompt")
+        assert(not duplicate.Find(peer),"The unrelated duplicate-display account cannot acquire a username-specific prompt")
+        local whitelisted={Name="TrustedUser",DisplayName="SameDisplay",UserId=30}
+        duplicate=fixture(intended,"Block SameDisplay?",false,{intended,whitelisted})
+        local _,_,pending=duplicate.Find(intended)
+        assert(pending=="Ambiguous","Identity checks include whitelisted users, not just block candidates")
         return {Passed=true,Vertical=true,Horizontal=true,HiddenAncestors=true,TargetGuard=true,Native=nativeInstances==true}
     end)
     for _,object in ipairs(owned)do object:Destroy()end

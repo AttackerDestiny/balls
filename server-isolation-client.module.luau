@@ -142,7 +142,7 @@ return function(ctx)
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
-    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui")})or function()
+    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui"),Targets=function()return Players:GetPlayers()end})or function()
         error("Native block dialog recognition is unavailable; no rejoin attempted")
     end
     local touchId=0
@@ -257,6 +257,7 @@ return function(ctx)
             task.wait(.04)
         until false
         blockBusy=true
+        state.LastBlockInput=nil
         maskTarget=target
         local sent,result=pcall(function()
             if blockMask then blockMask.Begin()end
@@ -394,6 +395,31 @@ end
             end})
         state.AntiSuspiciousRestUntil=restTracker.Deadline()
     end
+    local failurePath="SB2Codex/safe-failure_"..player.UserId..".json"
+    pcall(function()
+        if type(isfile)~="function"or type(readfile)~="function"or not isfile(failurePath)then return end
+        local bytes=readfile(failurePath)
+        if #bytes>8192 then return end
+        local record=HttpService:JSONDecode(bytes)
+        if type(record)=="table"and record.Version==1 and record.UserId==player.UserId then state.LastSafeFailure=record end
+    end)
+    local function recordFailure(failure)
+        local record={Version=1,UserId=player.UserId,Build=state.Build,JobId=game.JobId,PlaceId=game.PlaceId,
+            At=failure.At,Phase=failure.Phase,Reason=tostring(failure.Reason):sub(1,1500),
+            TargetUserId=failure.TargetUserId,TargetName=failure.TargetName}
+        local input=state.LastBlockInput
+        if input and failure.TargetUserId then
+            record.Input={Method=input.Method,Dispatched=input.Dispatched==true,Attempt=input.Attempt,X=input.X,Y=input.Y,Errors={}}
+            for i=1,math.min(3,#(input.Errors or {}))do record.Input.Errors[i]=tostring(input.Errors[i]):sub(1,400)end
+        end
+        state.LastSafeFailure=record
+        local saved,reason=pcall(function()
+            assert(type(writefile)=="function","Failure record storage unavailable")
+            if state.StorageBootstrap then local ready,problem=state.StorageBootstrap.Ensure();assert(ready,problem)end
+            writefile(failurePath,HttpService:JSONEncode(record))
+        end)
+        state.SafeFailureSaveError=not saved and tostring(reason)or nil
+    end
     local function chooseBlockTarget(people)
         for _,person in ipairs(people)do
             if not allowed(person)then
@@ -406,7 +432,7 @@ end
     end
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
-        Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
+        Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,RecordFailure=recordFailure,
         SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
         ChooseTarget=chooseBlockTarget,IsPresent=function(person)return person.Parent==Players end,
         Block=function(person,active)

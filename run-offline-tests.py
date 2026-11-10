@@ -272,6 +272,9 @@ def main():
     save = script[save_start:script.index("requestSave=function()", save_start)]
     fixture += "assert(loadstring(" + quote(read("storage-bootstrap.test.luau")) + "))()(" + ",".join(quote(value) for value in (read("storage-bootstrap.module.luau"), script, read("kill-aura.luau"), save)) + ")\n"
     adapter = read("server-isolation-client.module.luau")
+    failure_start=adapter.index("    local failurePath=")
+    failure_record=adapter[failure_start:adapter.index("    local function chooseBlockTarget",failure_start)]
+    fixture += "assert(loadstring(" + quote(read("safe-failure-record.test.luau")) + "))()(" + quote(failure_record) + ")\n"
     resume_template=adapter.split("local code=string.format([[\n",1)[1].split("]],state.ConfigPath",1)[0]
     fixture += "assert(loadstring(" + quote(read("auto-regroup-resume.test.luau")) + "))()(" + quote(resume_template) + ")\n"
     choose_start=adapter.index("    local function chooseBlockTarget(people)")

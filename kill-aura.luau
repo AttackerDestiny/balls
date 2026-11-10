@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-10.between-unassigned-warning-v3.0.42"
-local VERSION="3.0.42"
+local BUILD="2026-11-10.safe-block-identity-diagnostics-v3.0.43"
+local VERSION="3.0.43"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -7607,7 +7607,12 @@ return function(ctx)
     end
     local function guard(epoch,fn)
         local ok,result=pcall(fn)
-        if not ok and current(epoch)then api.Stop(message(result))end
+        if not ok and current(epoch)then
+            local reason=message(result)
+            api.LastFailure={At=ctx.Now(),Phase=api.Phase,Reason=reason,TargetUserId=api.TargetUserId,TargetName=api.TargetName}
+            if ctx.RecordFailure then pcall(ctx.RecordFailure,api.LastFailure)end
+            api.Stop(reason)
+        end
         return ok and current(epoch)
     end
     local function blocked(epoch)
@@ -7639,6 +7644,7 @@ return function(ctx)
         run.epoch=run.epoch+1;run.sameReturn=false
         local epoch=run.epoch
         api.Active=true;api.Phase="Preparing";api.Outcome="Searching"
+        api.TargetUserId=nil;api.TargetName=nil
         publish("Checking block access and rejoin support...")
         return guard(epoch,function()
             if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features)end
@@ -7689,6 +7695,7 @@ return function(ctx)
         if #eligible==0 then api.Stop("No eligible players to block (friends are skipped)");return end
         local person=ctx.ChooseTarget and ctx.ChooseTarget(eligible)or eligible[ctx.Random(#eligible)]
         if not ctx.IsPresent(person)then return end
+        api.TargetUserId=person.UserId;api.TargetName=person.Name
         publish("Blocking @"..person.Name.."...")
         local receipt=ctx.Block(person,function()return current(epoch)and ctx.IsPresent(person)end)
         if not current(epoch)then return end
@@ -8507,7 +8514,7 @@ return function(ctx)
         getBlocked()
         if not isfile(path)then save({Version=1,Active=false})end
     end
-    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui")})or function()
+    local findPrompt=ctx.MakeBlockPrompt and ctx.MakeBlockPrompt({Root=game:GetService("CoreGui"),Targets=function()return Players:GetPlayers()end})or function()
         error("Native block dialog recognition is unavailable; no rejoin attempted")
     end
     local touchId=0
@@ -8622,6 +8629,7 @@ return function(ctx)
             task.wait(.04)
         until false
         blockBusy=true
+        state.LastBlockInput=nil
         maskTarget=target
         local sent,result=pcall(function()
             if blockMask then blockMask.Begin()end
@@ -8759,6 +8767,31 @@ end
             end})
         state.AntiSuspiciousRestUntil=restTracker.Deadline()
     end
+    local failurePath="SB2Codex/safe-failure_"..player.UserId..".json"
+    pcall(function()
+        if type(isfile)~="function"or type(readfile)~="function"or not isfile(failurePath)then return end
+        local bytes=readfile(failurePath)
+        if #bytes>8192 then return end
+        local record=HttpService:JSONDecode(bytes)
+        if type(record)=="table"and record.Version==1 and record.UserId==player.UserId then state.LastSafeFailure=record end
+    end)
+    local function recordFailure(failure)
+        local record={Version=1,UserId=player.UserId,Build=state.Build,JobId=game.JobId,PlaceId=game.PlaceId,
+            At=failure.At,Phase=failure.Phase,Reason=tostring(failure.Reason):sub(1,1500),
+            TargetUserId=failure.TargetUserId,TargetName=failure.TargetName}
+        local input=state.LastBlockInput
+        if input and failure.TargetUserId then
+            record.Input={Method=input.Method,Dispatched=input.Dispatched==true,Attempt=input.Attempt,X=input.X,Y=input.Y,Errors={}}
+            for i=1,math.min(3,#(input.Errors or {}))do record.Input.Errors[i]=tostring(input.Errors[i]):sub(1,400)end
+        end
+        state.LastSafeFailure=record
+        local saved,reason=pcall(function()
+            assert(type(writefile)=="function","Failure record storage unavailable")
+            if state.StorageBootstrap then local ready,problem=state.StorageBootstrap.Ensure();assert(ready,problem)end
+            writefile(failurePath,HttpService:JSONEncode(record))
+        end)
+        state.SafeFailureSaveError=not saved and tostring(reason)or nil
+    end
     local function chooseBlockTarget(people)
         for _,person in ipairs(people)do
             if not allowed(person)then
@@ -8771,7 +8804,7 @@ end
     end
     local api=ctx.Make({UserId=player.UserId,PlaceId=game.PlaceId,JobId=game.JobId,Now=os.time,Clock=os.clock,
         SettleSeconds=0,SoloSeconds=.3,BlockSettleSeconds=0,NewId=function()return HttpService:GenerateGUID(false)end,
-        Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,
+        Random=function(count)return math.random(1,count)end,Preflight=preflight,Save=save,GetBlocked=getBlocked,RecordFailure=recordFailure,
         SnapshotSettings=snapshot,RestoreSettings=restoreFeatures,GetPlayers=others,IsAllowed=allowed,IsFriend=function()return false end,
         ChooseTarget=chooseBlockTarget,IsPresent=function(person)return person.Parent==Players end,
         Block=function(person,active)
@@ -9205,6 +9238,7 @@ return function(ctx)
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
+        if not ready and pending=="Ambiguous"then error("Roblox block dialog target is ambiguous; no rejoin attempted")end
         if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
         if not ready and observed then error("Native block button is not ready or covered; no rejoin attempted")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")
@@ -9267,8 +9301,19 @@ return function(ctx)
         until from>#text
         return false
     end
+    local function targetMatches(text,target)
+        if not(contains(text,target.DisplayName)or contains(text,target.Name))then return false end
+        if ctx.Targets then
+            for _,person in ipairs(ctx.Targets())do
+                if person.UserId~=target.UserId and (contains(text,person.DisplayName)or contains(text,person.Name))then
+                    return false,true
+                end
+            end
+        end
+        return true
+    end
     return function(target)
-        local busy,loading=false,false
+        local busy,loading,ambiguous=false,false,false
         local confirm,cancel
         for _,overlay in ipairs(ctx.Root:GetChildren())do
             if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
@@ -9283,7 +9328,9 @@ return function(ctx)
                         if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
                             and modal.Parent and modal.Parent.Name=="BlockingModal"then
                             local text=title.Text:gsub("<[^>]*>",""):gsub("&amp;","&"):gsub("&lt;","<"):gsub("&gt;",">")
-                            if not(contains(text,target.DisplayName)or contains(text,target.Name))then busy=true
+                            local matched,conflict=targetMatches(text,target)
+                            if conflict then ambiguous=true
+                            elseif not matched then busy=true
                             else
                                 local footer=contents:FindFirstChild("Footer")
                                 local buttons=footer and footer:FindFirstChild("Buttons")
@@ -9308,6 +9355,7 @@ return function(ctx)
             end
         end
         -- Another modal can cover an otherwise matching button; don't click through it.
+        if ambiguous then return nil,nil,"Ambiguous"end
         if busy then return nil,nil,"Busy"end
         if confirm then return confirm,cancel end
         if loading then return nil,nil,"Loading"end

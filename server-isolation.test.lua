@@ -231,4 +231,18 @@ test("A recognized dialog conflict recovers after closure while unsupported layo
     g.tick(8)
     assert(not g.api.Retryable and not g.api.Active and not g.api.Retry()and g.blocks==0 and g.hops==0)
 end)
+test("Failure diagnostics retain the target and error without authorizing a rejoin",function()
+    local f=fixture();local recorded
+    f.ctx.RecordFailure=function(value)recorded=copy(value)end
+    f.ctx.Block=function()error("Roblox did not confirm the block; no rejoin attempted")end
+    f.start();f.tick(8)
+    assert(recorded and recorded.TargetUserId==2 and recorded.TargetName and recorded.Phase=="Waiting"
+        and recorded.Reason:find("did not confirm",1,true)and f.hops==0 and f.api.LastFailure)
+    f.people={};f.api.Stop("Protected","Safe")
+    assert(f.api.LastFailure.TargetUserId==2,"A healthy population update cannot erase the last failure")
+    local g=fixture();g.ctx.RecordFailure=function()error("Storage unavailable")end
+    g.ctx.Block=function()error("Roblox did not confirm the block; no rejoin attempted")end
+    g.start();g.tick(8)
+    assert(not g.api.Active and g.api.Retryable and g.hops==0,"Diagnostic failures must not bypass block confirmation")
+end)
 print("All " .. count .. " server-isolation scenarios passed")

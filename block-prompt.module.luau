@@ -22,8 +22,19 @@ return function(ctx)
         until from>#text
         return false
     end
+    local function targetMatches(text,target)
+        if not(contains(text,target.DisplayName)or contains(text,target.Name))then return false end
+        if ctx.Targets then
+            for _,person in ipairs(ctx.Targets())do
+                if person.UserId~=target.UserId and (contains(text,person.DisplayName)or contains(text,person.Name))then
+                    return false,true
+                end
+            end
+        end
+        return true
+    end
     return function(target)
-        local busy,loading=false,false
+        local busy,loading,ambiguous=false,false,false
         local confirm,cancel
         for _,overlay in ipairs(ctx.Root:GetChildren())do
             if overlay.Name=="FoundationOverlay"and overlay:IsA("ScreenGui")and overlay.Enabled then
@@ -38,7 +49,9 @@ return function(ctx)
                         if contents and contents.Name=="AlertContents"and modal and modal.Name=="AlertModal"
                             and modal.Parent and modal.Parent.Name=="BlockingModal"then
                             local text=title.Text:gsub("<[^>]*>",""):gsub("&amp;","&"):gsub("&lt;","<"):gsub("&gt;",">")
-                            if not(contains(text,target.DisplayName)or contains(text,target.Name))then busy=true
+                            local matched,conflict=targetMatches(text,target)
+                            if conflict then ambiguous=true
+                            elseif not matched then busy=true
                             else
                                 local footer=contents:FindFirstChild("Footer")
                                 local buttons=footer and footer:FindFirstChild("Buttons")
@@ -63,6 +76,7 @@ return function(ctx)
             end
         end
         -- Another modal can cover an otherwise matching button; don't click through it.
+        if ambiguous then return nil,nil,"Ambiguous"end
         if busy then return nil,nil,"Busy"end
         if confirm then return confirm,cancel end
         if loading then return nil,nil,"Loading"end

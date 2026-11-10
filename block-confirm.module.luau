@@ -22,6 +22,7 @@ return function(ctx)
             if button and ctx.Ready(button)then ready=button;break end
             ctx.Sleep(.03)
         until ctx.Now()>=expires
+        if not ready and pending=="Ambiguous"then error("Roblox block dialog target is ambiguous; no rejoin attempted")end
         if not ready and pending=="Busy"then error("Another Roblox block dialog is open; waiting for it to close")end
         if not ready and observed then error("Native block button is not ready or covered; no rejoin attempted")end
         assert(ready,"Roblox block dialog did not open; no rejoin attempted")

@@ -63,6 +63,12 @@ return function(source)
         assert(not ok and tostring(reason):find("Another Roblox block dialog is open",1,true)
             and f.Prompts==0 and f.Clicks==0 and f.Cancels==0)
     end)
+    test("Duplicate display names cannot trigger a block, cancel or replacement prompt",function()
+        local f=fixture();f.Pending="Ambiguous"
+        local ok,reason=pcall(f.Run,{},f.Live)
+        assert(not ok and tostring(reason):find("target is ambiguous",1,true)
+            and f.Clicks==0 and f.Cancels==0 and f.Prompts==0)
+    end)
     test("A partially mounted matching dialog is not opened twice",function()
         local f=fixture();f.Pending="Loading"
         f.OnStep=function(v)if v.Now>=.2 then v.Pending=nil;v.Visible=true end end

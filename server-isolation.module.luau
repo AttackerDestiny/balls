@@ -58,7 +58,12 @@ return function(ctx)
     end
     local function guard(epoch,fn)
         local ok,result=pcall(fn)
-        if not ok and current(epoch)then api.Stop(message(result))end
+        if not ok and current(epoch)then
+            local reason=message(result)
+            api.LastFailure={At=ctx.Now(),Phase=api.Phase,Reason=reason,TargetUserId=api.TargetUserId,TargetName=api.TargetName}
+            if ctx.RecordFailure then pcall(ctx.RecordFailure,api.LastFailure)end
+            api.Stop(reason)
+        end
         return ok and current(epoch)
     end
     local function blocked(epoch)
@@ -90,6 +95,7 @@ return function(ctx)
         run.epoch=run.epoch+1;run.sameReturn=false
         local epoch=run.epoch
         api.Active=true;api.Phase="Preparing";api.Outcome="Searching"
+        api.TargetUserId=nil;api.TargetName=nil
         publish("Checking block access and rejoin support...")
         return guard(epoch,function()
             if resume and ctx.RestoreSettings then ctx.RestoreSettings(resume.Features)end
@@ -140,6 +146,7 @@ return function(ctx)
         if #eligible==0 then api.Stop("No eligible players to block (friends are skipped)");return end
         local person=ctx.ChooseTarget and ctx.ChooseTarget(eligible)or eligible[ctx.Random(#eligible)]
         if not ctx.IsPresent(person)then return end
+        api.TargetUserId=person.UserId;api.TargetName=person.Name
         publish("Blocking @"..person.Name.."...")
         local receipt=ctx.Block(person,function()return current(epoch)and ctx.IsPresent(person)end)
         if not current(epoch)then return end
