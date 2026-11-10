@@ -49,10 +49,13 @@ return function(source)
     end
     assert(encoded.Settings.AccountProgression and encoded.Presets.Items[1].Settings.AccountProgression,
         "Progression ON/OFF is still a portable feature preference")
-    local old={Format="FeatherConfig",Version=1,Settings=settings,CustomSpots=spots,
-        Presets={Items={{Settings=settings,CustomSpots=spots}},Auto=false,Active=1,Manual=1,Outside=1,Between=0}}
+    local legacy=table.clone(settings);legacy.FarmDesync=true
+    local old={Format="FeatherConfig",Version=1,Settings=legacy,CustomSpots=spots,
+        Presets={Items={{Settings=legacy,CustomSpots=spots}},Auto=false,Active=1,Manual=1,Outside=1,Between=0}}
     encoded=old
     assert(api.Import("encoded-config"))
+    assert(applied.Settings.FarmDesync==nil and applied.Presets.Items[1].Settings.FarmDesync==nil,
+        "Older exports load without the retired Desync setting")
     for key,value in pairs(private)do
         assert(applied.Settings[key]==nil and applied.Presets.Items[1].Settings[key]==nil,
             "Legacy configs cannot import another account's progression")

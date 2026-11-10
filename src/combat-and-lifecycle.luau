@@ -382,7 +382,6 @@ function state.Destroy(replacing,teleportCleanup)
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
-    owned("Farm desync",state.FarmDesyncController)
     owned("AutoRegroup",state.AutoRegroupController)
     local callbacks={
         {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},

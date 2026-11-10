@@ -2,12 +2,13 @@
 return function(ctx)
     local schema={}
     local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","AutoRegroupUsers","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
         table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
+    schema.FarmDesync="boolean" -- Accept older exports before stripping the retired field.
     local function data(value,depth,path)
         assert(depth<=12,"Config nesting is too deep")
         local kind=type(value)
@@ -80,10 +81,10 @@ return function(ctx)
         data(value,0,{})
         settings(value.Settings);arenas(value.CustomSpots)
     end
-    local accountProgression={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore"}
+    local excludedSettings={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore","FarmDesync"}
     local function portable(item)
         local filtered
-        for _,field in ipairs(accountProgression)do
+        for _,field in ipairs(excludedSettings)do
             if item.Settings[field]~=nil then
                 filtered=filtered or table.clone(item.Settings)
                 filtered[field]=nil
@@ -115,7 +116,7 @@ return function(ctx)
             end
             assert(total==count,"Invalid preset list")
         end
-        -- Accept old exports, but never apply or re-export another account's checkpoints.
+        -- Drop account checkpoints and retired preferences from portable settings.
         local clean=portable(package)
         if library then
             clean=table.clone(clean);clean.Presets=table.clone(library)

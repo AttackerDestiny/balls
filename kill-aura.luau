@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-10.terrain-free-desync-v3.0.40"
-local VERSION="3.0.40"
+local BUILD="2026-11-10.feature-cleanup-v3.0.41"
+local VERSION="3.0.41"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -283,12 +283,13 @@ local presetBook=(function()
 return function(ctx)
     local schema={}
     local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","AutoRegroupUsers","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
         table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
     }
     for kind,names in pairs(groups)do for _,name in ipairs(names)do schema[name]=kind end end
+    schema.FarmDesync="boolean" -- Accept older exports before stripping the retired field.
     local function data(value,depth,path)
         assert(depth<=12,"Config nesting is too deep")
         local kind=type(value)
@@ -361,10 +362,10 @@ return function(ctx)
         data(value,0,{})
         settings(value.Settings);arenas(value.CustomSpots)
     end
-    local accountProgression={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore"}
+    local excludedSettings={"ProgressionFloor","ProgressionBossCleared","ProgressionBossClearedName","ProgressionComplete","ProgressionRestore","FarmDesync"}
     local function portable(item)
         local filtered
-        for _,field in ipairs(accountProgression)do
+        for _,field in ipairs(excludedSettings)do
             if item.Settings[field]~=nil then
                 filtered=filtered or table.clone(item.Settings)
                 filtered[field]=nil
@@ -396,7 +397,7 @@ return function(ctx)
             end
             assert(total==count,"Invalid preset list")
         end
-        -- Accept old exports, but never apply or re-export another account's checkpoints.
+        -- Drop account checkpoints and retired preferences from portable settings.
         local clean=portable(package)
         if library then
             clean=table.clone(clean);clean.Presets=table.clone(library)
@@ -698,7 +699,7 @@ if filePersistence then
 -- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
     local file=ctx.File or "SB2Codex/shared-settings.json"
-    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoRegroup","AutoRegroupUsers","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}
@@ -788,7 +789,7 @@ local function numericPreference(key,fallback,minimum,maximum)
     return math.clamp(number,minimum,maximum)
 end
 local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
-local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,FarmDesync=false,BossOnly=false,
+local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
     AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false,AutoRegroup=false}
@@ -1804,7 +1805,7 @@ local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreat
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
-    "Enabled","AutoFarm","FarmDesync","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
+    "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
     "UnsafeOffsetProfiles","Threat","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion","SelectedMiscSkill",
     "AutoExplore","AutoDodge","AtheonDodge","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
 local function settingsPayload()
@@ -2877,12 +2878,11 @@ end
 -- END BUNDLED FARM NOCLIP
     end)()
     state.FarmNoclip=make({Player=player,Pulse=RunService.Stepped,
-        Enabled=function()return state.Running and (state.AutoFarm or state.DesyncHolding)and not state.StopEverything and not state.ModeratorBlocking end})
+        Enabled=function()return state.Running and state.AutoFarm and not state.StopEverything and not state.ModeratorBlocking end})
 end
 function state.SetAutoFarm(enabled,reason)
     enabled=enabled==true
     if (state.StopEverything and enabled)or enabled==state.AutoFarm then return end
-    if enabled and state.DesyncHolding then state.FarmDesyncController.Release("Switching to Auto Farm",true)end
     state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
     state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
@@ -3054,7 +3054,6 @@ local function clearStaleFarmControllers(root)
     for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
-    if state.DesyncHolding then state.FarmDesyncController.Release("Movement handed off")end
     if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
     if movementRoot==root and positionAlign and positionAlign.Parent then return end
@@ -6221,7 +6220,6 @@ end
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
-    owned("Farm desync",state.FarmDesyncController)
     owned("AutoRegroup",state.AutoRegroupController)
     local callbacks={
         {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},
@@ -29694,10 +29692,6 @@ return function(ctx)
             local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
-        toggle("Settings","FarmDesync","Desync","SetFarmDesync")
-        paragraph("Settings","FarmDesyncStatus","Desync Status",function()
-            return state.FarmDesyncController and state.FarmDesyncController.Status or "Off"
-        end)
         local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
         local pickedPreset=state.PresetId or 0
         local function presetView(id,empty)
@@ -30170,197 +30164,6 @@ end
             task.wait(.5)
         end
     end)
-end
-do
-    local function installFarmDesync()
-        local make=(function()
--- BEGIN BUNDLED FARM DESYNC
--- Own the raised camera and, in manual mode, one reversible underground hold.
-return function(ctx)
-    local api={Active=false,Status="Off"}
-    local session,root,floor,sample,nextProbe,hold,fallback
-    local function releaseCamera()
-        local old=session
-        session=nil;api.Active=false
-        if not old then return end
-        if old.Render then old.Render:Disconnect()end
-        if old.Subject.Parent and old.Subject.CameraOffset==old.Applied then old.Subject.CameraOffset=old.Base end
-    end
-    function api.Release(reason,restore)
-        releaseCamera()
-        if hold then
-            local old=hold;hold=nil
-            ctx.EndHold(old,restore==true)
-        end
-        root,floor,sample,nextProbe,fallback=nil,nil,nil,nil,nil
-        api.Status=reason or "Off"
-    end
-    local function distanceSquared(a,b)
-        local x,z=a.X-b.X,a.Z-b.Z
-        return x*x+z*z
-    end
-    function api.Update(now)
-        local mode,reason,restore=ctx.Mode(now)
-        if not mode then api.Release(reason,restore);return end
-        local current,humanoid=ctx.Character()
-        if not current then api.Release("Waiting for character");return end
-        if current~=root then api.Release();root=current end
-        if mode~="Hold" and hold then
-            api.Release("Waiting for farm movement");root=current
-        end
-        if hold and not ctx.HoldValid(hold)then
-            api.Release("Position changed · finding ground again",true);return
-        end
-        local point=root.Position
-        if hold then
-            floor=hold.Floor;sample=hold.Position
-        elseif not sample or now>=nextProbe or distanceSquared(point,sample)>12*12 or math.abs(point.Y-sample.Y)>10 then
-            floor=(mode=="Hold" and ctx.Ground(root,point)or nil)or ctx.Surface(root,point)
-            fallback=floor==nil
-            if fallback then floor=mode=="Hold" and point.Y or ctx.FarmReference(point)end
-            sample=point;nextProbe=now+.25
-        end
-        if mode=="Hold" and not hold and floor then
-            hold=ctx.BeginHold(root,humanoid,floor,fallback)
-            if not hold then api.Status="Waiting for safe hold clearance";return end
-            point=root.Position;sample=hold.Position
-        end
-        local depth=floor and floor-point.Y
-        if not depth or depth<6 or depth>45 then
-            releaseCamera();api.Status="Waiting for Auto Farm position";return
-        end
-        local status=hold and (fallback and "Holding 20 studs below starting position" or "Holding 20 studs below ground")
-            or (fallback and "Auto Farm · terrain-free camera active" or "Auto Farm · surface camera active")
-        local camera=ctx.Camera()
-        if session and (camera~=session.Camera or camera.CameraSubject~=session.Subject)then releaseCamera()end
-        if session then api.Status=status;return end
-        local subject=camera and camera.CameraSubject
-        if not camera or subject~=humanoid then
-            api.Active=hold~=nil
-            api.Status=hold and "Holding position · camera is viewing another subject" or "Waiting for character camera"
-            return
-        end
-        local active={Camera=camera,Subject=humanoid,Base=humanoid.CameraOffset}
-        session=active
-        local function render()
-            if session~=active then return end
-            if not root.Parent or not humanoid.Parent or ctx.Camera()~=camera or camera.CameraSubject~=humanoid then releaseCamera();return end
-            local at=root.Position
-            local currentDepth=floor-at.Y
-            if distanceSquared(at,sample)>32*32 or currentDepth<6 or currentDepth>45 then releaseCamera();return end
-            local currentOffset=humanoid.CameraOffset
-            if currentOffset~=active.Applied then active.Base=currentOffset end
-            local offset=ctx.CameraOffset(root,active.Base,currentDepth)
-            if offset~=currentOffset then humanoid.CameraOffset=offset end
-            active.Applied=humanoid.CameraOffset
-        end
-        local ok=pcall(function()
-            render()
-            active.Render=ctx.Render:Connect(render)
-        end)
-        if not ok then releaseCamera();api.Status="Character camera unavailable";return end
-        api.Active=true;api.Status=status
-    end
-    return api
-end
-
--- END BUNDLED FARM DESYNC
-        end)()
-        local params=RaycastParams.new()
-        params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
-        local function groundRay(root,point,above,depth)
-            if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.PerformanceBoosters["Delete map"]
-                or state.PerformanceBoosters["Remove everything"]then return nil end
-            local excluded={root.Parent}
-            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
-                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
-            end
-            params.FilterDescendantsInstances=excluded
-            local hit=workspace:Raycast(point+Vector3.new(0,above,0),Vector3.new(0,-depth,0),params)
-            return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
-        end
-        local function cameraHeight(humanoid,root)
-            return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
-        end
-        local controller=make({Render=RunService.PreRender,Camera=function()return workspace.CurrentCamera end,
-            Mode=function(now)
-                local owner=state.MovementOwnership.Resolve(now)
-                if not state.Running or not state.FarmDesync or state.StopEverything or state.AntiSuspiciousRestUntil then
-                    return nil,"Paused",owner=="Stopped" or owner=="Manual"
-                end
-                if state.TravelHold or state.ProtectionRetreating or (owner~="Manual" and owner~="Farm")then return nil,"Paused · "..owner end
-                return owner=="Farm" and "Farm" or "Hold"
-            end,
-            Character=function()
-                local character=player.Character
-                local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-                local root=character and character:FindFirstChild("HumanoidRootPart")
-                if humanoid and humanoid.Health>0 and not humanoid.SeatPart and root and not root.Anchored then return root,humanoid end
-                return nil,humanoid
-            end,
-            Surface=function(root,point)return groundRay(root,point,45,41)end,
-            Ground=function(root,point)
-                local floor=groundRay(root,point,1,10)
-                return floor and floor<=point.Y and floor or nil
-            end,
-            FarmReference=function(point)
-                if point.Y<=workspace.FallenPartsDestroyHeight+30 or state.FixedFarmPosition then return nil end
-                if state.IdleBelowMap and type(state.IdleFloorY)=="number"then
-                    local depth=state.IdleFloorY-point.Y
-                    if depth>=6 and depth<=45 then return state.IdleFloorY end
-                end
-                if state.Moving then return point.Y+20 end
-            end,
-            BeginHold=function(root,humanoid,floor,fallback)
-                local point=root.Position
-                local below=Vector3.new(point.X,floor-20,point.Z)
-                if below.Y<=workspace.FallenPartsDestroyHeight+35 or movementRoot then return nil end
-                local surface=fallback and point or Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
-                local attachment=create("Attachment",{Name="FeatherDesyncAttachment"},root)
-                local align=create("AlignPosition",{Name="FeatherDesyncHold",Mode=Enum.PositionAlignmentMode.OneAttachment,
-                    Attachment0=attachment,Position=below,ApplyAtCenterOfMass=true,
-                    MaxForce=math.max(1,root.AssemblyMass)*workspace.Gravity*8,MaxVelocity=60,Responsiveness=45},root)
-                state.DesyncHolding=true;state.FarmNoclip.Update()
-                pivotRoot(root,below)
-                return {Root=root,Humanoid=humanoid,Align=align,Attachment=attachment,Position=below,Floor=floor,Surface=surface}
-            end,
-            HoldValid=function(hold)
-                return hold.Align.Parent and (hold.Root.Position-hold.Position).Magnitude<=8
-            end,
-            EndHold=function(hold,restorePosition)
-                hold.Align:Destroy();hold.Attachment:Destroy()
-                local root=hold.Root
-                if restorePosition and root.Parent==player.Character and not root.Anchored and hold.Humanoid.Health>0
-                    and root.Position.Y<hold.Floor then
-                    local drift=root.Position-hold.Position
-                    if math.abs(drift.Y)<=25 and drift.X*drift.X+drift.Z*drift.Z<=36 then pivotRoot(root,hold.Surface)end
-                end
-                state.DesyncHolding=false;state.FarmNoclip.Update()
-            end,
-            CameraOffset=function(root,base,depth)
-                return base+root.CFrame:VectorToObjectSpace(Vector3.new(0,depth,0))
-            end})
-        local heartbeat,nextUpdate
-        local function stop()
-            if heartbeat then heartbeat:Disconnect();heartbeat=nil end
-            controller.Release("Off",not state.AutomationTeleporting and not state.TravelBusy and not state.SafeModePanic and not state.Dodging)
-        end
-        local function apply(value)
-            state.FarmDesync=value==true
-            if not state.FarmDesync then stop();return end
-            if heartbeat then return end
-            nextUpdate=0
-            heartbeat=RunService.Heartbeat:Connect(function()
-                local now=os.clock()
-                if now>=nextUpdate then nextUpdate=now+.1;controller.Update(now)end
-            end)
-        end
-        state.FarmDesyncController=controller
-        controller.Destroy=stop
-        function state.SetFarmDesync(value)apply(value);requestSave()end
-        apply(restore.FarmDesync)
-    end
-    installFarmDesync()
 end
 state.StartupComplete=true
 ]============]

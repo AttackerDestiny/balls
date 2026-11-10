@@ -44,7 +44,7 @@ local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreat
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
-    "Enabled","AutoFarm","FarmDesync","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
+    "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
     "UnsafeOffsetProfiles","Threat","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion","SelectedMiscSkill",
     "AutoExplore","AutoDodge","AtheonDodge","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
 local function settingsPayload()

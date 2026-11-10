@@ -263,12 +263,11 @@ do
 -- END BUNDLED FARM NOCLIP
     end)()
     state.FarmNoclip=make({Player=player,Pulse=RunService.Stepped,
-        Enabled=function()return state.Running and (state.AutoFarm or state.DesyncHolding)and not state.StopEverything and not state.ModeratorBlocking end})
+        Enabled=function()return state.Running and state.AutoFarm and not state.StopEverything and not state.ModeratorBlocking end})
 end
 function state.SetAutoFarm(enabled,reason)
     enabled=enabled==true
     if (state.StopEverything and enabled)or enabled==state.AutoFarm then return end
-    if enabled and state.DesyncHolding then state.FarmDesyncController.Release("Switching to Auto Farm",true)end
     state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
     state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
@@ -412,7 +411,6 @@ local function clearStaleFarmControllers(root)
     for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
-    if state.DesyncHolding then state.FarmDesyncController.Release("Movement handed off")end
     if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
     if movementRoot==root and positionAlign and positionAlign.Parent then return end

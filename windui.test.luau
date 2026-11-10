@@ -85,7 +85,6 @@ return function(source)
     function s.SetPresetRoute(key,id)record("SetPresetRoute",key,id);s.PresetPreferences[key]=id end
     function s.GetWebhookRarities()return {"Legendary","Tribute","Burst"},{Legendary=true}end
     function s.GetWebhookStatus()return "Webhook status"end
-    function s.SetFarmDesync(value)record("SetFarmDesync",value);s.FarmDesync=value end
     function s.SetWebhookUrl(url)record("SetWebhookUrl",url)end
     function s.SetBetweenRoomField(index,field,value)
         if field=="AutoRetry" and not s.IsBetweenRoomHost(index)then return end
@@ -284,7 +283,6 @@ return function(source)
     for i=1,10 do staged.Update(20+i*.3);flush()end
     assert(inventoryReads>priorReads,"Sliced refreshes must eventually update inventory")
     assert(staged.Tabs.Settings and staged.Controls.Theme and staged.Controls.ConfigImport and staged.Controls.ConfigExport)
-    assert(staged.Controls.FarmDesync.Title=="Desync" and staged.Controls.FarmDesync.Value==false)
     staged.Controls.Theme:Emit("Light");assert(s.Theme=="Light")
     staged.Controls.ConfigExport.Callback();assert(calls[#calls].Name=="ExportConfig")
     function s.ImportConfig(bytes)
@@ -297,7 +295,6 @@ return function(source)
     assert(calls[#calls].Name=="SetWebhookUrl" and staged.Controls.WebhookUrl.Value=="", "Webhook credentials clear from the input after entry")
     assert(staged.Controls.ConfigImport.Value=="","Successful import clears the text field")
     staged.Tabs.Settings:Select()
-    staged.Controls.FarmDesync:Emit(true);assert(s.FarmDesync and calls[#calls].Name=="SetFarmDesync")
     for i=1,10 do staged.Update(24+i*.3);flush()end
     assert(staged.Controls.PresetSelection.Value=="Preset 1" and table.find(staged.Controls.PresetBetween.Values,"Preset 1"))
     staged.Controls.LoadPreset.Callback();assert(calls[#calls].Name=="LoadPreset"and calls[#calls].Args[1]==1)

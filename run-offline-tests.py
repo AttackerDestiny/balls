@@ -282,7 +282,6 @@ def main():
     fixture += "assert(loadstring(" + quote(read("block-confirm.test.luau")) + "))()(" + quote(read("block-confirm.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("block-prompt.test.luau")) + "))()(" + quote(read("block-prompt.module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("farm-noclip.test.luau")) + "))()(" + quote(read("farm-noclip.module.luau")) + ")\n"
-    fixture += "assert(loadstring(" + quote(read("farm-desync.test.luau")) + "))()(" + quote(read("farm-desync.module.luau")) + ")\n"
     order_adapter = adapter[adapter.index("    local function spotOrder("):adapter.index("    local function joinFriendAtPad(")]
     fixture += "assert(loadstring(" + quote(read("multi-order.test.luau")) + "))()(" + quote(order_adapter) + ")\n"
     preflight = adapter[adapter.index("    local function queuePreflight()"):adapter.index("    local function preflight()")]

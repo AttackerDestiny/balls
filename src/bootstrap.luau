@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-10.terrain-free-desync-v3.0.40"
-local VERSION="3.0.40"
+local BUILD="2026-11-10.feature-cleanup-v3.0.41"
+local VERSION="3.0.41"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -164,7 +164,7 @@ local function numericPreference(key,fallback,minimum,maximum)
     return math.clamp(number,minimum,maximum)
 end
 local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
-local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,FarmDesync=false,BossOnly=false,
+local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
     AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false,AutoRegroup=false}
