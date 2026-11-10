@@ -223,6 +223,8 @@ Use **Create Room** to add a numbered setup with **Host**, **Alt**, **Difficulty
 
 The native party limit is eight accounts total: one Host and seven Alts. Repeating the host in Alt is ignored when resolving the assignment. Too many alts, malformed assignments or conflicting enabled rooms show a warning under the affected **Start** toggle; the roster is never silently truncated. Correcting the setup clears its warning without restarting the script.
 
+Each account must appear in its own active preset's room **Host** or **Alt** list. A Safe Mode whitelist, Auto Join Friend target or Regroup Users list does not assign it to a room. If Start is ON but the current username is absent, the Start toggle identifies that mismatch. The saved `AutoCreateBetween` flag is derived from a valid assignment; editing that flag alone does not enable joining. Keep the Host and Alt rosters consistent in the outside and Between presets used by every participating account.
+
 While **Start** is ON, each Alt continuously searches for its configured Host's room and attempts to join every three seconds until native party membership is confirmed. This does not wait for a wipe, Wave 100, or the Alt's Auto Retry setting. If the host replaces the room or membership is lost, joining resumes automatically. Start OFF, Stop Everything, teleport and active Safe Mode recovery pause the loop. Update/reload the script on each Alt to use this behavior.
 
 Use the **X** on a room header to delete its saved setup. The remaining setups are renumbered.

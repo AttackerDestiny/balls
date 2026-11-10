@@ -39,5 +39,20 @@ return function(source)
     rooms[2]=nil;room.Start=false
     assignment=update()
     assert(assignment.Role=="Unassigned"and not state.AutoCreateBetween and not state.BetweenRoomError)
+    local testAccount={Name="Sb2WaBanTest",UserId=99}
+    scope.player=testAccount;room.Host="Host";room.Start=true
+    room.Alt="andrew_ei7h4, MonyTally, brandon_1sks4, dana_axmr, levi_9hj32y, cameron_9e3, lindsay_nxi4"
+    local original=room.Alt
+    assignment=update()
+    assert(assignment.Role=="Unassigned"and not state.AutoCreateBetween and state.BetweenRoomStatus:find("Sb2WaBanTest",1,true)
+        and state.BetweenRoomErrors[1]:find("not in this room",1,true),
+        "An enabled room must explain when the current account is missing from its Alt list")
+    assert(room.Alt==original,"Diagnostics cannot append an eighth alt or replace another user")
+    room.Alt=room.Alt:gsub("brandon_1sks4","Sb2WaBanTest")
+    assignment=update()
+    assert(assignment.Role=="Alt"and #assignment.Alts==7 and state.AutoCreateBetween and not state.BetweenRoomError
+        and not state.BetweenRoomErrors[1],"Correcting the configured slot enables joining without changing a derived flag")
+    room.Start=false;assignment=update()
+    assert(not state.BetweenRoomError and not next(state.BetweenRoomErrors),"Start OFF clears the unassigned-room warning")
     print("PASS Between assignment: host deduplication, native seven-alt limit, explicit errors, roster preservation and corrected setup")
 end

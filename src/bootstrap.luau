@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-10.feature-cleanup-v3.0.41"
-local VERSION="3.0.41"
+local BUILD="2026-11-10.between-unassigned-warning-v3.0.42"
+local VERSION="3.0.42"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

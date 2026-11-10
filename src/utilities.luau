@@ -628,8 +628,10 @@ local function installBetweenAutomation()
         state.AutoCreateBetween=false
         state.BetweenRoomErrors={}
         local assignedIndex
+        local enabledRooms={}
         for roomIndex,entry in ipairs(rooms)do
             if not entry.Start then continue end
+            enabledRooms[#enabledRooms+1]=roomIndex
             local host=hostName(entry)
             local hostPlayer=host and findPlayer(host)
             local isHost=host and matches(player,host)
@@ -665,10 +667,17 @@ local function installBetweenAutomation()
                 if assignment.Role=="Invalid"then state.BetweenRoomErrors[roomIndex]=assignment.Message end
             end
         end
+        if not assignment and #enabledRooms>0 then
+            local message="@"..player.Name.." is not listed as Host or Alt in an enabled room"
+            assignment={Role="Unassigned",Message=message}
+            for _,roomIndex in ipairs(enabledRooms)do
+                state.BetweenRoomErrors[roomIndex]="@"..player.Name.." is not in this room's Host/Alt list"
+            end
+        end
         assignment=assignment or {Role="Unassigned"}
         state.AutoCreateBetween=assignment.Room~=nil
         local previousError=state.BetweenRoomError
-        state.BetweenRoomError=assignment.Role=="Invalid"and assignment.Message or nil
+        state.BetweenRoomError=(assignment.Role=="Invalid"or assignment.Role=="Unassigned")and assignment.Message or nil
         if state.BetweenRoomError then state.BetweenRoomStatus=state.BetweenRoomError
         elseif previousError then state.BetweenRoomStatus="Checking configured room"end
         state.ObserveBetweenReward=retry and assignment.Role=="Host" and assignment.Room.AutoRetry and retry.Observe or nil
