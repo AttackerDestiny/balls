@@ -73,6 +73,7 @@ MODULES = {
     "SHARED SETTINGS": "shared-settings.module.luau",
     "MODERATOR WATCH": "moderator-watch.module.luau",
     "FARM NOCLIP": "farm-noclip.module.luau",
+    "FARM DESYNC": "farm-desync.module.luau",
     "BLOCK CONFIRM": "block-confirm.module.luau",
     "BLOCK INPUT": "block-input.module.luau",
     "BLOCK PROMPT": "block-prompt.module.luau",

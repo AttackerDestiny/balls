@@ -1,7 +1,7 @@
 -- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
     local file=ctx.File or "SB2Codex/shared-settings.json"
-    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoRegroup","AutoRegroupUsers","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}

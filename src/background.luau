@@ -87,4 +87,68 @@ do
         end
     end)
 end
+do
+    local function installFarmDesync()
+        local make=(function()
+-- BEGIN BUNDLED FARM DESYNC
+-- END BUNDLED FARM DESYNC
+        end)()
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local controller=make({Render=RunService.PreRender,Camera=function()return workspace.CurrentCamera end,
+            Allowed=function(now)
+                return state.Running and state.FarmDesync and state.AutoFarm and not state.ViewingPlayer
+                    and not state.AntiSuspiciousRestUntil and not state.PerformanceBoosters["Delete map"]
+                    and not state.PerformanceBoosters["Remove everything"] and state.MovementOwnership.Resolve(now)=="Farm"
+            end,
+            Character=function()
+                local character=player.Character
+                local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+                local root=character and character:FindFirstChild("HumanoidRootPart")
+                if humanoid and humanoid.Health>0 and not humanoid.SeatPart and root and not root.Anchored then return root,humanoid end
+                return nil,humanoid
+            end,
+            Surface=function(root,point)
+                if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+                local excluded={root.Parent}
+                for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
+                    local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+                end
+                params.FilterDescendantsInstances=excluded
+                local hit=workspace:Raycast(point+Vector3.new(0,45,0),Vector3.new(0,-41,0),params)
+                return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+            end,
+            CameraHeight=function(humanoid,root)
+                return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
+            end,
+            CreateProxy=function()
+                return create("Part",{Name="FeatherDesyncCamera",Anchored=true,Transparency=1,CanCollide=false,
+                    CanTouch=false,CanQuery=false,CastShadow=false,Size=Vector3.one},workspace)
+            end,
+            MoveProxy=function(proxy,position,y)
+                local point=Vector3.new(position.X,y,position.Z)
+                if (proxy.Position-point).Magnitude>.02 then proxy.Position=point end
+            end})
+        local heartbeat,nextUpdate
+        local function stop()
+            if heartbeat then heartbeat:Disconnect();heartbeat=nil end
+            controller.Release()
+        end
+        local function apply(value)
+            state.FarmDesync=value==true
+            if not state.FarmDesync then stop();return end
+            if heartbeat then return end
+            nextUpdate=0
+            heartbeat=RunService.Heartbeat:Connect(function()
+                local now=os.clock()
+                if now>=nextUpdate then nextUpdate=now+.1;controller.Update(now)end
+            end)
+        end
+        state.FarmDesyncController=controller
+        controller.Destroy=stop
+        function state.SetFarmDesync(value)apply(value);requestSave()end
+        apply(restore.FarmDesync)
+    end
+    installFarmDesync()
+end
 state.StartupComplete=true

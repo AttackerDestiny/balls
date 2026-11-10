@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-09.built-in-idle-protection-v3.0.37"
-local VERSION="3.0.37"
+local BUILD="2026-11-10.farm-desync-v3.0.38"
+local VERSION="3.0.38"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -283,7 +283,7 @@ local presetBook=(function()
 return function(ctx)
     local schema={}
     local groups={
-        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
+        boolean={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","AutoRegroup","CreditCheck","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","AutoTrade","AutoEquipBestSword","SafeMode","AntiSuspicious","MultiSpot","AccountProgression","ProgressionBossCleared","ProgressionComplete","AutoOffset","SkillAura","MiscSkillEnabled","AutoExplore","AutoDodge","AtheonDodge","TransparentMap","AutoJoinFriend","ViewingPlayer","ViewingPlayerInventory","AutoHideUI","StopEverything"},
         number={"Version","SafeFloorId","ProgressionFloor","Radius","SkillRange","Threat","SkillPerWeaponVersion","SelectedPlayerId"},
         string={"BetweenAccess","BetweenDifficulty","AutoRegroupUsers","CreditWhitelistText","TradeMode","JoinFriendUsername","SafeWhitelistText","MultiSpotCursor","MultiSpotPending","ProgressionBossClearedName","AutomationRunId","SelectedSkill","SelectedMiscSkill","Theme","ActiveTab"},
         table={"BetweenRooms","BetweenPace","AntiSuspiciousLimits","AutoCraft","TradeItems","AutoDismantle","SafeWhitelistIds","MultiSpotSelected","MultiSpotOrder","ProgressionRestore","AutomationResumeFeatures","OffsetProfiles","UnsafeOffsetProfiles","SkillPerWeapon","PerformanceBoosters","PanelPosition","HealthHUDPosition","WindUIPosition"},
@@ -698,7 +698,7 @@ if filePersistence then
 -- Merge only this account's changed preference fields into the latest shared file.
 return function(ctx)
     local file=ctx.File or "SB2Codex/shared-settings.json"
-    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
+    local fields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreateBetween","BetweenRooms","BetweenPace","BetweenAccess","BetweenDifficulty","CreditCheck","CreditWhitelistText","AutoCraft","AutoTrade","TradeMode","TradeItems","AutoDismantle","AutoEquipBestSword","Enabled","AutoFarm","FarmDesync","BossOnly","AutoSwing","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion",
         "MiscSkillEnabled","SelectedMiscSkill","AutoDodge","AtheonDodge","TransparentMap","PerformanceBoosters","AutoRegroup","AutoRegroupUsers","AutoJoinFriend","JoinFriendUsername","SafeMode","SafeFloorId","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected","MultiSpotOrder","Theme","AccountProgression","PanelPosition","HealthHUDPosition","WindUIPosition","AutoHideUI"}
     local function project(settings)
         local result={Version=1}
@@ -788,7 +788,7 @@ local function numericPreference(key,fallback,minimum,maximum)
     return math.clamp(number,minimum,maximum)
 end
 local restore={Radius=30,SkillRange=30,FarmRange=math.huge,Threat=3}
-local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,BossOnly=false,
+local booleanDefaults={Enabled=false,AutoSwing=true,AutoTrade=false,AutoEquipBestSword=true,AutoFarm=false,FarmDesync=false,BossOnly=false,
     CreditCheck=false,SkillAura=false,MiscSkillEnabled=false,ViewingPlayer=false,ViewingPlayerInventory=false,
     AutoExplore=true,AutoDodge=true,NoSelfDamage=false,AeganatosDodge=false,AtheonDodge=false,AtheonUnlock=false,AutoCreateBetween=false,AutoJoinFriend=false,SafeMode=false,MultiSpot=false,
     AccountProgression=false,ProgressionBossCleared=false,ProgressionComplete=false,AntiSuspicious=false,AutoRegroup=false}
@@ -1804,7 +1804,7 @@ local persistedFields={"NoSelfDamage","AeganatosDodge","AtheonUnlock","AutoCreat
     "AutoJoinFriend","JoinFriendUsername","SafeMode","SafeWhitelistText","SafeWhitelistIds","AntiSuspicious","AntiSuspiciousLimits","MultiSpot","MultiSpotSelected",
     "MultiSpotOrder","MultiSpotCursor","MultiSpotPending","AccountProgression","ProgressionFloor","ProgressionBossCleared",
     "ProgressionComplete","ProgressionBossClearedName","ProgressionRestore","AutomationRunId","AutomationResumeFeatures",
-    "Enabled","AutoFarm","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
+    "Enabled","AutoFarm","FarmDesync","BossOnly","CreditCheck","CreditWhitelistText","AutoSwing","Radius","SkillRange","OffsetProfiles",
     "UnsafeOffsetProfiles","Threat","SkillAura","SelectedSkill","SkillPerWeapon","SkillPerWeaponVersion","SelectedMiscSkill",
     "AutoExplore","AutoDodge","AtheonDodge","PerformanceBoosters","WindUIPosition","AutoHideUI","Theme","SelectedPlayerId"}
 local function settingsPayload()
@@ -6219,6 +6219,7 @@ end
     method("Search",search,"Destroy",preserveSearch)
     if not preserveSearch then owned("Safe",state.SafeController)end
     owned("MultiSpot",state.MultiSpotController)
+    owned("Farm desync",state.FarmDesyncController)
     owned("AutoRegroup",state.AutoRegroupController)
     local callbacks={
         {"Progression",function()if state.ProgressionDestroy then state.ProgressionDestroy()end end},
@@ -29691,6 +29692,7 @@ return function(ctx)
             local options={};for name in pairs(ctx.WindUI:GetThemes())do options[#options+1]=name end;table.sort(options)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
+        toggle("Settings","FarmDesync","Desync","SetFarmDesync")
         local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
         local pickedPreset=state.PresetId or 0
         local function presetView(id,empty)
@@ -30163,6 +30165,135 @@ end
             task.wait(.5)
         end
     end)
+end
+do
+    local function installFarmDesync()
+        local make=(function()
+-- BEGIN BUNDLED FARM DESYNC
+-- Follow the verified surface while the existing farm controller owns the underground body.
+return function(ctx)
+    local api={Active=false,Status="Off"}
+    local session,root,floor,sample,nextProbe
+    local function releaseCamera()
+        local old=session
+        session=nil;api.Active=false
+        if not old then return end
+        if old.Render then old.Render:Disconnect()end
+        if old.Camera.Parent and old.Camera.CameraSubject==old.Proxy then
+            local _,humanoid=ctx.Character()
+            old.Camera.CameraSubject=old.Subject.Parent and old.Subject or humanoid
+        end
+        old.Proxy:Destroy()
+    end
+    function api.Release(reason)
+        releaseCamera()
+        root,floor,sample,nextProbe=nil,nil,nil,nil
+        api.Status=reason or "Off"
+    end
+    local function distanceSquared(a,b)
+        local x,z=a.X-b.X,a.Z-b.Z
+        return x*x+z*z
+    end
+    function api.Update(now)
+        if not ctx.Allowed(now)then api.Release("Waiting for farm movement");return end
+        local current,humanoid=ctx.Character()
+        if not current then api.Release("Waiting for character");return end
+        if current~=root then api.Release();root=current end
+        local point=root.Position
+        if not sample or now>=nextProbe or distanceSquared(point,sample)>12*12 or math.abs(point.Y-sample.Y)>10 then
+            floor=ctx.Surface(root,point);sample=point;nextProbe=now+.25
+        end
+        local depth=floor and floor-point.Y
+        if not depth or depth<6 or depth>45 then
+            releaseCamera();api.Status="Waiting for verified underground position";return
+        end
+        local camera=ctx.Camera()
+        if session and (camera~=session.Camera or camera.CameraSubject~=session.Proxy)then releaseCamera()end
+        if session then return end
+        local subject=camera and camera.CameraSubject
+        if subject~=humanoid and subject~=root then api.Status="Waiting for character camera";return end
+        local proxy=ctx.CreateProxy()
+        local active={Camera=camera,Subject=subject,Proxy=proxy}
+        session=active
+        local function render()
+            if session~=active then return end
+            if not root.Parent or ctx.Camera()~=camera or camera.CameraSubject~=proxy then releaseCamera();return end
+            local at=root.Position
+            local currentDepth=floor-at.Y
+            if distanceSquared(at,sample)>32*32 or currentDepth<6 or currentDepth>45 then releaseCamera();return end
+            ctx.MoveProxy(proxy,at,floor+ctx.CameraHeight(humanoid,root))
+        end
+        local ok=pcall(function()
+            ctx.MoveProxy(proxy,point,floor+ctx.CameraHeight(humanoid,root))
+            camera.CameraSubject=proxy
+            active.Render=ctx.Render:Connect(render)
+        end)
+        if not ok then releaseCamera();api.Status="Character camera unavailable";return end
+        api.Active=true;api.Status="Underground · surface camera"
+    end
+    api.Destroy=api.Release
+    return api
+end
+
+-- END BUNDLED FARM DESYNC
+        end)()
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local controller=make({Render=RunService.PreRender,Camera=function()return workspace.CurrentCamera end,
+            Allowed=function(now)
+                return state.Running and state.FarmDesync and state.AutoFarm and not state.ViewingPlayer
+                    and not state.AntiSuspiciousRestUntil and not state.PerformanceBoosters["Delete map"]
+                    and not state.PerformanceBoosters["Remove everything"] and state.MovementOwnership.Resolve(now)=="Farm"
+            end,
+            Character=function()
+                local character=player.Character
+                local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+                local root=character and character:FindFirstChild("HumanoidRootPart")
+                if humanoid and humanoid.Health>0 and not humanoid.SeatPart and root and not root.Anchored then return root,humanoid end
+                return nil,humanoid
+            end,
+            Surface=function(root,point)
+                if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+                local excluded={root.Parent}
+                for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
+                    local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+                end
+                params.FilterDescendantsInstances=excluded
+                local hit=workspace:Raycast(point+Vector3.new(0,45,0),Vector3.new(0,-41,0),params)
+                return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+            end,
+            CameraHeight=function(humanoid,root)
+                return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
+            end,
+            CreateProxy=function()
+                return create("Part",{Name="FeatherDesyncCamera",Anchored=true,Transparency=1,CanCollide=false,
+                    CanTouch=false,CanQuery=false,CastShadow=false,Size=Vector3.one},workspace)
+            end,
+            MoveProxy=function(proxy,position,y)
+                local point=Vector3.new(position.X,y,position.Z)
+                if (proxy.Position-point).Magnitude>.02 then proxy.Position=point end
+            end})
+        local heartbeat,nextUpdate
+        local function stop()
+            if heartbeat then heartbeat:Disconnect();heartbeat=nil end
+            controller.Release()
+        end
+        local function apply(value)
+            state.FarmDesync=value==true
+            if not state.FarmDesync then stop();return end
+            if heartbeat then return end
+            nextUpdate=0
+            heartbeat=RunService.Heartbeat:Connect(function()
+                local now=os.clock()
+                if now>=nextUpdate then nextUpdate=now+.1;controller.Update(now)end
+            end)
+        end
+        state.FarmDesyncController=controller
+        controller.Destroy=stop
+        function state.SetFarmDesync(value)apply(value);requestSave()end
+        apply(restore.FarmDesync)
+    end
+    installFarmDesync()
 end
 state.StartupComplete=true
 ]============]
