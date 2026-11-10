@@ -2,7 +2,7 @@
 
 Feather is the Swordburst 2 Luau script distributed through this repository's stable loader. It combines farming and combat automation, protected-server searching, arena rotation, progression, inventory utilities, trading, and a WindUI interface.
 
-This guide describes **v3.0.38**. Saved settings can override fresh-install defaults.
+This guide describes **v3.0.39**. Saved settings can override fresh-install defaults.
 
 Version 3 reimplements the authored feature modules and main runtime adapters. Combat, credit, target detection, movement, dodges, safety/rejoining, progression, inventory/trade/crafting, Between/Atheon utilities, persistence, visual cleanup and modern UI all use the rewritten implementations. Public loader paths and version-1 settings remain compatible. Licensed WindUI/icon dependencies and fixed arena/moderator datasets remain dependencies/data rather than being counted as rewritten features.
 
@@ -376,7 +376,7 @@ Streaming loss, an unrelated miniboss, or an uncredited corpse is not a complete
 | Control | Behavior |
 | --- | --- |
 | **Theme** | Selects a theme from bundled WindUI |
-| **Desync** | Follows verified ground with a local camera proxy during underground Auto Farm. Releases the camera for dodge, travel, safety, and manual control. OFF. |
+| **Desync** | Holds the character 20 studs under nearby verified ground with a surface camera. When Auto Farm is enabled, Auto Farm controls the character and Desync follows underground movement with the camera. Yields to dodge, travel, and safety. OFF. |
 | **Config Export** | Copies portable JSON to the clipboard |
 | **Config Import** | Paste an export to add its presets and restore its Auto Preset choices |
 | **Load Preset** | Load the selected preset or switch back to Default |

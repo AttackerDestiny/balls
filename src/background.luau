@@ -95,11 +95,30 @@ do
         end)()
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local function groundRay(root,point,above,depth)
+            if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+            local excluded={root.Parent}
+            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
+                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            end
+            params.FilterDescendantsInstances=excluded
+            local hit=workspace:Raycast(point+Vector3.new(0,above,0),Vector3.new(0,-depth,0),params)
+            return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+        end
+        local function cameraHeight(humanoid,root)
+            return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
+        end
         local controller=make({Render=RunService.PreRender,Camera=function()return workspace.CurrentCamera end,
-            Allowed=function(now)
-                return state.Running and state.FarmDesync and state.AutoFarm and not state.ViewingPlayer
-                    and not state.AntiSuspiciousRestUntil and not state.PerformanceBoosters["Delete map"]
-                    and not state.PerformanceBoosters["Remove everything"] and state.MovementOwnership.Resolve(now)=="Farm"
+            Mode=function(now)
+                local owner=state.MovementOwnership.Resolve(now)
+                if not state.Running or not state.FarmDesync or state.StopEverything or state.AntiSuspiciousRestUntil then
+                    return nil,"Paused",owner=="Stopped" or owner=="Manual"
+                end
+                if state.TravelHold or state.ProtectionRetreating or (owner~="Manual" and owner~="Farm")then return nil,"Paused · "..owner end
+                if state.PerformanceBoosters["Delete map"] or state.PerformanceBoosters["Remove everything"]then
+                    return nil,"Desync requires solid terrain",true
+                end
+                return owner=="Farm" and "Farm" or "Hold"
             end,
             Character=function()
                 local character=player.Character
@@ -108,31 +127,44 @@ do
                 if humanoid and humanoid.Health>0 and not humanoid.SeatPart and root and not root.Anchored then return root,humanoid end
                 return nil,humanoid
             end,
-            Surface=function(root,point)
-                if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
-                local excluded={root.Parent}
-                for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
-                    local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            Surface=function(root,point)return groundRay(root,point,45,41)end,
+            Ground=function(root,point)
+                local floor=groundRay(root,point,1,10)
+                return floor and floor<=point.Y and floor or nil
+            end,
+            BeginHold=function(root,humanoid,floor)
+                local point=root.Position
+                local below=Vector3.new(point.X,floor-20,point.Z)
+                if below.Y<=workspace.FallenPartsDestroyHeight+35 or movementRoot then return nil end
+                local surface=Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
+                local attachment=create("Attachment",{Name="FeatherDesyncAttachment"},root)
+                local align=create("AlignPosition",{Name="FeatherDesyncHold",Mode=Enum.PositionAlignmentMode.OneAttachment,
+                    Attachment0=attachment,Position=below,ApplyAtCenterOfMass=true,
+                    MaxForce=math.max(1,root.AssemblyMass)*workspace.Gravity*8,MaxVelocity=60,Responsiveness=45},root)
+                state.DesyncHolding=true;state.FarmNoclip.Update()
+                pivotRoot(root,below)
+                return {Root=root,Humanoid=humanoid,Align=align,Attachment=attachment,Position=below,Floor=floor,Surface=surface}
+            end,
+            HoldValid=function(hold)
+                return hold.Align.Parent and (hold.Root.Position-hold.Position).Magnitude<=8
+            end,
+            EndHold=function(hold,restorePosition)
+                hold.Align:Destroy();hold.Attachment:Destroy()
+                local root=hold.Root
+                if restorePosition and root.Parent==player.Character and not root.Anchored and hold.Humanoid.Health>0
+                    and root.Position.Y<hold.Floor then
+                    local drift=root.Position-hold.Position
+                    if math.abs(drift.Y)<=25 and drift.X*drift.X+drift.Z*drift.Z<=36 then pivotRoot(root,hold.Surface)end
                 end
-                params.FilterDescendantsInstances=excluded
-                local hit=workspace:Raycast(point+Vector3.new(0,45,0),Vector3.new(0,-41,0),params)
-                return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+                state.DesyncHolding=false;state.FarmNoclip.Update()
             end,
-            CameraHeight=function(humanoid,root)
-                return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
-            end,
-            CreateProxy=function()
-                return create("Part",{Name="FeatherDesyncCamera",Anchored=true,Transparency=1,CanCollide=false,
-                    CanTouch=false,CanQuery=false,CastShadow=false,Size=Vector3.one},workspace)
-            end,
-            MoveProxy=function(proxy,position,y)
-                local point=Vector3.new(position.X,y,position.Z)
-                if (proxy.Position-point).Magnitude>.02 then proxy.Position=point end
+            CameraOffset=function(root,base,depth)
+                return base+root.CFrame:VectorToObjectSpace(Vector3.new(0,depth,0))
             end})
         local heartbeat,nextUpdate
         local function stop()
             if heartbeat then heartbeat:Disconnect();heartbeat=nil end
-            controller.Release()
+            controller.Release("Off",not state.AutomationTeleporting and not state.TravelBusy and not state.SafeModePanic and not state.Dodging)
         end
         local function apply(value)
             state.FarmDesync=value==true

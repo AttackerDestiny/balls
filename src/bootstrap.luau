@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-10.farm-desync-v3.0.38"
-local VERSION="3.0.38"
+local BUILD="2026-11-10.standalone-desync-v3.0.39"
+local VERSION="3.0.39"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

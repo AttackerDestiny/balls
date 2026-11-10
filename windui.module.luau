@@ -457,6 +457,9 @@ return function(ctx)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
         toggle("Settings","FarmDesync","Desync","SetFarmDesync")
+        paragraph("Settings","FarmDesyncStatus","Desync Status",function()
+            return state.FarmDesyncController and state.FarmDesyncController.Status or "Off"
+        end)
         local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
         local pickedPreset=state.PresetId or 0
         local function presetView(id,empty)

@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-10.farm-desync-v3.0.38"
-local VERSION="3.0.38"
+local BUILD="2026-11-10.standalone-desync-v3.0.39"
+local VERSION="3.0.39"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -2876,11 +2876,12 @@ end
 -- END BUNDLED FARM NOCLIP
     end)()
     state.FarmNoclip=make({Player=player,Pulse=RunService.Stepped,
-        Enabled=function()return state.Running and state.AutoFarm and not state.StopEverything and not state.ModeratorBlocking end})
+        Enabled=function()return state.Running and (state.AutoFarm or state.DesyncHolding)and not state.StopEverything and not state.ModeratorBlocking end})
 end
 function state.SetAutoFarm(enabled,reason)
     enabled=enabled==true
     if (state.StopEverything and enabled)or enabled==state.AutoFarm then return end
+    if enabled and state.DesyncHolding then state.FarmDesyncController.Release("Switching to Auto Farm",true)end
     state.LastAutoFarmChange={Enabled=enabled,Reason=reason or "API",At=os.clock(),Line=debug.info(2,"l")}
     if state.AutoFarm and not enabled then state.ProtectionUntil=os.clock()+8 end
     state.AutoFarm=enabled;state.FarmTargetLock=nil;state.LastMovementError=nil
@@ -3052,6 +3053,7 @@ local function clearStaleFarmControllers(root)
     for _,object in ipairs(root:GetChildren())do local class=names[object.Name];if class and object:IsA(class)then object:Destroy()end end
 end
 local function ensureMovementController(character, root, humanoid, destination)
+    if state.DesyncHolding then state.FarmDesyncController.Release("Movement handed off")end
     if releaseStartupHold then releaseStartupHold(false)end
     if state.ArenaFloat and state.ArenaFloat.Root then state.ArenaFloat.Release()end
     if movementRoot==root and positionAlign and positionAlign.Parent then return end
@@ -29692,6 +29694,9 @@ return function(ctx)
             return {Options=options,Value=state.Theme or "Dark"}
         end,function(name)if ctx.WindUI:SetTheme(name)then state.Theme=name;if state.SaveNow then state.SaveNow()end end end)
         toggle("Settings","FarmDesync","Desync","SetFarmDesync")
+        paragraph("Settings","FarmDesyncStatus","Desync Status",function()
+            return state.FarmDesyncController and state.FarmDesyncController.Status or "Off"
+        end)
         local prefs=state.PresetPreferences or {Count=0,Manual=0,Outside=0,Between=0}
         local pickedPreset=state.PresetId or 0
         local function presetView(id,empty)
@@ -30169,23 +30174,23 @@ do
     local function installFarmDesync()
         local make=(function()
 -- BEGIN BUNDLED FARM DESYNC
--- Follow the verified surface while the existing farm controller owns the underground body.
+-- Own the surface camera and, in manual mode, one reversible underground hold.
 return function(ctx)
     local api={Active=false,Status="Off"}
-    local session,root,floor,sample,nextProbe
+    local session,root,floor,sample,nextProbe,hold
     local function releaseCamera()
         local old=session
         session=nil;api.Active=false
         if not old then return end
         if old.Render then old.Render:Disconnect()end
-        if old.Camera.Parent and old.Camera.CameraSubject==old.Proxy then
-            local _,humanoid=ctx.Character()
-            old.Camera.CameraSubject=old.Subject.Parent and old.Subject or humanoid
-        end
-        old.Proxy:Destroy()
+        if old.Subject.Parent and old.Subject.CameraOffset==old.Applied then old.Subject.CameraOffset=old.Base end
     end
-    function api.Release(reason)
+    function api.Release(reason,restore)
         releaseCamera()
+        if hold then
+            local old=hold;hold=nil
+            ctx.EndHold(old,restore==true)
+        end
         root,floor,sample,nextProbe=nil,nil,nil,nil
         api.Status=reason or "Off"
     end
@@ -30194,43 +30199,63 @@ return function(ctx)
         return x*x+z*z
     end
     function api.Update(now)
-        if not ctx.Allowed(now)then api.Release("Waiting for farm movement");return end
+        local mode,reason,restore=ctx.Mode(now)
+        if not mode then api.Release(reason,restore);return end
         local current,humanoid=ctx.Character()
         if not current then api.Release("Waiting for character");return end
         if current~=root then api.Release();root=current end
+        if mode~="Hold" and hold then
+            api.Release("Waiting for farm movement");root=current
+        end
+        if hold and not ctx.HoldValid(hold)then
+            api.Release("Position changed · finding ground again",true);return
+        end
         local point=root.Position
-        if not sample or now>=nextProbe or distanceSquared(point,sample)>12*12 or math.abs(point.Y-sample.Y)>10 then
-            floor=ctx.Surface(root,point);sample=point;nextProbe=now+.25
+        if hold then
+            floor=hold.Floor;sample=hold.Position
+        elseif not sample or now>=nextProbe or distanceSquared(point,sample)>12*12 or math.abs(point.Y-sample.Y)>10 then
+            floor=(mode=="Hold" and ctx.Ground(root,point)or nil)or ctx.Surface(root,point)
+            sample=point;nextProbe=now+.25
+        end
+        if mode=="Hold" and not hold and floor then
+            hold=ctx.BeginHold(root,humanoid,floor)
+            if not hold then api.Status="Unable to hold underground";return end
+            point=root.Position;sample=hold.Position
         end
         local depth=floor and floor-point.Y
         if not depth or depth<6 or depth>45 then
-            releaseCamera();api.Status="Waiting for verified underground position";return
+            releaseCamera();api.Status=mode=="Hold" and "Waiting for nearby solid ground" or "Waiting for Auto Farm to move below ground";return
         end
         local camera=ctx.Camera()
-        if session and (camera~=session.Camera or camera.CameraSubject~=session.Proxy)then releaseCamera()end
+        if session and (camera~=session.Camera or camera.CameraSubject~=session.Subject)then releaseCamera()end
         if session then return end
         local subject=camera and camera.CameraSubject
-        if subject~=humanoid and subject~=root then api.Status="Waiting for character camera";return end
-        local proxy=ctx.CreateProxy()
-        local active={Camera=camera,Subject=subject,Proxy=proxy}
+        if not camera or subject~=humanoid then
+            api.Active=hold~=nil
+            api.Status=hold and "Holding underground · camera is viewing another subject" or "Waiting for character camera"
+            return
+        end
+        local active={Camera=camera,Subject=humanoid,Base=humanoid.CameraOffset}
         session=active
         local function render()
             if session~=active then return end
-            if not root.Parent or ctx.Camera()~=camera or camera.CameraSubject~=proxy then releaseCamera();return end
+            if not root.Parent or not humanoid.Parent or ctx.Camera()~=camera or camera.CameraSubject~=humanoid then releaseCamera();return end
             local at=root.Position
             local currentDepth=floor-at.Y
             if distanceSquared(at,sample)>32*32 or currentDepth<6 or currentDepth>45 then releaseCamera();return end
-            ctx.MoveProxy(proxy,at,floor+ctx.CameraHeight(humanoid,root))
+            local currentOffset=humanoid.CameraOffset
+            if currentOffset~=active.Applied then active.Base=currentOffset end
+            local offset=ctx.CameraOffset(root,active.Base,currentDepth)
+            if offset~=currentOffset then humanoid.CameraOffset=offset end
+            active.Applied=humanoid.CameraOffset
         end
         local ok=pcall(function()
-            ctx.MoveProxy(proxy,point,floor+ctx.CameraHeight(humanoid,root))
-            camera.CameraSubject=proxy
+            render()
             active.Render=ctx.Render:Connect(render)
         end)
         if not ok then releaseCamera();api.Status="Character camera unavailable";return end
-        api.Active=true;api.Status="Underground · surface camera"
+        api.Active=true;api.Status=hold and "Holding 20 studs below ground" or "Auto Farm · surface camera active"
     end
-    api.Destroy=api.Release
     return api
 end
 
@@ -30238,11 +30263,30 @@ end
         end)()
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude;params.RespectCanCollide=true
+        local function groundRay(root,point,above,depth)
+            if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
+            local excluded={root.Parent}
+            for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
+                local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            end
+            params.FilterDescendantsInstances=excluded
+            local hit=workspace:Raycast(point+Vector3.new(0,above,0),Vector3.new(0,-depth,0),params)
+            return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+        end
+        local function cameraHeight(humanoid,root)
+            return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
+        end
         local controller=make({Render=RunService.PreRender,Camera=function()return workspace.CurrentCamera end,
-            Allowed=function(now)
-                return state.Running and state.FarmDesync and state.AutoFarm and not state.ViewingPlayer
-                    and not state.AntiSuspiciousRestUntil and not state.PerformanceBoosters["Delete map"]
-                    and not state.PerformanceBoosters["Remove everything"] and state.MovementOwnership.Resolve(now)=="Farm"
+            Mode=function(now)
+                local owner=state.MovementOwnership.Resolve(now)
+                if not state.Running or not state.FarmDesync or state.StopEverything or state.AntiSuspiciousRestUntil then
+                    return nil,"Paused",owner=="Stopped" or owner=="Manual"
+                end
+                if state.TravelHold or state.ProtectionRetreating or (owner~="Manual" and owner~="Farm")then return nil,"Paused · "..owner end
+                if state.PerformanceBoosters["Delete map"] or state.PerformanceBoosters["Remove everything"]then
+                    return nil,"Desync requires solid terrain",true
+                end
+                return owner=="Farm" and "Farm" or "Hold"
             end,
             Character=function()
                 local character=player.Character
@@ -30251,31 +30295,44 @@ end
                 if humanoid and humanoid.Health>0 and not humanoid.SeatPart and root and not root.Anchored then return root,humanoid end
                 return nil,humanoid
             end,
-            Surface=function(root,point)
-                if point.Y<=workspace.FallenPartsDestroyHeight+30 then return nil end
-                local excluded={root.Parent}
-                for _,name in ipairs({"Mobs","Characters","CharacterItems","HitEffects","WaveDefenseStuff"})do
-                    local folder=workspace:FindFirstChild(name);if folder then excluded[#excluded+1]=folder end
+            Surface=function(root,point)return groundRay(root,point,45,41)end,
+            Ground=function(root,point)
+                local floor=groundRay(root,point,1,10)
+                return floor and floor<=point.Y and floor or nil
+            end,
+            BeginHold=function(root,humanoid,floor)
+                local point=root.Position
+                local below=Vector3.new(point.X,floor-20,point.Z)
+                if below.Y<=workspace.FallenPartsDestroyHeight+35 or movementRoot then return nil end
+                local surface=Vector3.new(point.X,floor+cameraHeight(humanoid,root)+.5,point.Z)
+                local attachment=create("Attachment",{Name="FeatherDesyncAttachment"},root)
+                local align=create("AlignPosition",{Name="FeatherDesyncHold",Mode=Enum.PositionAlignmentMode.OneAttachment,
+                    Attachment0=attachment,Position=below,ApplyAtCenterOfMass=true,
+                    MaxForce=math.max(1,root.AssemblyMass)*workspace.Gravity*8,MaxVelocity=60,Responsiveness=45},root)
+                state.DesyncHolding=true;state.FarmNoclip.Update()
+                pivotRoot(root,below)
+                return {Root=root,Humanoid=humanoid,Align=align,Attachment=attachment,Position=below,Floor=floor,Surface=surface}
+            end,
+            HoldValid=function(hold)
+                return hold.Align.Parent and (hold.Root.Position-hold.Position).Magnitude<=8
+            end,
+            EndHold=function(hold,restorePosition)
+                hold.Align:Destroy();hold.Attachment:Destroy()
+                local root=hold.Root
+                if restorePosition and root.Parent==player.Character and not root.Anchored and hold.Humanoid.Health>0
+                    and root.Position.Y<hold.Floor then
+                    local drift=root.Position-hold.Position
+                    if math.abs(drift.Y)<=25 and drift.X*drift.X+drift.Z*drift.Z<=36 then pivotRoot(root,hold.Surface)end
                 end
-                params.FilterDescendantsInstances=excluded
-                local hit=workspace:Raycast(point+Vector3.new(0,45,0),Vector3.new(0,-41,0),params)
-                return hit and hit.Normal.Y>.6 and hit.Position.Y or nil
+                state.DesyncHolding=false;state.FarmNoclip.Update()
             end,
-            CameraHeight=function(humanoid,root)
-                return humanoid.RigType==Enum.HumanoidRigType.R6 and 3 or humanoid.HipHeight+root.Size.Y/2
-            end,
-            CreateProxy=function()
-                return create("Part",{Name="FeatherDesyncCamera",Anchored=true,Transparency=1,CanCollide=false,
-                    CanTouch=false,CanQuery=false,CastShadow=false,Size=Vector3.one},workspace)
-            end,
-            MoveProxy=function(proxy,position,y)
-                local point=Vector3.new(position.X,y,position.Z)
-                if (proxy.Position-point).Magnitude>.02 then proxy.Position=point end
+            CameraOffset=function(root,base,depth)
+                return base+root.CFrame:VectorToObjectSpace(Vector3.new(0,depth,0))
             end})
         local heartbeat,nextUpdate
         local function stop()
             if heartbeat then heartbeat:Disconnect();heartbeat=nil end
-            controller.Release()
+            controller.Release("Off",not state.AutomationTeleporting and not state.TravelBusy and not state.SafeModePanic and not state.Dodging)
         end
         local function apply(value)
             state.FarmDesync=value==true
