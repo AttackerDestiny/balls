@@ -32,6 +32,11 @@ return function(source)
         f.OnClick=function(v)assert(v.Now>=.5);v.ConfirmAt=v.Now;v.Visible=false end
         assert(f.Run({},f.Live)and f.Clicks==1)
     end)
+    test("Native handlers that mount late still receive a bounded confirmation retry",function()
+        local f=fixture();f.OnClick=function(v)if v.Now>=2 then v.ConfirmAt=v.Now;v.Visible=false end end
+        assert(f.Run({},f.Live)and f.Clicks==4 and f.Now<6,
+            "Do not consume every retry in the first second, then wait idle for the receipt")
+    end)
     test("A dismissed modal is never clicked again while acknowledgment is pending",function()
         local f=fixture();f.OnClick=function(v)v.Visible=false;v.ConfirmAt=v.Now+.4 end
         assert(f.Run({},f.Live)and f.Clicks==1 and f.Prompts==1)

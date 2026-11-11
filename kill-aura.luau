@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-10.safe-block-identity-diagnostics-v3.0.43"
-local VERSION="3.0.43"
+local BUILD="2026-11-11.delta-block-input-calibration-v3.0.44"
+local VERSION="3.0.44"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -8395,7 +8395,8 @@ return function(ctx)
     pcall(function()virtualInput=game:GetService("VirtualInputManager")end)
     local blockPoint=ctx.BlockPoint
     local touchEnabled=false
-    pcall(function()touchEnabled=game:GetService("UserInputService").TouchEnabled end)
+    local inputService=game:GetService("UserInputService")
+    pcall(function()touchEnabled=inputService.TouchEnabled end)
     local function supportsInput(name)
         local ok,method=pcall(function()return virtualInput and virtualInput[name]end)
         return ok and type(method)=="function"
@@ -8531,12 +8532,37 @@ return function(ctx)
             return false
         end)
     end
-    local function click(button,attempt)
+    local function click(button,attempt,purpose)
         assert(button.Visible and button.Active and button.AbsoluteSize.X>0,"Block dialog is not ready")
         local point=inputPoint(button)
         assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
         local diagnostic={Attempt=attempt or 1,Errors={}}
-        state.LastBlockInput=diagnostic
+        if purpose=="Cancel"then state.LastBlockCleanupInput=diagnostic else state.LastBlockInput=diagnostic end
+        local function calibrate()
+            local desired=point
+            if not virtualInput or not supportsInput("SendMouseMoveEvent")then return end
+            -- Android can add a window offset beyond Roblox's GuiInset. Measure it
+            -- with movement only, then verify the correction before pressing anything.
+            virtualInput:SendMouseMoveEvent(desired.X,desired.Y,game)
+            task.wait(.03)
+            local observed=inputService:GetMouseLocation()
+            local dx=math.floor(desired.X-observed.X+.5)
+            local dy=math.floor(desired.Y-observed.Y+.5)
+            assert(math.abs(dx)<=128 and math.abs(dy)<=128,"Native block input calibration is unavailable")
+            local corrected=desired+Vector2.new(dx,dy)
+            if dx~=0 or dy~=0 then
+                virtualInput:SendMouseMoveEvent(corrected.X,corrected.Y,game)
+                task.wait(.03)
+                local verified=inputService:GetMouseLocation()
+                assert(math.abs(verified.X-desired.X)<=2 and math.abs(verified.Y-desired.Y)<=2,
+                    "Native block input calibration did not settle")
+            end
+            local current=inputPoint(button)
+            assert(current and math.abs(current.X-desired.X)<=1 and math.abs(current.Y-desired.Y)<=1,
+                "Native block button moved during input calibration")
+            diagnostic.OffsetX=dx;diagnostic.OffsetY=dy
+            point=corrected
+        end
         local function touch()
             touchId+=1
             local id=touchId
@@ -8548,7 +8574,6 @@ return function(ctx)
             assert(pressed and released,tostring(reason or releaseReason))
         end
         local function mouse()
-            pcall(function()virtualInput:SendMouseMoveEvent(point.X,point.Y,game)end)
             local pressed,reason=pcall(function()
                 virtualInput:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)
                 task.wait(.03)
@@ -8561,14 +8586,17 @@ return function(ctx)
             -- Recheck the actual hit target before changing input method.
             point=inputPoint(button)
             assert(point,"Native block button is covered or input coordinates unavailable; no rejoin attempted")
-            diagnostic.X=point.X;diagnostic.Y=point.Y
-            local ok,reason=pcall(fn)
+            local ok,reason=pcall(function()
+                if name=="Mouse"then calibrate()end
+                diagnostic.X=point.X;diagnostic.Y=point.Y
+                fn()
+            end)
             if ok then diagnostic.Method=name;diagnostic.Dispatched=true;return true end
             diagnostic.Errors[#diagnostic.Errors+1]=name..": "..tostring(reason)
             return false
         end
         attempt=attempt or 1
-        local primary=canTouch and (attempt%2==1 or not canMouse) and touch or canMouse and mouse
+        local primary=canTouch and attempt==2 and touch or canMouse and mouse or canTouch and touch
         local secondary=primary==touch and canMouse and mouse or primary==mouse and canTouch and touch
         if fireActivation and (attempt==3 or not primary)and send("Activated",activate)then return true end
         if primary and send(primary==touch and "Touch"or "Mouse",primary)then return true end
@@ -8583,12 +8611,12 @@ return function(ctx)
         local deadline=os.clock()+8
         repeat
             button,cancel=findPrompt(target)
-            if not active()then if cancel then click(cancel)end;return false end
+            if not active()then if cancel then click(cancel,nil,"Cancel")end;return false end
             if button then break end
             task.wait(.05)
         until os.clock()>=deadline
         assert(button,"Roblox block dialog did not open; no rejoin attempted")
-        if not active()then if cancel then click(cancel)end;return false end
+        if not active()then if cancel then click(cancel,nil,"Cancel")end;return false end
         click(button)
         local receipt
         deadline=os.clock()+10
@@ -8630,13 +8658,14 @@ return function(ctx)
         until false
         blockBusy=true
         state.LastBlockInput=nil
+        state.LastBlockCleanupInput=nil
         maskTarget=target
         local sent,result=pcall(function()
             if blockMask then blockMask.Begin()end
             return block(target,active)
         end)
         if blockMask then
-            if not sent or result~=true then pcall(function()local _,cancel=findPrompt(target);if cancel then click(cancel)end end)end
+            if not sent or result~=true then pcall(function()local _,cancel=findPrompt(target);if cancel then click(cancel,nil,"Cancel")end end)end
             task.wait(.1)
             local restored,reason=pcall(blockMask.End)
             if not restored then state.LastBlockMaskError=tostring(reason)end
@@ -8781,7 +8810,8 @@ end
             TargetUserId=failure.TargetUserId,TargetName=failure.TargetName}
         local input=state.LastBlockInput
         if input and failure.TargetUserId then
-            record.Input={Method=input.Method,Dispatched=input.Dispatched==true,Attempt=input.Attempt,X=input.X,Y=input.Y,Errors={}}
+            record.Input={Method=input.Method,Dispatched=input.Dispatched==true,Attempt=input.Attempt,X=input.X,Y=input.Y,
+                OffsetX=input.OffsetX,OffsetY=input.OffsetY,Errors={}}
             for i=1,math.min(3,#(input.Errors or {}))do record.Input.Errors[i]=tostring(input.Errors[i]):sub(1,400)end
         end
         state.LastSafeFailure=record
@@ -9218,7 +9248,7 @@ end
 return function(ctx)
     local function cancel(target)
         local _,button=ctx.Find(target)
-        if button then ctx.Click(button)end
+        if button then ctx.Click(button,nil,"Cancel")end
         return false
     end
     return function(target,active)
@@ -9263,7 +9293,7 @@ return function(ctx)
                     if now>=clickAt and now-geometryAt>=.06 then
                         clicked=clicked+1
                         ctx.Click(button,clicked)
-                        clickAt=ctx.Now()+.3
+                        clickAt=ctx.Now()+math.min(3,.3*4^(clicked-1))
                     end
                 end
             end

@@ -2,7 +2,7 @@
 return function(ctx)
     local function cancel(target)
         local _,button=ctx.Find(target)
-        if button then ctx.Click(button)end
+        if button then ctx.Click(button,nil,"Cancel")end
         return false
     end
     return function(target,active)
@@ -47,7 +47,7 @@ return function(ctx)
                     if now>=clickAt and now-geometryAt>=.06 then
                         clicked=clicked+1
                         ctx.Click(button,clicked)
-                        clickAt=ctx.Now()+.3
+                        clickAt=ctx.Now()+math.min(3,.3*4^(clicked-1))
                     end
                 end
             end
