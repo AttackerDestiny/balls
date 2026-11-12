@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-11.trade-always-include-weapons-v3.0.46"
-local VERSION="3.0.46"
+local BUILD="2026-11-12.automation-rest-status-recovery-v3.0.47"
+local VERSION="3.0.47"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

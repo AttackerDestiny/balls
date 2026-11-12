@@ -373,6 +373,8 @@ Streaming loss, an unrelated miniboss, or an uncredited corpse is not a complete
 
 **Anti Suspicious** starts counting Safe Mode departure attempts after the account reaches its first protected server. A rejoin and its fallback kick count as one attempt. **Rejoin Limit** and **Track (min)** default to **10 departures in 10 minutes**. Set a **Rest Time (min)** range up to **200 minutes**. At the limit, Feather saves a randomly selected deadline down to the second, kicks the local account, and attempts a rejoin when the timer ends if the executor is still running. The account's deadline is retained across reloads. If the kick stops the executor, reopen Roblox manually after the rest.
 
+While a saved rest is active, both Safe Mode status and the Multi Spot HUD show its remaining time. The deadline is account-local and is not part of an exported config. When it expires, automation resumes unless a committed fallback rejoin still owns the hold; that case displays the pending rejoin or its failure message. Temporary status-UI errors cannot stop the shared Safe Mode/arena worker.
+
 ## Dodge
 
 **Atheon Dodge** evades supported Atheon attacks and hazards, then returns to farming. OFF by default.

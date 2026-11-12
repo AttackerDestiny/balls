@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-11.trade-always-include-weapons-v3.0.46"
-local VERSION="3.0.46"
+local BUILD="2026-11-12.automation-rest-status-recovery-v3.0.47"
+local VERSION="3.0.47"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -8822,6 +8822,22 @@ end
         end)
         state.SafeFailureSaveError=not saved and tostring(reason)or nil
     end
+    local function restHoldReason()
+        local deadline=state.AntiSuspiciousRestUntil
+        if not deadline then return end
+        local remaining=math.max(0,math.ceil(deadline-os.time()))
+        if remaining>0 then
+            return string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+        end
+        if kickFallback and kickFallback.Armed then
+            return state.SafeKickFallbackStatus or "Anti Suspicious rest ended · waiting for rejoin"
+        end
+        state.AntiSuspiciousRestUntil=nil
+    end
+    local function showAutomationHold(reason)
+        if state.SafeMode then state.SafeModeStatus=reason end
+        if state.MultiSpot then state.MultiSpotStatus=reason end
+    end
     local function chooseBlockTarget(people)
         for _,person in ipairs(people)do
             if not allowed(person)then
@@ -8868,7 +8884,8 @@ end
     state.SoloServerSearch=api
     local safe=ctx.MakeSafe({State=state,Search=api,CurrentFloor=function()return game.PlaceId end,
         Suspended=function()
-            if state.AntiSuspiciousRestUntil then return true end
+            local reason=restHoldReason()
+            if reason then showAutomationHold(reason);return true end
             if not waitingForBetween()then return false end
             if state.SafeMode and not state.SafeWhitelistResolving then state.SafeModeStatus="Waiting to enter The Between through a room"end
             return true
@@ -9154,7 +9171,9 @@ end
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
             end,
             Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end,
-            Finish=function()state.SafeKickFallbackBusy=false end,Status=function(message)state.SafeModeStatus=message;refresh()end})
+            Finish=function()state.SafeKickFallbackBusy=false end,Status=function(message)
+                state.SafeKickFallbackStatus=message;state.SafeModeStatus=message;refresh()
+            end})
         state.SafeKickFallback=kickFallback
     end
     ctx.Bind(player.OnTeleport,function(stage)
@@ -9191,22 +9210,27 @@ end
         end
         state.SaveNow()
         while state.Running do
-            if state.AutomationTeleporting and os.clock()>state.AutomationTeleportDeadline then fail("Floor teleport timed out")end
             local updated,reason=pcall(function()
-                if state.AutoRegroupHolding then return end
-                if state.AntiSuspiciousRestUntil then
-                    if os.time()<state.AntiSuspiciousRestUntil or kickFallback and kickFallback.Armed then return end
-                    state.AntiSuspiciousRestUntil=nil
+                if state.AutomationTeleporting then
+                    local deadline=state.AutomationTeleportDeadline
+                    if type(deadline)~="number"or os.clock()>deadline then fail("Floor teleport timed out")end
                 end
-                if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then return end
+                if state.AutoRegroupHolding then showAutomationHold("Waiting · Auto Regroup returning to lobby");return end
+                local hold=restHoldReason()
+                if hold then showAutomationHold(hold);return end
+                if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then
+                    if state.MultiSpot then state.MultiSpotStatus="Waiting · "..tostring(state.SafeModeStatus or "protection and rejoin")end
+                    return
+                end
                 if inBetween then safe.Update();return end
                 friend.Update(os.clock());safe.Update()
                 if state.AccountProgression then
                     if state.ProgressionController then state.ProgressionController.Update(os.clock())end
                 else multi.Update(farmClock())end
             end)
-            if not updated then fail(reason)end
-            refresh()
+            if not updated then state.LastAutomationError=tostring(reason);pcall(fail,reason)end
+            local painted,paintError=pcall(refresh)
+            state.LastAutomationUIError=not painted and tostring(paintError)or nil
             local interval=1
             if api.Active or state.SafeModePanic then interval=.03
             elseif state.MultiSpot or state.AccountProgression then interval=.1

@@ -235,6 +235,10 @@ def main():
     movement_gate = script.split("-- BEGIN TEST MOVEMENT BUDGET\n",1)[1].split("-- END TEST MOVEMENT BUDGET",1)[0]
     fixture += "assert(loadstring(" + quote(read("fps-budget.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(movement_gate) + ")\n"
     move_adapter = read("server-isolation-client.module.luau")
+    hold_helpers = move_adapter[move_adapter.index("    local function restHoldReason()"):move_adapter.index("    local function chooseBlockTarget(people)")]
+    automation_loop = move_adapter[move_adapter.index("    state.AutomationLoadedJob=game.JobId"):]
+    automation_loop = automation_loop.removesuffix("end\n")
+    fixture += "assert(loadstring(" + quote(read("automation-loop.test.luau")) + "))()(" + quote(hold_helpers) + "," + quote(automation_loop) + ")\n"
     can_move = move_adapter[move_adapter.index("        CanMove=function()")+len("        CanMove="):move_adapter.index("        Moving=function()")].strip().removesuffix(",")
     fixture += "assert(loadstring(" + quote(read("farm-coordination.test.luau")) + "))()(" + quote(read("farm-coordination.module.luau")) + "," + quote(can_move) + ")\n"
     fixture += "assert(loadstring(" + quote(read("performance-budget.test.luau")) + "))()(" + quote(read("performance-budget.module.luau")) + ")\n"
