@@ -269,6 +269,12 @@ def main():
     arrival = script[arrival_start:script.index("function state.TeleportToDestination", arrival_start)]
     fixture += "assert(loadstring(" + quote(read("arena-float.test.luau")) + "))()(" + quote(read("arena-float.module.luau")) + "," + quote(arrival) + ")\n"
     fixture += "assert(loadstring(" + quote(read("lobby-play.test.luau")) + "))()(" + quote(read("lobby-play.module.luau")) + ")\n"
+    lobby_queue = script[script.index("    local function queueLobby()"):script.index("    local lobby=makeLobby(")]
+    fixture += "assert(loadstring(" + quote(read("lobby-resume.test.luau")) + "))()(" + quote(lobby_queue) + ")\n"
+    menu_idle = script[script.index("    local menuState={Running=true}"):script.index('    local status=Instance.new("TextLabel")')]
+    idle_cleanup = "menuState.Running=false;idle.Destroy();idleCleanup:Disconnect()"
+    assert idle_cleanup in script
+    fixture += "assert(loadstring(" + quote(read("lobby-afk.test.luau")) + "))()(" + ",".join(quote(value) for value in (menu_idle, idle_cleanup, read("anti-afk.module.luau"), read("anti-afk-input.module.luau"))) + ")\n"
     for name in ("account-progression", "progression-gear"):
         fixture += "assert(loadstring(" + quote(read(name + ".test.luau")) + "))()(" + quote(read(name + ".module.luau")) + ")\n"
     fixture += "assert(loadstring(" + quote(read("progression-client.test.luau")) + "))()(" + ",".join(quote(read(name)) for name in ("progression-client.module.luau", "account-progression.module.luau", "progression-gear.module.luau")) + "," + quote(payload) + ")\n"

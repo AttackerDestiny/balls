@@ -1,12 +1,11 @@
 local embeddedSource=...
-local BUILD="2026-11-12.automation-rest-status-recovery-v3.0.47"
-local VERSION="3.0.47"
+local BUILD="2026-11-12.anti-suspicious-start-menu-rest-v3.0.48"
+local VERSION="3.0.48"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
 local UserInputService=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
-local Stats=game:GetService("Stats")
 local HttpService=game:GetService("HttpService")
 local TweenService=game:GetService("TweenService")
 local player=Players.LocalPlayer
@@ -42,11 +41,30 @@ env.SB2LoadToken=loadToken
 local function startupCurrent()
     return env.SB2LoadToken==loadToken and runtimeOwner.Alive()
 end
+local bootstrapFeatures={Rest=(function()
+-- BEGIN BUNDLED ANTI SUSPICIOUS
+-- END BUNDLED ANTI SUSPICIOUS
+end)(),AntiAfk=(function()
+-- BEGIN BUNDLED ANTI AFK
+-- END BUNDLED ANTI AFK
+end)(),IdleInput=(function()
+-- BEGIN BUNDLED ANTI AFK INPUT
+-- END BUNDLED ANTI AFK INPUT
+end)()}
 if game.PlaceId==659222129 and game.GameId==212154879 then
+    runtimeOwner.Retire()
     local makeLobby=(function()
 -- BEGIN BUNDLED LOBBY PLAY
 -- END BUNDLED LOBBY PLAY
     end)()
+    local restReadable,menuRest=pcall(bootstrapFeatures.Rest,{StrictLoad=true,Now=os.time,Load=function()
+        assert(type(isfile)=="function"and type(readfile)=="function","Saved rest storage is unavailable")
+        local path="SB2Codex/anti-suspicious_"..player.UserId..".json"
+        if not isfile(path)then return end
+        local bytes=readfile(path)
+        assert(#bytes<8192,"Saved rest exceeds its size limit")
+        return HttpService:JSONDecode(bytes)
+    end})
     local function findPlay()
         local node=playerGui:FindFirstChild("ScreenGui")
         for _,name in ipairs({"Frame","Buttons","Play"})do node=node and node:FindFirstChild(name)end
@@ -70,18 +88,28 @@ if game.PlaceId==659222129 and game.GameId==212154879 then
         local ready,reason=storageBootstrap.Ensure();assert(ready,reason)
         local queue=queue_on_teleport or queueonteleport or(syn and syn.queue_on_teleport)or(fluxus and fluxus.queue_on_teleport)
         assert(type(queue)=="function","Auto Play requires teleport queue support")
-        assert(type(readfile)=="function"and type(isfile)=="function"and isfile("SB2Codex/kill-aura.luau"),"Saved source is unavailable")
+        local sourcePath=storageBootstrap.SourcePath
+        assert(type(readfile)=="function"and type(isfile)=="function"and sourcePath and isfile(sourcePath),"Saved source is unavailable")
+        local resumePath=env.SB2AutomationResumeConfigPath
         queue(string.format([==[
 if not game:IsLoaded()then game.Loaded:Wait()end
 local p=game:GetService("Players").LocalPlayer
 while not p do task.wait();p=game:GetService("Players").LocalPlayer end
-if p.UserId==%s and game.GameId==212154879 and isfile("SB2Codex/kill-aura.luau")then
-    local code=readfile("SB2Codex/kill-aura.luau")
-    if code:find(%q,1,true)then assert(loadstring(code))()end
+if p.UserId==%s and game.GameId==212154879 and isfile(%q)then
+    local code=readfile(%q)
+    if code:find(%q,1,true)then
+        getgenv().SB2AutomationResumeConfigPath=%s
+        assert(loadstring(code))()
+    end
 end
-]==],tostring(player.UserId),BUILD))
+]==],tostring(player.UserId),sourcePath,sourcePath,BUILD,type(resumePath)=="string"and string.format("%q",resumePath)or "nil"))
     end
     local lobby=makeLobby({Now=os.clock,Alive=startupCurrent,Find=findPlay,Ready=playReady,Queue=queueLobby,
+        Hold=function()
+            assert(restReadable,tostring(menuRest))
+            local deadline=menuRest.Deadline()
+            return deadline and math.max(0,deadline-os.time())or 0
+        end,
         Activate=function(button)
             assert(type(getconnections)=="function","Native Play activation is unavailable")
             local count=0
@@ -91,7 +119,34 @@ end
             return count>0
         end})
     env.SB2LobbyPlay=lobby
-    while not lobby.Done and startupCurrent()do lobby.Update();if not lobby.Done then task.wait(.25)end end
+    local menuState={Running=true}
+    local idleInput
+    local idle=bootstrapFeatures.AntiAfk({State=menuState,Player=player,Pulse=bootstrapFeatures.IdleInput({
+        Input=function()idleInput=idleInput or game:GetService("VirtualUser");return idleInput end,
+        Point=function()return Vector2.zero end,
+        Frame=function()local camera=workspace.CurrentCamera;return camera and camera.CFrame or CFrame.new()end,
+        Wait=task.wait})})
+    local idleCleanup=runtimeOwner.Root.Destroying:Connect(function()menuState.Running=false;idle.Destroy()end)
+    local status=Instance.new("TextLabel")
+    status.Name="AntiSuspiciousRest";status.Size=UDim2.fromOffset(340,42);status.Position=UDim2.new(.5,-170,0,72)
+    status.BackgroundColor3=Color3.fromRGB(30,30,32);status.TextColor3=Color3.new(1,1,1)
+    status.TextSize=16;status.TextWrapped=true;status.Visible=false;status.Parent=runtimeOwner.Root
+    while not lobby.Done and startupCurrent()do
+        lobby.Update()
+        local remaining=lobby.RestRemaining
+        status.Visible=remaining~=nil and remaining>0 or lobby.Error~=nil
+        if remaining and remaining>0 then
+            remaining=math.ceil(remaining)
+            status.Text=string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+        elseif lobby.Error then status.Text="Start menu paused · "..lobby.Error end
+        if not lobby.Done then task.wait(.25)end
+    end
+    menuState.Running=false;idle.Destroy();idleCleanup:Disconnect()
+    if lobby.Error and startupCurrent()then
+        warn("[SB2 Start menu] "..lobby.Error)
+        runtimeOwner.Release()
+        return
+    end
     runtimeOwner.Release();runtimeOwner.Root:Destroy()
     return
 end

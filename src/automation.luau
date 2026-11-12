@@ -385,10 +385,7 @@ do
 -- BEGIN BUNDLED SAFE KICK FALLBACK
 -- END BUNDLED SAFE KICK FALLBACK
     end)()
-    local makeRest=(function()
--- BEGIN BUNDLED ANTI SUSPICIOUS
--- END BUNDLED ANTI SUSPICIOUS
-    end)()
+    local makeRest=bootstrapFeatures.Rest
     attach({MakeBlockPrompt=makeBlockPrompt,MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})

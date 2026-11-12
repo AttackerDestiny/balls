@@ -1,14 +1,13 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-12.automation-rest-status-recovery-v3.0.47"
-local VERSION="3.0.47"
+local BUILD="2026-11-12.anti-suspicious-start-menu-rest-v3.0.48"
+local VERSION="3.0.48"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
 local UserInputService=game:GetService("UserInputService")
 local RunService=game:GetService("RunService")
-local Stats=game:GetService("Stats")
 local HttpService=game:GetService("HttpService")
 local TweenService=game:GetService("TweenService")
 local player=Players.LocalPlayer
@@ -187,15 +186,146 @@ env.SB2LoadToken=loadToken
 local function startupCurrent()
     return env.SB2LoadToken==loadToken and runtimeOwner.Alive()
 end
+local bootstrapFeatures={Rest=(function()
+-- BEGIN BUNDLED ANTI SUSPICIOUS
+-- Account-scoped rolling history and an absolute rest deadline.
+return function(ctx)
+    local maxWindow=200*60
+    local maxHops=100
+    local ledger={Version=1,Armed=false,Hops={}}
+    local function prune(hops,now)
+        local recent={}
+        for i=math.max(1,#hops-maxHops+1),#hops do
+            local at=hops[i]
+            if type(at)=="number" and at<=now and at>now-maxWindow then recent[#recent+1]=at end
+        end
+        return recent
+    end
+    local ok,saved=pcall(ctx.Load)
+    if ctx.StrictLoad then
+        assert(ok,"Could not read saved Anti Suspicious rest: "..tostring(saved))
+        if saved~=nil then
+            assert(type(saved)=="table"and saved.Version==1 and type(saved.Hops)=="table","Invalid saved Anti Suspicious rest")
+            local deadline=saved.Until
+            assert(deadline==nil or type(deadline)=="number"and deadline==deadline
+                and math.abs(deadline)<math.huge and deadline<=ctx.Now()+maxWindow,"Invalid saved Anti Suspicious deadline")
+        end
+    end
+    if ok and type(saved)=="table" and saved.Version==1 and type(saved.Hops)=="table" then
+        local now=ctx.Now()
+        ledger.Armed=saved.Armed==true
+        ledger.Hops=prune(saved.Hops,now)
+        if type(saved.Until)=="number" and saved.Until>now and saved.Until<=now+maxWindow then
+            ledger.Until=saved.Until
+        end
+    end
+    local api={}
+    local retryAt=0
+    local function persist(nextLedger)
+        local ok,result=pcall(ctx.Save,nextLedger)
+        local written=ok and result~=false
+        if written then ledger=nextLedger end
+        return written
+    end
+    function api.Deadline()
+        local untilAt=ledger.Until
+        return untilAt and untilAt>ctx.Now() and untilAt or nil
+    end
+    function api.ObserveProtected()
+        if not ctx.Enabled() or ledger.Armed or api.Deadline() or ctx.Now()<retryAt then return end
+        local nextLedger={Version=1,Armed=true,Hops=ledger.Hops}
+        if not persist(nextLedger) then retryAt=ctx.Now()+30 end
+    end
+    function api.Departure()
+        if not ctx.Enabled() or not ledger.Armed or api.Deadline() then return end
+        local now,limits=ctx.Now(),ctx.Limits()
+        local hops=prune(ledger.Hops,now)
+        if #hops>=maxHops then table.remove(hops,1)end
+        hops[#hops+1]=now
+        if not persist({Version=1,Armed=true,Hops=hops})then return end
+        local count=0
+        for _,at in ipairs(hops)do if at>now-limits.Window*60 then count+=1 end end
+        if count>=limits.Hops then return ctx.Random(limits.Min*60,limits.Max*60) end
+    end
+    function api.Commit(seconds)
+        local deadline=ctx.Now()+seconds
+        if persist({Version=1,Armed=false,Hops={},Until=deadline})then return deadline end
+    end
+    return api
+end
+
+-- END BUNDLED ANTI SUSPICIOUS
+end)(),AntiAfk=(function()
+-- BEGIN BUNDLED ANTI AFK
+-- Idle events acquire a short pulse lease; no polling worker is created.
+return function(ctx)
+    local result={Enabled=true,Pulses=0}
+    local lease={Running=false,Due=0,Closed=false}
+    local clock=ctx.Clock or os.clock
+    local state=ctx.State
+    state.AntiAfkStatus="Active · waiting for idle"
+    local function onIdle()
+        local stamp=clock()
+        if lease.Closed or lease.Running or state.Running==false or stamp<lease.Due then return end
+        lease.Running=true;lease.Due=stamp+20
+        local success,reason=pcall(ctx.Pulse)
+        lease.Running=false
+        if lease.Closed or state.Running==false then return end
+        if success and reason~=false then
+            result.Pulses+=1
+            state.LastAntiAfkError=nil
+            state.AntiAfkInputMethod=type(reason)=="string"and reason or nil
+            state.AntiAfkStatus="Active · idle input sent"
+        else
+            state.LastAntiAfkError=success and "Executor rejected idle input"or tostring(reason)
+            state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
+        end
+    end
+    local subscription=ctx.Player.Idled:Connect(onIdle)
+    function result.Destroy()
+        if lease.Closed then return end
+        lease.Closed=true;result.Enabled=false
+        subscription:Disconnect();subscription=nil
+        state.AntiAfkStatus="Stopped";state.AntiAfkInputMethod=nil
+    end
+    return result
+end
+
+-- END BUNDLED ANTI AFK
+end)(),IdleInput=(function()
+-- BEGIN BUNDLED ANTI AFK INPUT
+-- Lazy idle-only input with a paired press/release fallback for restricted executors.
+return function(ctx)
+    return function()
+        local input=ctx.Input()
+        local point,frame=ctx.Point(),ctx.Frame()
+        pcall(input.CaptureController,input)
+        local clicked,clickError=pcall(input.ClickButton2,input,point,frame)
+        if clicked then return "VirtualUser ClickButton2"end
+        local pressed,pressError=pcall(function()
+            input:Button2Down(point,frame)
+            ctx.Wait(.05)
+        end)
+        -- Release even when a partial press errors, or the runtime closes during the wait.
+        local released,releaseError=pcall(input.Button2Up,input,point,frame)
+        assert(pressed and released,"Idle input unavailable: "..tostring(pressError or releaseError or clickError))
+        return "VirtualUser Button2Down/Up"
+    end
+end
+
+-- END BUNDLED ANTI AFK INPUT
+end)()}
 if game.PlaceId==659222129 and game.GameId==212154879 then
+    runtimeOwner.Retire()
     local makeLobby=(function()
 -- BEGIN BUNDLED LOBBY PLAY
 -- Observe readiness, queue recovery once, then pace attempts until the menu leaves.
 return function(ctx)
-    local api={Attempts=0,Done=false}
+    local api={Attempts=0,Done=false,RestRemaining=0}
     local expires=ctx.Now()+60
     local nextActivation=0
     local prepared=false
+    local held=false
     local function call(fn,...)
         local ok,result=pcall(fn,...)
         if not ok then api.Error=tostring(result);api.Done=true end
@@ -204,7 +334,20 @@ return function(ctx)
     function api.Update()
         if api.Done then return end
         local now=ctx.Now()
-        if now>=expires or not ctx.Alive() then api.Done=true;return end
+        if not ctx.Alive()then api.Done=true;return end
+        if ctx.Hold then
+            local ok,remaining=call(function()
+                local value=ctx.Hold()
+                assert(value==nil or type(value)=="number"and value==value and math.abs(value)<math.huge,
+                    "Menu rest duration is unavailable")
+                return math.max(0,value or 0)
+            end)
+            if not ok then return end
+            api.RestRemaining=remaining
+            if remaining>0 then held=true;return end
+        end
+        if held then held=false;expires=now+60 end
+        if now>=expires then api.Done=true;return end
         local button=ctx.Find()
         if not button or not ctx.Ready(button) then
             api.Done=api.Attempts>0
@@ -224,6 +367,14 @@ end
 
 -- END BUNDLED LOBBY PLAY
     end)()
+    local restReadable,menuRest=pcall(bootstrapFeatures.Rest,{StrictLoad=true,Now=os.time,Load=function()
+        assert(type(isfile)=="function"and type(readfile)=="function","Saved rest storage is unavailable")
+        local path="SB2Codex/anti-suspicious_"..player.UserId..".json"
+        if not isfile(path)then return end
+        local bytes=readfile(path)
+        assert(#bytes<8192,"Saved rest exceeds its size limit")
+        return HttpService:JSONDecode(bytes)
+    end})
     local function findPlay()
         local node=playerGui:FindFirstChild("ScreenGui")
         for _,name in ipairs({"Frame","Buttons","Play"})do node=node and node:FindFirstChild(name)end
@@ -247,18 +398,28 @@ end
         local ready,reason=storageBootstrap.Ensure();assert(ready,reason)
         local queue=queue_on_teleport or queueonteleport or(syn and syn.queue_on_teleport)or(fluxus and fluxus.queue_on_teleport)
         assert(type(queue)=="function","Auto Play requires teleport queue support")
-        assert(type(readfile)=="function"and type(isfile)=="function"and isfile("SB2Codex/kill-aura.luau"),"Saved source is unavailable")
+        local sourcePath=storageBootstrap.SourcePath
+        assert(type(readfile)=="function"and type(isfile)=="function"and sourcePath and isfile(sourcePath),"Saved source is unavailable")
+        local resumePath=env.SB2AutomationResumeConfigPath
         queue(string.format([==[
 if not game:IsLoaded()then game.Loaded:Wait()end
 local p=game:GetService("Players").LocalPlayer
 while not p do task.wait();p=game:GetService("Players").LocalPlayer end
-if p.UserId==%s and game.GameId==212154879 and isfile("SB2Codex/kill-aura.luau")then
-    local code=readfile("SB2Codex/kill-aura.luau")
-    if code:find(%q,1,true)then assert(loadstring(code))()end
+if p.UserId==%s and game.GameId==212154879 and isfile(%q)then
+    local code=readfile(%q)
+    if code:find(%q,1,true)then
+        getgenv().SB2AutomationResumeConfigPath=%s
+        assert(loadstring(code))()
+    end
 end
-]==],tostring(player.UserId),BUILD))
+]==],tostring(player.UserId),sourcePath,sourcePath,BUILD,type(resumePath)=="string"and string.format("%q",resumePath)or "nil"))
     end
     local lobby=makeLobby({Now=os.clock,Alive=startupCurrent,Find=findPlay,Ready=playReady,Queue=queueLobby,
+        Hold=function()
+            assert(restReadable,tostring(menuRest))
+            local deadline=menuRest.Deadline()
+            return deadline and math.max(0,deadline-os.time())or 0
+        end,
         Activate=function(button)
             assert(type(getconnections)=="function","Native Play activation is unavailable")
             local count=0
@@ -268,7 +429,34 @@ end
             return count>0
         end})
     env.SB2LobbyPlay=lobby
-    while not lobby.Done and startupCurrent()do lobby.Update();if not lobby.Done then task.wait(.25)end end
+    local menuState={Running=true}
+    local idleInput
+    local idle=bootstrapFeatures.AntiAfk({State=menuState,Player=player,Pulse=bootstrapFeatures.IdleInput({
+        Input=function()idleInput=idleInput or game:GetService("VirtualUser");return idleInput end,
+        Point=function()return Vector2.zero end,
+        Frame=function()local camera=workspace.CurrentCamera;return camera and camera.CFrame or CFrame.new()end,
+        Wait=task.wait})})
+    local idleCleanup=runtimeOwner.Root.Destroying:Connect(function()menuState.Running=false;idle.Destroy()end)
+    local status=Instance.new("TextLabel")
+    status.Name="AntiSuspiciousRest";status.Size=UDim2.fromOffset(340,42);status.Position=UDim2.new(.5,-170,0,72)
+    status.BackgroundColor3=Color3.fromRGB(30,30,32);status.TextColor3=Color3.new(1,1,1)
+    status.TextSize=16;status.TextWrapped=true;status.Visible=false;status.Parent=runtimeOwner.Root
+    while not lobby.Done and startupCurrent()do
+        lobby.Update()
+        local remaining=lobby.RestRemaining
+        status.Visible=remaining~=nil and remaining>0 or lobby.Error~=nil
+        if remaining and remaining>0 then
+            remaining=math.ceil(remaining)
+            status.Text=string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+        elseif lobby.Error then status.Text="Start menu paused · "..lobby.Error end
+        if not lobby.Done then task.wait(.25)end
+    end
+    menuState.Running=false;idle.Destroy();idleCleanup:Disconnect()
+    if lobby.Error and startupCurrent()then
+        warn("[SB2 Start menu] "..lobby.Error)
+        runtimeOwner.Release()
+        return
+    end
     runtimeOwner.Release();runtimeOwner.Root:Destroy()
     return
 end
@@ -2083,68 +2271,9 @@ function state.OpenGameMenu(name)
     return ok,reason
 end
 do
-    local attachAntiAFK=(function()
--- BEGIN BUNDLED ANTI AFK
--- Idle events acquire a short pulse lease; no polling worker is created.
-return function(ctx)
-    local result={Enabled=true,Pulses=0}
-    local lease={Running=false,Due=0,Closed=false}
-    local clock=ctx.Clock or os.clock
-    local state=ctx.State
-    state.AntiAfkStatus="Active · waiting for idle"
-    local function onIdle()
-        local stamp=clock()
-        if lease.Closed or lease.Running or state.Running==false or stamp<lease.Due then return end
-        lease.Running=true;lease.Due=stamp+20
-        local success,reason=pcall(ctx.Pulse)
-        lease.Running=false
-        if lease.Closed or state.Running==false then return end
-        if success and reason~=false then
-            result.Pulses+=1
-            state.LastAntiAfkError=nil
-            state.AntiAfkInputMethod=type(reason)=="string"and reason or nil
-            state.AntiAfkStatus="Active · idle input sent"
-        else
-            state.LastAntiAfkError=success and "Executor rejected idle input"or tostring(reason)
-            state.AntiAfkStatus="Idle input unavailable · retrying on next idle event"
-        end
-    end
-    local subscription=ctx.Player.Idled:Connect(onIdle)
-    function result.Destroy()
-        if lease.Closed then return end
-        lease.Closed=true;result.Enabled=false
-        subscription:Disconnect();subscription=nil
-        state.AntiAfkStatus="Stopped";state.AntiAfkInputMethod=nil
-    end
-    return result
-end
-
--- END BUNDLED ANTI AFK
-    end)()
+    local attachAntiAFK=bootstrapFeatures.AntiAfk
     local input
-    local makeIdleInput=(function()
--- BEGIN BUNDLED ANTI AFK INPUT
--- Lazy idle-only input with a paired press/release fallback for restricted executors.
-return function(ctx)
-    return function()
-        local input=ctx.Input()
-        local point,frame=ctx.Point(),ctx.Frame()
-        pcall(input.CaptureController,input)
-        local clicked,clickError=pcall(input.ClickButton2,input,point,frame)
-        if clicked then return "VirtualUser ClickButton2"end
-        local pressed,pressError=pcall(function()
-            input:Button2Down(point,frame)
-            ctx.Wait(.05)
-        end)
-        -- Release even when a partial press errors, or the runtime closes during the wait.
-        local released,releaseError=pcall(input.Button2Up,input,point,frame)
-        assert(pressed and released,"Idle input unavailable: "..tostring(pressError or releaseError or clickError))
-        return "VirtualUser Button2Down/Up"
-    end
-end
-
--- END BUNDLED ANTI AFK INPUT
-    end)()
+    local makeIdleInput=bootstrapFeatures.IdleInput
     state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=makeIdleInput({
         Input=function()input=input or game:GetService("VirtualUser");return input end,
         Point=function()return Vector2.zero end,
@@ -8827,7 +8956,9 @@ end
         if not deadline then return end
         local remaining=math.max(0,math.ceil(deadline-os.time()))
         if remaining>0 then
-            return string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+            local reason=string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+            local problem=state.RestMenuError or kickFallback and kickFallback.MenuRest and state.SafeKickFallbackStatus
+            return problem and reason.." · "..problem or reason
         end
         if kickFallback and kickFallback.Armed then
             return state.SafeKickFallbackStatus or "Anti Suspicious rest ended · waiting for rejoin"
@@ -8837,6 +8968,25 @@ end
     local function showAutomationHold(reason)
         if state.SafeMode then state.SafeModeStatus=reason end
         if state.MultiSpot then state.MultiSpotStatus=reason end
+    end
+    local function teleportRestMenu()
+        state.QueueAutomation()
+        state.ServerTeleportStarted=false
+        state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
+        local sent,reason=pcall(TeleportService.Teleport,TeleportService,659222129,player)
+        if not sent then state.AutomationTeleporting=false;error(reason)end
+    end
+    local restMenuAttempts,restMenuRetryAt=0,0
+    local function resumeRestMenu()
+        if state.StopEverything or state.ModeratorBlocking or state.AutoRegroupHolding or state.ServerTeleportStarted
+            or state.AutomationTeleporting or kickFallback and kickFallback.Armed then return end
+        local now=os.clock()
+        if restMenuAttempts>=3 then state.RestMenuError="Start menu unavailable · rejoin manually";return end
+        if now<restMenuRetryAt then return end
+        restMenuAttempts+=1;restMenuRetryAt=now+45
+        local sent,reason=pcall(teleportRestMenu)
+        state.RestMenuError=not sent and tostring(reason):sub(1,400)or nil
+        if not sent then showAutomationHold("Anti Suspicious rest · Start menu retry · "..tostring(reason))end
     end
     local function chooseBlockTarget(people)
         for _,person in ipairs(people)do
@@ -9129,7 +9279,7 @@ end
             end
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
             if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
-            if requested and kickFallback then kickFallback.TeleportFailed()end
+            if kickFallback and (requested or kickFallback.MenuRest)then kickFallback.TeleportFailed()end
         end
     end)
     local function fallbackTicket(rest)
@@ -9170,6 +9320,7 @@ end
                 ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
             end,
+            Menu=function()workerIdentity();teleportRestMenu()end,
             Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end,
             Finish=function()state.SafeKickFallbackBusy=false end,Status=function(message)
                 state.SafeKickFallbackStatus=message;state.SafeModeStatus=message;refresh()
@@ -9193,7 +9344,7 @@ end
             state.ServerTeleportStarted=false
             clearRejoinAway();state.AutomationTeleporting=false
             if friend.TeleportFailed then friend.TeleportFailed("Teleport failed")end
-            if requested and kickFallback then kickFallback.TeleportFailed()end
+            if kickFallback and (requested or kickFallback.MenuRest)then kickFallback.TeleportFailed()end
         end
     end)
     state.AutomationLoadedJob=game.JobId
@@ -9217,7 +9368,11 @@ end
                 end
                 if state.AutoRegroupHolding then showAutomationHold("Waiting · Auto Regroup returning to lobby");return end
                 local hold=restHoldReason()
-                if hold then showAutomationHold(hold);return end
+                if hold then
+                    showAutomationHold(hold)
+                    if state.AntiSuspiciousRestUntil>os.time()then resumeRestMenu()end
+                    return
+                end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then
                     if state.MultiSpot then state.MultiSpotStatus="Waiting · "..tostring(state.SafeModeStatus or "protection and rejoin")end
                     return
@@ -9641,12 +9796,13 @@ return function(ctx)
     local pendingId,pendingRest
     local epoch=0
     local executing=false
+    local menuRecovery
     local failures,retryDue=0,0
     local function enabled()return ctx.Active()and ctx.Job()==ctx.InitialJob end
     local function started()return api.Started or ctx.Started and ctx.Started()end
     function api.Reset()
         epoch+=1;pendingId=nil;pendingRest=nil;failures=0;retryDue=0
-        api.Armed=false;api.Started=false;api.Attempts=0
+        api.Armed=false;api.Started=false;api.Attempts=0;api.MenuRest=false;menuRecovery=nil
     end
     function api.MarkStarted()api.Started=true end
     function api.Requested(userId,restSeconds)
@@ -9655,6 +9811,9 @@ return function(ctx)
         api.Update(ctx.Now())
     end
     function api.TeleportFailed()
+        if api.Armed and api.MenuRest and menuRecovery then
+            api.Started=false;menuRecovery();return
+        end
         if pendingId and not api.Armed then api.Started=false;api.Update(ctx.Now())end
     end
     function api.Update(now)
@@ -9667,28 +9826,31 @@ return function(ctx)
         if executing or failures>=3 or now<retryDue then return end
         executing=true
         local token=epoch
-        local restSeconds,restUntil,kicked=pendingRest
+        local restSeconds,restUntil=pendingRest
         local function valid()
             return token==epoch and enabled()and ctx.Present(target)and not ctx.Allowed(target)
         end
         local function recovery()
             ctx.Sleep(.2)
-            if restUntil then
-                if not kicked then return end
-                while token==epoch and enabled()and not started()do
-                    local remaining=restUntil-ctx.WallTime()
-                    if remaining<=0 then break end
-                    ctx.Sleep(math.min(remaining,30))
-                end
-            end
-            for attempt=1,3 do
+            for attempt=api.Attempts+1,3 do
                 if token~=epoch or not enabled()or started()then return end
                 api.Attempts=attempt
-                local sent,reason=pcall(ctx.Rejoin)
-                if not sent then ctx.Status("Fallback rejoin · "..tostring(reason))end
+                local sent,reason=pcall(restUntil and ctx.Menu or ctx.Rejoin)
+                if not sent then ctx.Status((restUntil and "Start menu teleport · "or "Fallback rejoin · ")..tostring(reason))end
                 ctx.Sleep(3)
             end
-            if enabled()and not started()then ctx.Status("Fallback rejoin unavailable · rejoin manually")end
+            if enabled()and not started()then
+                ctx.Status(restUntil and "Start menu teleport unavailable · rejoin manually"or "Fallback rejoin unavailable · rejoin manually")
+            end
+        end
+        local recoveryRunning=false
+        local function scheduleRecovery()
+            if recoveryRunning then return end
+            recoveryRunning=true
+            ctx.Spawn(function()
+                recovery()
+                recoveryRunning=false
+            end)
         end
         ctx.Spawn(function()
             local ok,reason=pcall(function()
@@ -9704,12 +9866,14 @@ return function(ctx)
                 if restSeconds then
                     restUntil=ctx.CommitRest(restSeconds)
                     assert(restUntil,"Rest deadline could not be saved · no kick")
+                    assert(type(ctx.Menu)=="function","Start menu teleport is unavailable")
                 end
                 api.Armed=true
-                ctx.Status(restUntil and "Blocked · kicking for Anti Suspicious rest"or "Blocked · rejoin not started · kicking and rejoining")
-                ctx.Spawn(recovery)
-                ctx.Kick("Safe Mode: blocked @"..target.Name.." before automatic rejoin.")
-                kicked=true
+                api.MenuRest=restUntil~=nil
+                if api.MenuRest then menuRecovery=scheduleRecovery end
+                ctx.Status(restUntil and "Rest saved · returning to Start menu"or "Blocked · rejoin not started · kicking and rejoining")
+                scheduleRecovery()
+                if not restUntil then ctx.Kick("Safe Mode: blocked @"..target.Name.." before automatic rejoin.")end
             end)
             executing=false;ctx.Finish()
             if not ok then
@@ -9723,67 +9887,7 @@ end
 
 -- END BUNDLED SAFE KICK FALLBACK
     end)()
-    local makeRest=(function()
--- BEGIN BUNDLED ANTI SUSPICIOUS
--- Account-scoped rolling history and an absolute rest deadline.
-return function(ctx)
-    local maxWindow=200*60
-    local maxHops=100
-    local ledger={Version=1,Armed=false,Hops={}}
-    local function prune(hops,now)
-        local recent={}
-        for i=math.max(1,#hops-maxHops+1),#hops do
-            local at=hops[i]
-            if type(at)=="number" and at<=now and at>now-maxWindow then recent[#recent+1]=at end
-        end
-        return recent
-    end
-    local ok,saved=pcall(ctx.Load)
-    if ok and type(saved)=="table" and saved.Version==1 and type(saved.Hops)=="table" then
-        local now=ctx.Now()
-        ledger.Armed=saved.Armed==true
-        ledger.Hops=prune(saved.Hops,now)
-        if type(saved.Until)=="number" and saved.Until>now and saved.Until<=now+maxWindow then
-            ledger.Until=saved.Until
-        end
-    end
-    local api={}
-    local retryAt=0
-    local function persist(nextLedger)
-        local ok,result=pcall(ctx.Save,nextLedger)
-        local written=ok and result~=false
-        if written then ledger=nextLedger end
-        return written
-    end
-    function api.Deadline()
-        local untilAt=ledger.Until
-        return untilAt and untilAt>ctx.Now() and untilAt or nil
-    end
-    function api.ObserveProtected()
-        if not ctx.Enabled() or ledger.Armed or api.Deadline() or ctx.Now()<retryAt then return end
-        local nextLedger={Version=1,Armed=true,Hops=ledger.Hops}
-        if not persist(nextLedger) then retryAt=ctx.Now()+30 end
-    end
-    function api.Departure()
-        if not ctx.Enabled() or not ledger.Armed or api.Deadline() then return end
-        local now,limits=ctx.Now(),ctx.Limits()
-        local hops=prune(ledger.Hops,now)
-        if #hops>=maxHops then table.remove(hops,1)end
-        hops[#hops+1]=now
-        if not persist({Version=1,Armed=true,Hops=hops})then return end
-        local count=0
-        for _,at in ipairs(hops)do if at>now-limits.Window*60 then count+=1 end end
-        if count>=limits.Hops then return ctx.Random(limits.Min*60,limits.Max*60) end
-    end
-    function api.Commit(seconds)
-        local deadline=ctx.Now()+seconds
-        if persist({Version=1,Armed=false,Hops={},Until=deadline})then return deadline end
-    end
-    return api
-end
-
--- END BUNDLED ANTI SUSPICIOUS
-    end)()
+    local makeRest=bootstrapFeatures.Rest
     attach({MakeBlockPrompt=makeBlockPrompt,MakeBlockMask=makeBlockMask,MakeKickFallback=makeKickFallback,MakeRest=makeRest,SavePreferences=requestSave,Make=make,MakeSafe=makeSafe,MakeMulti=makeMulti,MakeCatalog=makeCatalog,MakeUI=makeUI,MakeFriend=makeFriend,BlockPoint=blockPoint,MakeBlockConfirm=makeBlockConfirm,
         State=state,Player=player,Players=Players,Bind=bind,Button=uiButton,Label=uiLabel,Create=create,
         Corner=corner,Reveal=revealOptions,Parent=content})

@@ -1,12 +1,17 @@
 return function(helpers,source)
     local function fixture(overrides)
-        local f={Now=1000,Ticks=0,Limit=4,SafeUpdates=0,MultiUpdates=0,Paints=0,Failures=0,Workers={}}
+        local f={Now=1000,Ticks=0,Limit=4,SafeUpdates=0,MultiUpdates=0,Paints=0,Failures=0,Workers={},Queues=0,Menus=0}
         local state={Running=true,SafeMode=true,MultiSpot=true,AutoFarm=true,Enabled=true,
             SafeFloorId=134019705603409,AutoJoinFriend=false,AccountProgression=false}
         for key,value in pairs(overrides or {})do state[key]=value end
         state.SaveNow=function()return true end
+        state.QueueAutomation=function()f.Queues+=1;if f.QueueFail then error("Queue unavailable")end end
         local fallback={Armed=false,Update=function()end}
         local environment={state=state,kickFallback=fallback,game={JobId="fixture"},
+            TeleportService={Teleport=function(_,id)
+                assert(id==659222129 and f.Queues>0);f.Menus+=1
+                if f.MenuFail then error("Menu unavailable")end
+            end},
             os={clock=function()return f.Now end,time=function()return f.Now end},
             getgenv=function()return {}end,workerIdentity=function()end,readTicket=function()end,
             api={Active=false},farmClock=function()return f.Now end,
@@ -30,9 +35,15 @@ return function(helpers,source)
     rest.Run()
     assert(rest.SafeUpdates==0 and rest.MultiUpdates==0 and rest.State.AntiSuspiciousRestUntil==1060,
         "Saved account rest must keep both protection and farming suspended")
+    assert(rest.Menus==1 and rest.Queues==1,"A rest restored inside a floor must return to the Start menu")
     assert(rest.State.SafeModeStatus:find("Anti Suspicious rest",1,true)
         and rest.State.MultiSpotStatus==rest.State.SafeModeStatus and rest.State.MultiSpotStatus:find("1:00",1,true),
         "A saved rest must publish its countdown instead of leaving the starting-arena placeholder")
+    local unavailable=fixture({AntiSuspiciousRestUntil=2000});unavailable.MenuFail=true;unavailable.Limit=1000
+    unavailable.Run()
+    assert(unavailable.Menus==3 and unavailable.SafeUpdates==0 and unavailable.MultiUpdates==0
+        and unavailable.State.MultiSpotStatus:find("Start menu unavailable",1,true),
+        "A restored rest retries a failed menu entry at most three times and retains its hold")
     local expires=fixture({AntiSuspiciousRestUntil=1000.15})
     expires.OnSafe=function()assert(expires.Now>=1000.15)end
     expires.Run()

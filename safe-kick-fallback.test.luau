@@ -2,10 +2,10 @@ return function(source)
     local make=assert(loadstring(source))()
     local target={UserId=2,Name="Outsider"}
     local function fixture()
-        local f={Clock=0,Active=true,People={target},White={},Threads={},Order={},Blocks=0,Kicks=0,Rejoins=0,Confirmed=true,Job="A"}
+        local f={Clock=0,Active=true,People={target},White={},Threads={},Order={},Blocks=0,Kicks=0,Rejoins=0,Menus=0,Confirmed=true,Job="A"}
         local function spawn(fn)local t=coroutine.create(fn);table.insert(f.Threads,t);assert(coroutine.resume(t))end
         f.Api=make({InitialJob="A",Job=function()return f.Job end,Now=function()return f.Clock end,
-            WallTime=function()return f.Clock end,CommitRest=function(seconds)if not f.RestFail then return f.Clock+seconds end end,
+            WallTime=function()return f.Clock end,CommitRest=function(seconds)if not f.RestFail then f.Deadline=f.Clock+seconds;return f.Deadline end end,
             Active=function()return f.Active end,Players=function()return f.People end,Allowed=function(p)return f.White[p.UserId]end,
             Present=function(p)for _,person in ipairs(f.People)do if person==p then return true end end;return false end,
             Started=function()return f.Started end,
@@ -14,6 +14,7 @@ return function(source)
             Block=function(_,active)f.Blocks+=1;table.insert(f.Order,"block");if f.OnBlock then f.OnBlock(active)end;return f.Confirmed end,
             Prepare=function()table.insert(f.Order,"queue");if f.QueueFail then error("Queue failed")end end,
             Kick=function()assert(f.Confirmed);f.Kicks+=1;table.insert(f.Order,"kick")end,
+            Menu=function()assert(f.Deadline and f.Confirmed and f.Kicks==0);f.Menus+=1;if f.MenuFail then error("Menu unavailable")end end,
             Rejoin=function()assert(f.Kicks==1);f.Rejoins+=1 end})
         function f.Tick(now)f.Clock=now;f.Api.Update(now)end
         function f.Resume(index)local t=f.Threads[index];if coroutine.status(t)~="dead"then assert(coroutine.resume(t))end end
@@ -48,10 +49,23 @@ return function(source)
     f=fixture();f.Request();f.Resume(1);for _=1,4 do f.Resume(2)end
     assert(f.Rejoins==3,"Post-kick recovery remains bounded")
     f=fixture();f.Api.Requested(2,2437);f.Resume(1)
-    assert(f.Kicks==1 and f.Rejoins==0,"Rest starts by kicking immediately")
-    f.Resume(2);f.Clock=2436;f.Resume(2);assert(f.Rejoins==0,"Never request a rejoin before the saved deadline")
-    f.Clock=2437;f.Resume(2);assert(f.Rejoins==1,"Attempt rejoin at the deadline")
+    assert(f.Kicks==0 and f.Rejoins==0 and f.Deadline==2437,"Rest is committed without kicking")
+    f.Resume(2);assert(f.Menus==1 and f.Clock==0,"Enter the Start menu immediately, before the rest deadline")
+    f.Api.MarkStarted();f.Resume(2);assert(f.Menus==1 and f.Rejoins==0,"The menu owns the rest after teleport starts")
+    f.Api.TeleportFailed();f.Resume(3)
+    assert(f.Menus==2 and f.Api.Armed and not f.Api.Started,"A failed Started event must resume the committed menu transition")
+    f.Api.MarkStarted();f.Resume(3);f.Api.TeleportFailed();f.Resume(4)
+    assert(f.Menus==3 and f.Rejoins==0 and f.Kicks==0,"Menu failure recovery shares the original three-attempt budget")
+    f.Api.MarkStarted();f.Resume(4);f.Api.TeleportFailed()
+    f.Resume(5);assert(f.Menus==3 and f.Status:find("Start menu teleport unavailable",1,true),
+        "Repeated Started/failure events cannot renew the menu retry budget")
     f=fixture();f.RestFail=true;f.Api.Requested(2,60);f.Resume(1)
-    assert(f.Kicks==0 and f.Rejoins==0,"Do not kick when the rest deadline cannot be stored")
+    assert(f.Kicks==0 and f.Rejoins==0 and f.Menus==0,"Do not leave when the rest deadline cannot be stored")
+    f=fixture();f.QueueFail=true;f.Api.Requested(2,60);f.Resume(1)
+    assert(not f.Deadline and f.Menus==0 and f.Kicks==0,"Resume preparation must succeed before committing the rest or leaving")
+    f=fixture();f.MenuFail=true;f.Api.Requested(2,60);f.Resume(1)
+    for _=1,4 do f.Resume(2)end
+    assert(f.Menus==3 and f.Kicks==0 and f.Rejoins==0 and f.Api.Armed and f.Status:find("Start menu teleport unavailable",1,true),
+        "Menu failures retry boundedly and retain the rest; they cannot fall back to a floor rejoin")
     print("PASS Immediate Safe fallback: dispatch required, 5 FPS scheduler turn, confirmed-block/queue guards, native start cancellation, whitelist, departure, limits and bounded recovery")
 end

@@ -455,7 +455,9 @@ end
         if not deadline then return end
         local remaining=math.max(0,math.ceil(deadline-os.time()))
         if remaining>0 then
-            return string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+            local reason=string.format("Anti Suspicious rest · %d:%02d remaining",math.floor(remaining/60),remaining%60)
+            local problem=state.RestMenuError or kickFallback and kickFallback.MenuRest and state.SafeKickFallbackStatus
+            return problem and reason.." · "..problem or reason
         end
         if kickFallback and kickFallback.Armed then
             return state.SafeKickFallbackStatus or "Anti Suspicious rest ended · waiting for rejoin"
@@ -465,6 +467,25 @@ end
     local function showAutomationHold(reason)
         if state.SafeMode then state.SafeModeStatus=reason end
         if state.MultiSpot then state.MultiSpotStatus=reason end
+    end
+    local function teleportRestMenu()
+        state.QueueAutomation()
+        state.ServerTeleportStarted=false
+        state.AutomationTeleporting=true;state.AutomationTeleportDeadline=os.clock()+40
+        local sent,reason=pcall(TeleportService.Teleport,TeleportService,659222129,player)
+        if not sent then state.AutomationTeleporting=false;error(reason)end
+    end
+    local restMenuAttempts,restMenuRetryAt=0,0
+    local function resumeRestMenu()
+        if state.StopEverything or state.ModeratorBlocking or state.AutoRegroupHolding or state.ServerTeleportStarted
+            or state.AutomationTeleporting or kickFallback and kickFallback.Armed then return end
+        local now=os.clock()
+        if restMenuAttempts>=3 then state.RestMenuError="Start menu unavailable · rejoin manually";return end
+        if now<restMenuRetryAt then return end
+        restMenuAttempts+=1;restMenuRetryAt=now+45
+        local sent,reason=pcall(teleportRestMenu)
+        state.RestMenuError=not sent and tostring(reason):sub(1,400)or nil
+        if not sent then showAutomationHold("Anti Suspicious rest · Start menu retry · "..tostring(reason))end
     end
     local function chooseBlockTarget(people)
         for _,person in ipairs(people)do
@@ -757,7 +778,7 @@ end
             end
             state.AutomationTeleporting=false;api.TeleportFailed(reason or result.Name);fail(reason or result.Name)
             if friend.TeleportFailed then friend.TeleportFailed(reason or result.Name)end
-            if requested and kickFallback then kickFallback.TeleportFailed()end
+            if kickFallback and (requested or kickFallback.MenuRest)then kickFallback.TeleportFailed()end
         end
     end)
     local function fallbackTicket(rest)
@@ -798,6 +819,7 @@ end
                 ticket.Active=true;ticket.SourceJob=game.JobId;ticket.Visited[game.JobId]=true
                 ticket.LastBlockedUserId=person.UserId;save(ticket);state.QueueAutomation()
             end,
+            Menu=function()workerIdentity();teleportRestMenu()end,
             Rejoin=function()workerIdentity();TeleportService:Teleport(game.PlaceId,player)end,Kick=function(reason)player:Kick(reason)end,
             Finish=function()state.SafeKickFallbackBusy=false end,Status=function(message)
                 state.SafeKickFallbackStatus=message;state.SafeModeStatus=message;refresh()
@@ -821,7 +843,7 @@ end
             state.ServerTeleportStarted=false
             clearRejoinAway();state.AutomationTeleporting=false
             if friend.TeleportFailed then friend.TeleportFailed("Teleport failed")end
-            if requested and kickFallback then kickFallback.TeleportFailed()end
+            if kickFallback and (requested or kickFallback.MenuRest)then kickFallback.TeleportFailed()end
         end
     end)
     state.AutomationLoadedJob=game.JobId
@@ -845,7 +867,11 @@ end
                 end
                 if state.AutoRegroupHolding then showAutomationHold("Waiting · Auto Regroup returning to lobby");return end
                 local hold=restHoldReason()
-                if hold then showAutomationHold(hold);return end
+                if hold then
+                    showAutomationHold(hold)
+                    if state.AntiSuspiciousRestUntil>os.time()then resumeRestMenu()end
+                    return
+                end
                 if state.ModeratorBlocking or state.SafeKickFallbackBusy or kickFallback and kickFallback.Armed then
                     if state.MultiSpot then state.MultiSpotStatus="Waiting · "..tostring(state.SafeModeStatus or "protection and rejoin")end
                     return

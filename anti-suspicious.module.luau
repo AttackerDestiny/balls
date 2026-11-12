@@ -12,6 +12,15 @@ return function(ctx)
         return recent
     end
     local ok,saved=pcall(ctx.Load)
+    if ctx.StrictLoad then
+        assert(ok,"Could not read saved Anti Suspicious rest: "..tostring(saved))
+        if saved~=nil then
+            assert(type(saved)=="table"and saved.Version==1 and type(saved.Hops)=="table","Invalid saved Anti Suspicious rest")
+            local deadline=saved.Until
+            assert(deadline==nil or type(deadline)=="number"and deadline==deadline
+                and math.abs(deadline)<math.huge and deadline<=ctx.Now()+maxWindow,"Invalid saved Anti Suspicious deadline")
+        end
+    end
     if ok and type(saved)=="table" and saved.Version==1 and type(saved.Hops)=="table" then
         local now=ctx.Now()
         ledger.Armed=saved.Armed==true

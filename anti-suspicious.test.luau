@@ -29,5 +29,19 @@ return function(source)
     assert(not api.Departure(),"Entries outside the rolling window expire")
     enabled=false
     assert(not api.Departure())
+    local deadline=now+2437
+    local function strict(load)
+        return make({StrictLoad=true,Now=function()return now end,Load=load})
+    end
+    local menu=strict(function()return {Version=1,Hops={},Until=deadline}end)
+    assert(menu.Deadline()==deadline,"The menu uses the original absolute deadline across reloads")
+    now+=60
+    assert(strict(function()return {Version=1,Hops={},Until=deadline}end).Deadline()==deadline)
+    assert(not strict(function()return nil end).Deadline(),"A missing ledger has no rest")
+    assert(not pcall(strict,function()error("Read failed")end),"An unreadable rest must stop Auto Play")
+    for _,value in ipairs({{Version=2,Hops={}},{Version=1,Hops={},Until=math.huge},
+        {Version=1,Hops={},Until=0/0},{Version=1,Hops={},Until=now+12001}})do
+        assert(not pcall(strict,function()return value end),"Malformed or impossible menu-rest data cannot authorize Start")
+    end
     print("PASS Anti Suspicious: rolling Safe Mode departures, reload, randomized seconds, rest commitment and expiry")
 end

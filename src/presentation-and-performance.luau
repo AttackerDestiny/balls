@@ -152,15 +152,9 @@ function state.OpenGameMenu(name)
     return ok,reason
 end
 do
-    local attachAntiAFK=(function()
--- BEGIN BUNDLED ANTI AFK
--- END BUNDLED ANTI AFK
-    end)()
+    local attachAntiAFK=bootstrapFeatures.AntiAfk
     local input
-    local makeIdleInput=(function()
--- BEGIN BUNDLED ANTI AFK INPUT
--- END BUNDLED ANTI AFK INPUT
-    end)()
+    local makeIdleInput=bootstrapFeatures.IdleInput
     state.AntiAfk=attachAntiAFK({State=state,Player=player,Pulse=makeIdleInput({
         Input=function()input=input or game:GetService("VirtualUser");return input end,
         Point=function()return Vector2.zero end,
