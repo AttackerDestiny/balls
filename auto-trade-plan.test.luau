@@ -9,7 +9,8 @@ return function(planSource,moduleSource)
     local scroll=item("Upgrade Protection Scroll",1)
     local crystal=item("Resurrection Crystal",2)
     local sword=item("Ordinary Sword",3)
-    local inventory={GetChildren=function()return {scroll,crystal,sword}end}
+    local inventoryItems={scroll,crystal,sword}
+    local inventory={GetChildren=function()return inventoryItems end}
     local equipped={}
     local equip={GetChildren=function()return equipped end}
     local state={TradeMode="Selected",TradeItems={}}
@@ -29,6 +30,14 @@ return function(planSource,moduleSource)
     crystal.Attrs.Favorited=nil;scroll.Restricted=true;items=plan();assert(#items==1 and items[1]==crystal)
     scroll.Restricted=false;equipped={{Value=2,IsA=function()return true end}}
     items=plan();assert(#items==1 and items[1]==scroll)
+    equipped={}
+    inventoryItems={scroll,crystal,sword,item("Death Grim",4),item("Death Gale",5),item("Black Omen",6)}
+    for _,mode in ipairs({"Selected","Legendary"})do
+        state.TradeMode=mode
+        items=plan()
+        assert(#items==5 and items[3].Name=="Death Grim"and items[4].Name=="Death Gale"and items[5].Name=="Black Omen",
+            "All three named items are offered without being selected or passing the rarity filter")
+    end
     assert(not worker.AlwaysInclude("Other Crystal"))
-    print("PASS Always-trade consumables: both modes, rare items included, locked/favorited/equipped/restricted items preserved")
+    print("PASS Always-trade items: both modes, named items included, locked/favorited/equipped/restricted items preserved")
 end

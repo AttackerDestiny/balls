@@ -344,7 +344,7 @@ With both selected, available rare crystals can become legendary while uncommon 
 | **Mode: Legendary+** | Offers eligible Legendary, Tribute, and Burst items |
 | **Inventory** | Selects item names from the local inventory, including displayed quantities |
 
-Offers up to **400 item units per outgoing trade**, counting every unit in a stack. For example, 158 scrolls leave room for 242 crystals. Eligible items already offered keep their slots; remaining capacity follows inventory ID order. Excess inventory remains for another trade. **Upgrade Protection Scroll** and **Resurrection Crystal** are always eligible, even if not selected. Equipped, locked/favorited, and native-restricted items are excluded.
+Offers up to **400 item units per outgoing trade**, counting every unit in a stack. For example, 158 scrolls leave room for 242 crystals. Eligible items already offered keep their slots; remaining capacity follows inventory ID order. Excess inventory remains for another trade. **Upgrade Protection Scroll**, **Resurrection Crystal**, **Death Grim**, **Death Gale**, and **Black Omen** are always eligible, even if not selected. Equipped, locked/favorited, and native-restricted items are excluded.
 
 Item adding uses batches of up to eight units across stacks or individual items, checked every 0.15 seconds while active. Every unit in the previous batch must appear in the replicated offer before another batch can start. Missing or partial acknowledgment pauses further additions and acceptance rather than resending requests. Server latency and acceptance determine the actual transfer rate.
 

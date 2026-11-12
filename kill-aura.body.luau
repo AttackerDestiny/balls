@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-11.trade-400-cap-batching-v3.0.45"
-local VERSION="3.0.45"
+local BUILD="2026-11-11.trade-always-include-weapons-v3.0.46"
+local VERSION="3.0.46"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -10772,6 +10772,7 @@ return function(ctx)
     local rarities={Legendary=true,Tribute=true,Burst=true}
     function api.AlwaysInclude(name)
         return name=="Upgrade Protection Scroll"or name=="Resurrection Crystal"
+            or name=="Death Grim"or name=="Death Gale"or name=="Black Omen"
     end
     function api.IncludesRarity(mode,rarity)
         return (mode=="Legendary"or mode=="Tribute")and rarities[rarity]==true

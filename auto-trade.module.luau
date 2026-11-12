@@ -6,6 +6,7 @@ return function(ctx)
     local rarities={Legendary=true,Tribute=true,Burst=true}
     function api.AlwaysInclude(name)
         return name=="Upgrade Protection Scroll"or name=="Resurrection Crystal"
+            or name=="Death Grim"or name=="Death Gale"or name=="Black Omen"
     end
     function api.IncludesRarity(mode,rarity)
         return (mode=="Legendary"or mode=="Tribute")and rarities[rarity]==true
