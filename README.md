@@ -344,7 +344,9 @@ With both selected, available rare crystals can become legendary while uncommon 
 | **Mode: Legendary+** | Offers eligible Legendary, Tribute, and Burst items |
 | **Inventory** | Selects item names from the local inventory, including displayed quantities |
 
-Offers all eligible copies/stacks, paced to native acknowledgment and trade limits. There is no old script-imposed 128-item cutoff. **Upgrade Protection Scroll** and **Resurrection Crystal** are always included when eligible, even if not selected. Equipped, locked/favorited, and native-restricted items are excluded.
+Offers up to **400 item units per outgoing trade**, counting every unit in a stack. For example, 158 scrolls leave room for 242 crystals. Eligible items already offered keep their slots; remaining capacity follows inventory ID order. Excess inventory remains for another trade. **Upgrade Protection Scroll** and **Resurrection Crystal** are always eligible, even if not selected. Equipped, locked/favorited, and native-restricted items are excluded.
+
+Item adding uses batches of up to eight units across stacks or individual items, checked every 0.15 seconds while active. Every unit in the previous batch must appear in the replicated offer before another batch can start. Missing or partial acknowledgment pauses further additions and acceptance rather than resending requests. Server latency and acceptance determine the actual transfer rate.
 
 Vel is offered automatically at the maximum affordable amount after the sender's **10% tax**, capped at a 100,000,000 Vel offer. This is equivalent to `floor(balance / 1.10)`, subject to the cap. A 660,000 balance permits a 600,000 offer plus 60,000 tax. There is no manual Vel box.
 

@@ -1,7 +1,7 @@
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-11.delta-block-input-calibration-v3.0.44"
-local VERSION="3.0.44"
+local BUILD="2026-11-11.trade-400-cap-batching-v3.0.45"
+local VERSION="3.0.45"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -10766,6 +10766,7 @@ do
 -- BEGIN BUNDLED AUTO TRADE
 -- Trade synchronization compares a desired offer with the replicated offer ledger.
 return function(ctx)
+    local limit,batchSize=400,8
     local api={}
     local session={trade=nil,request=nil,accepted=nil,receipt=nil,signature=nil,stableAt=0,action=nil}
     local rarities={Legendary=true,Tribute=true,Burst=true}
@@ -10803,21 +10804,42 @@ return function(ctx)
         end
     end
     local function offer(trade,role,peer,items,currency)
-        local desired,actual={},{}
+        local desired,actual,available={},{},{}
         local signature={tostring(currency)}
         for _,item in ipairs(items)do
             local amount=ctx.Count and ctx.Count(item)or 1
             if type(amount)~="number"or amount~=amount or amount==math.huge then amount=0 end
             amount=math.max(0,math.floor(amount))
-            if amount>0 then desired[item]=amount end
-            signature[#signature+1]="want:"..item.Value..":"..amount
+            if amount>0 then available[item]=amount end
         end
+        local total=0
         for _,side in ipairs({role,peer})do
             signature[#signature+1]=tostring(trade[side.."Currency"]or 0)
             for _,entry in ipairs(trade[side.."Items"]or {})do
                 signature[#signature+1]=side..":"..tostring(entry.item and entry.item.Value)..":"..tostring(entry.count or 1)
-                if side==role and entry.item then actual[entry.item]=(actual[entry.item]or 0)+(entry.count or 1)end
+                if side==role then
+                    local amount=entry.count==nil and 1 or entry.count
+                    if not entry.item or type(amount)~="number"or amount~=amount or amount<=0 or amount==math.huge or amount%1~=0 then
+                        return nil,nil,nil,"Trade paused · invalid outgoing quantity"
+                    end
+                    actual[entry.item]=(actual[entry.item]or 0)+amount;total+=amount
+                end
             end
+        end
+        if total>limit then return nil,nil,nil,"Trade paused · outgoing offer exceeds 400 items"end
+        local remaining=limit
+        -- Keep eligible units already offered, then fill spare slots in inventory order.
+        for item,amount in pairs(actual)do
+            if not available[item]or amount>available[item]then
+                return nil,nil,nil,"Trade paused · offer exceeds selected quantity"
+            end
+            desired[item]=amount;remaining-=amount
+        end
+        for _,item in ipairs(items)do
+            local have=desired[item]or 0
+            local add=math.min(remaining,(available[item]or 0)-have)
+            if add>0 then desired[item]=have+add;remaining-=add end
+            signature[#signature+1]="want:"..item.Value..":"..tostring(desired[item]or 0)
         end
         return desired,actual,table.concat(signature,"|")
     end
@@ -10836,31 +10858,35 @@ return function(ctx)
         local peer=role=="Requester"and "Partner"or "Requester"
         if not ctx.Allowed(trade[peer])then ctx.Status("Trade paused · partner is not whitelisted");return false end
         local items,currency=ctx.Plan()
-        local desired,actual,signature=offer(trade,role,peer,items,currency)
+        local desired,actual,signature,problem=offer(trade,role,peer,items,currency)
+        if not desired then ctx.Status(problem);return true end
         if session.signature~=signature then
             session.signature=signature;session.stableAt=now;session.action=nil
         end
-        for item,quantity in pairs(actual)do
-            if not desired[item]or quantity>desired[item]then ctx.Status("Trade paused · offer exceeds selected quantity");return true end
-        end
         local receipt=session.receipt
         if receipt then
-            if (actual[receipt.item]or 0)<receipt.quantity then
-                ctx.Status(now>=receipt.deadline and "Server has not acknowledged the batch · trade may be full · automatic acceptance paused"or "Waiting for stacked items to register")
-                return true
+            for item,quantity in pairs(receipt.items)do
+                if (actual[item]or 0)<quantity then
+                    ctx.Status(now>=receipt.deadline and "Server has not acknowledged the batch · automatic acceptance paused"or "Waiting for trade items to register")
+                    return true
+                end
             end
             session.receipt=nil
         end
+        local batch=0
         for _,item in ipairs(items)do
             local have,want=actual[item]or 0,desired[item]or 0
-            if have<want then
-                local batch=math.min(4,want-have)
-                session.receipt={item=item,quantity=have+batch,deadline=now+10}
-                for _=1,batch do ctx.Send("TradeAddItem",{item})end
-                ctx.Status("Adding "..item.Name.." · "..have.."/"..want)
-                return true
+            if batch<batchSize and have<want then
+                if not session.receipt then session.receipt={items={},deadline=now+10}end
+                local pending=session.receipt.items[item]or have
+                for _=1,math.min(batchSize-batch,want-pending)do
+                    if not ctx.Active()or not ctx.Allowed(trade[peer])then return true end
+                    pending+=1;batch+=1;session.receipt.items[item]=pending
+                    ctx.Send("TradeAddItem",{item})
+                end
             end
         end
+        if batch>0 then ctx.Status("Adding trade items · batch "..batch.." · limit 400");return true end
         if (trade[role.."Currency"]or 0)~=currency then
             once("vel","TradeChangeCurrency",{currency});ctx.Status("Setting trade Vel");return true
         end
@@ -10953,7 +10979,7 @@ end
             local ok,busy=pcall(worker.Update,os.clock())
             state.AutoTradeBusy=ok and busy==true
             if not ok then state.TradeStatus="Trade paused · "..tostring(busy)end
-            task.wait(state.AutoTrade and .3 or 1)
+            task.wait(state.AutoTradeBusy and .15 or state.AutoTrade and .3 or 1)
         end
         state.AutoTradeBusy=false
     end)

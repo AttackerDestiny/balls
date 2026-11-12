@@ -261,7 +261,7 @@ do
             local ok,busy=pcall(worker.Update,os.clock())
             state.AutoTradeBusy=ok and busy==true
             if not ok then state.TradeStatus="Trade paused · "..tostring(busy)end
-            task.wait(state.AutoTrade and .3 or 1)
+            task.wait(state.AutoTradeBusy and .15 or state.AutoTrade and .3 or 1)
         end
         state.AutoTradeBusy=false
     end)

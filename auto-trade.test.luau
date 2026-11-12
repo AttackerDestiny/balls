@@ -50,15 +50,15 @@ return function(source)
                 if action=="TradeAddItem"then requests+=1 elseif action=="TradeConfirm"then confirms+=1 end
             end})
         stacks.Event("RequestAccept",snapshot)
-        local target=quantity
-        for tick=1,math.ceil(quantity/4)+4 do
+        local target=math.min(quantity,400)
+        for tick=1,math.ceil(target/8)+4 do
             local before=requests;stacks.Update(tick)
-            assert(requests-before<=4 and requests<=target)
-            stacks.Update(tick+.1);assert(requests-before<=4,"No next batch without acknowledgment")
+            assert(requests-before<=8 and requests<=target)
+            stacks.Update(tick+.1);assert(requests-before<=8,"No next batch without acknowledgment")
             snapshot.RequesterItems={};for i=1,requests do snapshot.RequesterItems[i]={item=stack}end
             stacks.Event("TradeChanged",snapshot)
         end
-        assert(requests==target and confirms==1,"Stack fills to its full quantity without a 128-unit cutoff")
+        assert(requests==target and confirms==1,"Stacks fill to the selected quantity or the 400-unit trade cap")
     end
     local filters=make({})
     for _,rarity in ipairs({"Legendary","Tribute","Burst"})do
@@ -85,6 +85,54 @@ return function(source)
         Send=function(action)if action=="TradeAddItem"then attempts+=1 elseif action=="TradeConfirm"then confirmed+=1 end end})
     full.Event("RequestAccept",{Requester=me,Partner=friend,RequesterItems={},PartnerItems={}})
     full.Update(0);full.Update(20)
-    assert(attempts==4 and confirmed==0 and status:find("not acknowledged"),"A full or unresponsive server cannot cause spam or partial auto-acceptance")
+    assert(attempts==8 and confirmed==0 and status:find("not acknowledged"),"A full or unresponsive server cannot cause spam or partial auto-acceptance")
+    local function fixture(items,counts,existing,peerItems)
+        local f={Calls={},Status="",Active=true,Allowed=true}
+        f.Trade={Requester=me,Partner=friend,RequesterItems=existing or {},PartnerItems=peerItems or {},RequesterCurrency=0,PartnerCurrency=0}
+        f.Worker=make({Player=me,Active=function()return f.Active end,Allowed=function(p)return p==friend and f.Allowed end,
+            Plan=function()return items,0 end,Count=function(value)return counts[value]end,Status=function(text)f.Status=text end,
+            Send=function(action,args)f.Calls[#f.Calls+1]={action,args};if f.OnSend then f.OnSend(action,args)end end})
+        f.Worker.Event("RequestAccept",f.Trade)
+        function f.Ack()
+            for _,call in ipairs(f.Calls)do if call[1]=="TradeAddItem"and not call.Acked then
+                f.Trade.RequesterItems[#f.Trade.RequesterItems+1]={item=call[2][1]};call.Acked=true
+            end end
+            f.Worker.Event("TradeChanged",f.Trade)
+        end
+        return f
+    end
+    local capped=fixture({a,b},{[a]=158,[b]=500},nil,{{item=a,count=400}})
+    for tick=1,55 do capped.Worker.Update(tick*.15);capped.Ack()end
+    local units,adds,confirmA=0,0,0
+    for _,entry in ipairs(capped.Trade.RequesterItems)do units+=entry.count or 1;if entry.item==a then confirmA+=1 end end
+    for _,call in ipairs(capped.Calls)do if call[1]=="TradeAddItem"then adds+=1 end end
+    assert(units==400 and adds==400 and confirmA==158,"A 158-unit stack leaves exactly 242 slots, independent of the peer's 400-unit offer")
+    capped.Worker.Update(20)
+    assert(capped.Calls[#capped.Calls][1]=="TradeConfirm","A full capped offer can confirm while excess inventory remains")
+    local reserved=fixture({a,b},{[a]=500,[b]=100},{{item=b,count=100}})
+    for tick=1,42 do reserved.Worker.Update(tick);reserved.Ack()end
+    local aCount,bCount=0,0
+    for _,entry in ipairs(reserved.Trade.RequesterItems)do if entry.item==a then aCount+=entry.count or 1 else bCount+=entry.count or 1 end end
+    assert(aCount==300 and bCount==100,"Eligible units already offered retain their slots before the remaining budget is allocated")
+    local distinct,counts={},{}
+    for i=1,12 do local value={Name="Sword"..i,Value=100+i};distinct[i]=value;counts[value]=1 end
+    local fast=fixture(distinct,counts)
+    fast.Worker.Update(0);assert(#fast.Calls==8,"One batch covers eight distinct items instead of only one")
+    fast.Trade.RequesterItems={{item=distinct[1]}};fast.Worker.Event("TradeChanged",fast.Trade);fast.Worker.Update(.15)
+    assert(#fast.Calls==8,"Partial multi-item acknowledgment cannot release the batch")
+    fast.Trade.RequesterItems={};fast.Ack();fast.Worker.Update(.3)
+    assert(#fast.Calls==12,"The next batch starts only after every earlier addition is acknowledged")
+    local duplicate=fixture({a,a},{[a]=500})
+    for tick=1,55 do duplicate.Worker.Update(tick);duplicate.Ack()end
+    assert(#duplicate.Trade.RequesterItems==400,"Duplicate plan entries cannot reserve or send a second stack")
+    for _,amount in ipairs({-1,0,1.5,math.huge,0/0,"2"})do
+        local invalid=fixture({a},{[a]=500},{{item=a,count=amount}})
+        invalid.Worker.Update(0);assert(#invalid.Calls==0 and invalid.Status:find("invalid outgoing"),"Malformed outgoing counts cannot authorize adding or acceptance")
+    end
+    local over=fixture({a},{[a]=500},{{item=a,count=401}})
+    over.Worker.Update(0);assert(#over.Calls==0 and over.Status:find("exceeds 400"))
+    local stopped=fixture(distinct,counts)
+    stopped.OnSend=function()stopped.Active=false end
+    stopped.Worker.Update(0);assert(#stopped.Calls==1,"Protection or toggle changes stop the remainder of a batch")
     print("PASS Trade: whitelist, exact items and Vel acknowledgment, stable offers, native confirm/accept stages, deduplication, changed offers, pause")
 end
