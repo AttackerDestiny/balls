@@ -308,12 +308,14 @@ Multi-select from these eight saved options:
 | **Hide players** | Hides supported other-player visuals locally |
 | **Hide effects** | Hides supported effects through the visual controller |
 | **Delete map** | Default OFF. Clears terrain and deletes static scenery/floors in bounded batches, including newly streamed parts. Preserves character/enemy rigs, gameplay effects, hazards, interaction objects and teleport/spawn objects. OFF stops further deletion; rejoin to restore geometry. |
-| **Remove animations** | Default OFF. Stops existing and newly played local animations on characters/enemies. Disconnects hooks when OFF; subsequent native animations can play again. Native animation markers may be affected. |
+| **Remove animations** | Default OFF. Stops existing and newly played local animations on confirmed player characters. Enemy/NPC animators are preserved, including unidentified rigs still streaming in. Disconnects hooks when OFF; subsequent native player animations can play again. Player animation markers may be affected. |
 | **Disable rendering** | Disables 3D rendering when its API is supported |
 | **Limit FPS** | Caps hidden farming at 15 FPS; allows 60 FPS while the UI is open; restores the previous cap when released |
 | **Remove everything** | Default OFF. Combines map deletion, animation removal, visual suppression and disabled 3D rendering. Keeps UI/combat controllers, releases the farming FPS limiter, and restores individual booster selections when OFF. Deleted map geometry still requires a rejoin. |
 
 Options are explicitly selected. A lower FPS cap reduces resource use; it is not an FPS increase. Unsupported APIs report failure rather than being assumed available.
+
+FPS cleanup preserves enemy movement: map deletion skips unanchored parts and models with native rig identifiers or animation controllers, and animation removal leaves enemy tracks running. The build rejects runtime assignments to `Anchored`; the bundled WindUI camera-blur part is the isolated visual exception. Farm holds move only the local character. These guards prevent specific gameplay interference; they do not establish protection from game moderation or detection.
 
 Map processing releases each consumed instance reference immediately and caps the streaming queue at 8,192 entries, with a deferred rescan after overflow. Explicit map deletion permits arena travel to confirm its configured height without a deleted floor; idle holding avoids cumulative height drift. Ordinary walking and floor-dependent dodges can still need geometry.
 

@@ -35,6 +35,16 @@ def main():
         return (root / name).read_text(encoding="utf-8")
 
     subprocess.run([sys.executable, str(root / "build-script.py"), "--check"], check=True)
+    import runpy
+    anchor_guard = runpy.run_path(str(root / "build-script.py"))["preserve_native_anchors"]
+    anchor_guard('if part.Anchored==true then return end')
+    for mutation in ('enemy.Root.Anchored=true', 'root["Anchored"]=false', '{Anchored = true}'):
+        try:
+            anchor_guard(mutation)
+        except AssertionError:
+            continue
+        raise AssertionError("The build accepted a gameplay Anchored assignment")
+    print("PASS Runtime anchoring guard: native reads allowed; freeze/unanchor assignments rejected before UI bundling")
     # Detect UTF-8 text accidentally decoded as Windows-1252 before publication.
     import re
     for source_file in [root / "kill-aura.body.luau", *root.glob("*.module.luau")]:

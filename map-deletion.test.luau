@@ -6,7 +6,7 @@ return function(source)
     local root={Name="Workspace"}
     local parts={}
     local function node(name,class,parent)
-        local n={Name=name,ClassName=class,Parent=parent,Children={}}
+        local n={Name=name,ClassName=class,Parent=parent,Children={},Anchored=true}
         function n:IsA(kind)return self.ClassName==kind or (kind=="BasePart"and (class=="Part"or class=="Terrain"))end
         function n:FindFirstChild(name)return self.Children[name]end
         function n:FindFirstChildOfClass(kind)for _,v in pairs(self.Children)do if v.ClassName==kind then return v end end end
@@ -23,6 +23,12 @@ return function(source)
     protected[#protected+1]=node("Terrain","Terrain",root)
     local hazard=node("Wave","Part",root);hazard.Protected=true;protected[#protected+1]=hazard
     local touch=node("Pad","Part",root);touch.Children.Touch={ClassName="TouchTransmitter"};protected[#protected+1]=touch
+    local moving=node("MovingMesh","Part",root);moving.Anchored=false;protected[#protected+1]=moving
+    for _,kind in ipairs({"AnimationController","HumanoidRootPart","RootPart"})do
+        local rig=node("StreamingRig","Model",root)
+        rig.Children[kind]=node(kind,kind=="AnimationController"and kind or "Part",rig)
+        protected[#protected+1]=node("Body","Part",rig)
+    end
     for i=1,200 do parts[#parts+1]=node("Wall","Part",root)end
     for _,part in ipairs(protected)do parts[#parts+1]=part end
     root.DescendantAdded={Connect=function(_,fn)

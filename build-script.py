@@ -106,6 +106,11 @@ def package(body):
     return PREFIX + body + SUFFIX
 
 
+def preserve_native_anchors(source):
+    assert not re.search(r'''\bAnchored\s*=(?!=)|\[\s*["']Anchored["']\s*\]\s*=(?!=)''', source), \
+        "Runtime must preserve native Anchored values; do not freeze or unanchor gameplay parts"
+
+
 def expand_source(path, parents=()):
     path = path.resolve()
     source_root = (ROOT / "src").resolve()
@@ -130,6 +135,9 @@ def main():
         before, rest = body.split(start, 1)
         _, after = rest.split(end, 1)
         body = before + start + (ROOT / name).read_text(encoding="utf-8") + "\n" + end + after
+    # Runtime features must not anchor/unanchor gameplay parts. WindUI's isolated
+    # camera blur geometry is bundled afterward and is the sole visual exception.
+    preserve_native_anchors(body)
     start, end = "-- BEGIN BUNDLED WINDUI SOURCE\n", "-- END BUNDLED WINDUI SOURCE\n"
     assert body.count(start) == 1 and body.count(end) == 1
     before, rest = body.split(start, 1)
