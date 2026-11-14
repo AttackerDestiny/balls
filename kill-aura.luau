@@ -1,8 +1,8 @@
 local SB2_SOURCE=[============[
 -- Runtime assembly. Includes share lexical scope; modules below are bundled offline.
 local embeddedSource=...
-local BUILD="2026-11-14.enemy-rig-fps-protection-v3.0.49"
-local VERSION="3.0.49"
+local BUILD="2026-11-12.anti-suspicious-start-menu-rest-v3.0.48"
+local VERSION="3.0.48"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
@@ -4537,14 +4537,12 @@ return function(ctx)
         if excluded[node.Name]or node:IsA("Camera")or node:IsA("Tool")then return true end
         local normalized=node.Name:lower()
         for _,word in ipairs(names)do if normalized:find(word,1,true)then return true end end
-        if node:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(node)or node:FindFirstChildOfClass("Humanoid")
-            or node:FindFirstChildOfClass("AnimationController")or node:FindFirstChild("Entity")
-            or node:FindFirstChild("HumanoidRootPart")or node:FindFirstChild("RootPart"))then return true end
+        if node:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(node)or node:FindFirstChildOfClass("Humanoid")or node:FindFirstChild("Entity"))then return true end
         for _,kind in ipairs({"ProximityPrompt","ClickDetector","TouchTransmitter"})do if node:FindFirstChildOfClass(kind)then return true end end
         return false
     end
     function api.Removable(part)
-        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")or not part.Anchored or ctx.Protected(part)then return false end
+        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")or ctx.Protected(part)then return false end
         local node=part
         repeat
             if node==ctx.Root then return true end
@@ -4634,23 +4632,8 @@ return function(ctx)
     local api={Stopped=0}
     local session=nil
     local closed=false
-    local function playerAnimation(animator)
-        local node=animator.Parent
-        local character=false
-        while node and node~=ctx.Root do
-            if node.Name=="Mobs"then return false end
-            if node:IsA("Model")then
-                local owner=ctx.Players:GetPlayerFromCharacter(node)
-                if node:FindFirstChild("Entity")and not owner then return false end
-                if owner then character=true end
-            end
-            node=node.Parent
-        end
-        return node==ctx.Root and character
-    end
-    local function stop(animator,track)
+    local function stop(track)
         if closed or not session or ctx.State.StopEverything then return end
-        if not playerAnimation(animator)then return end
         if pcall(function()track:Stop(0)end)then api.Stopped+=1 end
     end
     local function forget(animator)
@@ -4659,9 +4642,9 @@ return function(ctx)
         if connection then connection:Disconnect();session.Animators[animator]=nil end
     end
     local function watch(animator)
-        if not session or not animator:IsA("Animator")or session.Animators[animator]or not playerAnimation(animator)then return end
-        session.Animators[animator]=animator.AnimationPlayed:Connect(function(track)stop(animator,track)end)
-        for _,track in ipairs(animator:GetPlayingAnimationTracks())do stop(animator,track)end
+        if not session or not animator:IsA("Animator")or session.Animators[animator]then return end
+        session.Animators[animator]=animator.AnimationPlayed:Connect(stop)
+        for _,track in ipairs(animator:GetPlayingAnimationTracks())do stop(track)end
     end
     local function release()
         if not session then return end
@@ -4691,7 +4674,7 @@ end
 
 -- END BUNDLED ANIMATION REMOVAL
     end)()
-    state.AnimationRemoval=makeAnimations({State=state,Root=workspace,Players=Players})
+    state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
     local all=state.PerformanceBoosters["Remove everything"]==true
     state.MapDeletion.Set(all or state.PerformanceBoosters["Delete map"]==true)
     state.AnimationRemoval.Set(all or state.PerformanceBoosters["Remove animations"]==true)

@@ -1,6 +1,6 @@
 local embeddedSource=...
-local BUILD="2026-11-14.enemy-rig-fps-protection-v3.0.49"
-local VERSION="3.0.49"
+local BUILD="2026-11-12.anti-suspicious-start-menu-rest-v3.0.48"
+local VERSION="3.0.48"
 if not game:IsLoaded()then game.Loaded:Wait()end
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")

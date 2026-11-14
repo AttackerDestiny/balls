@@ -693,7 +693,7 @@ do
 -- BEGIN BUNDLED ANIMATION REMOVAL
 -- END BUNDLED ANIMATION REMOVAL
     end)()
-    state.AnimationRemoval=makeAnimations({State=state,Root=workspace,Players=Players})
+    state.AnimationRemoval=makeAnimations({State=state,Root=workspace})
     local all=state.PerformanceBoosters["Remove everything"]==true
     state.MapDeletion.Set(all or state.PerformanceBoosters["Delete map"]==true)
     state.AnimationRemoval.Set(all or state.PerformanceBoosters["Remove animations"]==true)

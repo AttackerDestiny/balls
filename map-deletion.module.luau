@@ -8,14 +8,12 @@ return function(ctx)
         if excluded[node.Name]or node:IsA("Camera")or node:IsA("Tool")then return true end
         local normalized=node.Name:lower()
         for _,word in ipairs(names)do if normalized:find(word,1,true)then return true end end
-        if node:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(node)or node:FindFirstChildOfClass("Humanoid")
-            or node:FindFirstChildOfClass("AnimationController")or node:FindFirstChild("Entity")
-            or node:FindFirstChild("HumanoidRootPart")or node:FindFirstChild("RootPart"))then return true end
+        if node:IsA("Model")and (ctx.Players:GetPlayerFromCharacter(node)or node:FindFirstChildOfClass("Humanoid")or node:FindFirstChild("Entity"))then return true end
         for _,kind in ipairs({"ProximityPrompt","ClickDetector","TouchTransmitter"})do if node:FindFirstChildOfClass(kind)then return true end end
         return false
     end
     function api.Removable(part)
-        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")or not part.Anchored or ctx.Protected(part)then return false end
+        if not part.Parent or not part:IsA("BasePart")or part:IsA("Terrain")or ctx.Protected(part)then return false end
         local node=part
         repeat
             if node==ctx.Root then return true end
